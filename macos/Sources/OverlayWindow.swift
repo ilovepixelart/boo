@@ -234,47 +234,45 @@ class OverlayWindow: NSWindow {
     func startRecording(viaHotkey: Bool = false) {
         startedViaHotkey = viaHotkey
 
-        // Warm up mic first (starts audio queue, captures preroll)
-        boo_warm_up(booCtx)
-        statusLabel.stringValue = "warming up..."
-
-        // Start display link for waveform animation
+        // Instant UI feedback
+        isRecording = true
+        statusLabel.stringValue = "recording..."
         startDisplayLink()
         NotificationCenter.default.post(name: .booRecordingStarted, object: nil)
 
-        // Start actual recording 500ms later — preroll captures the first words
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            boo_start_recording(self.booCtx)
-            self.isRecording = true
-            self.statusLabel.stringValue = "recording..."
+        // Circle → rounded square immediately
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            ctx.allowsImplicitAnimation = true
+            recordButton.layer?.cornerRadius = 6
+        })
 
-            // Circle → rounded square
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.2
-                ctx.allowsImplicitAnimation = true
-                self.recordButton.layer?.cornerRadius = 6
-            })
-        }
+        // Start recording immediately (warm-up + record in one call)
+        // Audio queue starts and recording flag set atomically
+        boo_warm_up(booCtx)
+        boo_start_recording(booCtx)
     }
 
     func stopAndTranscribe() {
-        boo_stop_recording(booCtx)
         isRecording = false
         statusLabel.stringValue = "thinking..."
         NotificationCenter.default.post(name: .booRecordingStopped, object: nil)
 
-        // Square → circle
+        // Square → circle immediately
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
+            ctx.duration = 0.15
             ctx.allowsImplicitAnimation = true
             recordButton.layer?.cornerRadius = 20
         })
 
-        // Small delay to let AudioQueue fully stop before Metal transcription starts
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        // Move EVERYTHING off the main thread — stop audio + transcribe
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            // Autorelease pool required for Metal backend on background thread
+
+            // Stop audio on background thread (AudioQueueStop can block)
+            boo_stop_recording(self.booCtx)
+
+            // Transcribe with autorelease pool for Metal
             let result: UnsafePointer<CChar>? = autoreleasepool {
                 return boo_transcribe(self.booCtx)
             }
