@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var hotKeyRef: EventHotKeyRef?
     var settingsWindowController: SettingsWindowController?
+    var statusBarTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Request all permissions upfront
@@ -47,6 +48,72 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(opacityDidChange(_:)), name: .opacityChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(autoTypeDidChange(_:)), name: .autoTypeChanged, object: nil)
 
+        // Setup status bar item
+        setupStatusBar()
+
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setupStatusBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        guard let button = statusItem?.button else { return }
+        button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
+        button.image?.size = NSSize(width: 18, height: 18)
+        button.imagePosition = .imageLeading
+
+        // Status bar menu
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Boo 👻", action: nil, keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+
+        let recordItem = NSMenuItem(title: "Record (Ctrl+Shift+Space)", action: #selector(statusBarToggleRecord), keyEquivalent: "")
+        menu.addItem(recordItem)
+
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Show Window", action: #selector(showMainWindow), keyEquivalent: "")
+        menu.addItem(withTitle: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit Boo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        statusItem?.menu = menu
+
+        // Timer to update status bar during recording
+        statusBarTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.updateStatusBar()
+        }
+    }
+
+    func updateStatusBar() {
+        guard let ctx = booCtx, let button = statusItem?.button else { return }
+
+        let recording = boo_is_recording(ctx)
+        let transcribing = boo_is_transcribing(ctx)
+
+        if recording {
+            let samples = boo_get_audio_samples(ctx)
+            let secs = Float(samples) / 16000.0
+            button.title = String(format: " %.0fs", secs)
+            button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")
+            button.contentTintColor = NSColor.systemRed
+        } else if transcribing {
+            button.title = " ..."
+            button.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Transcribing")
+            button.contentTintColor = NSColor.systemOrange
+        } else {
+            button.title = ""
+            button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
+            button.contentTintColor = nil // system default
+        }
+        button.image?.size = NSSize(width: 18, height: 18)
+    }
+
+    @objc func statusBarToggleRecord() {
+        overlayWindow?.toggleRecording(viaHotkey: true) // treat as hotkey since window may be hidden
+    }
+
+    @objc func showMainWindow() {
+        overlayWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

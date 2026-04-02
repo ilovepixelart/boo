@@ -57,8 +57,7 @@ pub const AudioCapture = struct {
             if (c.AudioQueueEnqueueBuffer(self.queue, buf.*, 0, null) != 0) return error.BufferEnqueueFailed;
         }
 
-        if (c.AudioQueueStart(self.queue, null) != 0) return error.AudioQueueStartFailed;
-
+        // Queue is built but NOT started — mic stays off until recording begins
         return self;
     }
 
@@ -73,12 +72,15 @@ pub const AudioCapture = struct {
     }
 
     pub fn startRecording(self: *AudioCapture) void {
+        // Start the audio queue — mic turns ON (macOS indicator appears)
+        if (self.queue) |q| {
+            _ = c.AudioQueueStart(q, null);
+        }
+
         self.mutex.lock();
         defer self.mutex.unlock();
 
         self.audio_buf.clearRetainingCapacity();
-        // Prepend preroll so first word isn't lost
-        self.audio_buf.appendSlice(self.allocator, self.preroll.items) catch {};
         self.preroll.clearRetainingCapacity();
         self.waveform = .{0.0} ** WAVEFORM_BARS;
         self.peak_rms = 0.0;
@@ -87,8 +89,13 @@ pub const AudioCapture = struct {
 
     pub fn stopRecording(self: *AudioCapture) void {
         self.mutex.lock();
-        defer self.mutex.unlock();
         self.recording = false;
+        self.mutex.unlock();
+
+        // Stop the audio queue — mic turns OFF (macOS indicator disappears)
+        if (self.queue) |q| {
+            _ = c.AudioQueueStop(q, 0); // 0 = stop after processing queued buffers
+        }
     }
 
     pub fn getAudioData(self: *AudioCapture, allocator: std.mem.Allocator) ![]f32 {
@@ -138,14 +145,8 @@ pub const AudioCapture = struct {
             };
             computeWaveform(self.audio_buf.items, &self.waveform);
             updatePeakRms(&self.peak_rms, &self.waveform);
-        } else {
-            // Rolling preroll buffer (last 500ms)
-            self.preroll.appendSlice(self.allocator, samples[0..count]) catch {};
-            if (self.preroll.items.len > PREROLL_SAMPLES) {
-                const excess = self.preroll.items.len - PREROLL_SAMPLES;
-                self.preroll.replaceRange(self.allocator, 0, excess, &.{}) catch {};
-            }
         }
+        // Queue only runs during recording — no preroll needed
 
         _ = c.AudioQueueEnqueueBuffer(queue, buffer, 0, null);
     }
