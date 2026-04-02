@@ -240,6 +240,7 @@ class OverlayWindow: NSWindow {
 
         // Start display link for waveform animation
         startDisplayLink()
+        NotificationCenter.default.post(name: .booRecordingStarted, object: nil)
 
         // Start actual recording 500ms later — preroll captures the first words
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -261,6 +262,7 @@ class OverlayWindow: NSWindow {
         boo_stop_recording(booCtx)
         isRecording = false
         statusLabel.stringValue = "thinking..."
+        NotificationCenter.default.post(name: .booRecordingStopped, object: nil)
 
         // Square → circle
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -269,9 +271,13 @@ class OverlayWindow: NSWindow {
             recordButton.layer?.cornerRadius = 20
         })
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        // Small delay to let AudioQueue fully stop before Metal transcription starts
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
-            let result = boo_transcribe(self.booCtx)
+            // Autorelease pool required for Metal backend on background thread
+            let result: UnsafePointer<CChar>? = autoreleasepool {
+                return boo_transcribe(self.booCtx)
+            }
 
             DispatchQueue.main.async {
                 if let cStr = result {
@@ -452,8 +458,8 @@ class OverlayWindow: NSWindow {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.performPaste()
 
-            // Restore clipboard later
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Restore clipboard quickly — 200ms is enough for paste to complete
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if let old = oldContents {
                     pasteboard.clearContents()
                     pasteboard.setString(old, forType: .string)

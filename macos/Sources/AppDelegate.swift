@@ -83,10 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem?.menu = menu
 
-        // Timer to update status bar during recording
-        statusBarTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.updateStatusBar()
-        }
+        // Status bar updates — only poll when recording/transcribing
+        NotificationCenter.default.addObserver(self, selector: #selector(recordingStateChanged), name: .booRecordingStarted, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(recordingStateChanged), name: .booRecordingStopped, object: nil)
     }
 
     func updateStatusBar() {
@@ -95,22 +94,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let recording = boo_is_recording(ctx)
         let transcribing = boo_is_transcribing(ctx)
 
+        button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
+        button.image?.size = NSSize(width: 18, height: 18)
+
         if recording {
             let samples = boo_get_audio_samples(ctx)
-            let secs = Float(samples) / 16000.0
-            button.title = String(format: " %.0fs", secs)
-            button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")
-            button.contentTintColor = NSColor.systemRed
-        } else if transcribing {
-            button.title = " ..."
-            button.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Transcribing")
-            button.contentTintColor = NSColor.systemOrange
+            let totalSecs = Int(Float(samples) / 16000.0)
+            if totalSecs < 60 {
+                button.title = String(format: " %ds", totalSecs)
+            } else {
+                let mins = totalSecs / 60
+                let secs = totalSecs % 60
+                button.title = String(format: " %d:%02d", mins, secs)
+            }
         } else {
             button.title = ""
             button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
             button.contentTintColor = nil // system default
         }
         button.image?.size = NSSize(width: 18, height: 18)
+    }
+
+    @objc func recordingStateChanged(_ notification: Notification) {
+        if notification.name == .booRecordingStarted {
+            // Start polling status bar at 2Hz
+            statusBarTimer?.invalidate()
+            statusBarTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                self?.updateStatusBar()
+            }
+            updateStatusBar()
+        } else {
+            // Stop polling after a brief delay (let transcription state show)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self = self, let ctx = self.booCtx else { return }
+                if !boo_is_recording(ctx) && !boo_is_transcribing(ctx) {
+                    self.statusBarTimer?.invalidate()
+                    self.statusBarTimer = nil
+                    self.updateStatusBar() // reset to idle state
+                }
+            }
+        }
     }
 
     @objc func statusBarToggleRecord() {

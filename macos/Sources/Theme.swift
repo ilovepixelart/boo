@@ -185,4 +185,6 @@ class ThemeManager {
 
 extension Notification.Name {
     static let themeChanged = Notification.Name("BooThemeChanged")
+    static let booRecordingStarted = Notification.Name("BooRecordingStarted")
+    static let booRecordingStopped = Notification.Name("BooRecordingStopped")
 }
