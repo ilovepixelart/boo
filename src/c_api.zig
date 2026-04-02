@@ -2,43 +2,49 @@ const std = @import("std");
 const Whisper = @import("whisper.zig").WhisperContext;
 const AudioCapture = @import("audio.zig").AudioCapture;
 
+const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
+const MIN_AUDIO_SAMPLES = 8000; // ~0.5s at 16kHz
+
 const BooContext = struct {
     whisper: Whisper,
     audio: *AudioCapture,
     allocator: std.mem.Allocator,
     transcribing: bool = false,
-    last_transcript: ?[:0]const u8 = null,
-    waveform_buf: [40]f32 = .{0.0} ** 40,
+    /// Owned null-terminated transcript string, or null if none.
+    last_transcript: ?[]u8 = null,
+    waveform_buf: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
+
+    fn freeTranscript(self: *BooContext) void {
+        if (self.last_transcript) |t| {
+            self.allocator.free(t);
+            self.last_transcript = null;
+        }
+    }
 };
 
-// Use the C allocator for interop with Swift
 const c_allocator = std.heap.c_allocator;
 
 export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
     const ctx = c_allocator.create(BooContext) catch return null;
+    errdefer c_allocator.destroy(ctx);
 
     const path: [:0]const u8 = std.mem.span(model_path);
-    const whisper = Whisper.init(path) catch return null;
+    var whisper = Whisper.init(path) catch return null;
+    errdefer whisper.deinit();
 
-    const audio = AudioCapture.init(c_allocator) catch {
-        var w = whisper;
-        w.deinit();
-        c_allocator.destroy(ctx);
-        return null;
-    };
+    const audio = AudioCapture.init(c_allocator) catch return null;
 
     ctx.* = .{
         .whisper = whisper,
         .audio = audio,
         .allocator = c_allocator,
     };
-
     return ctx;
 }
 
 export fn boo_deinit(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    if (c.last_transcript) |t| c.allocator.free(t[0 .. t.len + 1]); // free with null terminator
+    c.freeTranscript();
     c.audio.deinit();
     c.whisper.deinit();
     c.allocator.destroy(c);
@@ -46,11 +52,7 @@ export fn boo_deinit(ctx: ?*BooContext) void {
 
 export fn boo_start_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    // Free previous transcript
-    if (c.last_transcript) |t| {
-        c.allocator.free(t[0 .. t.len + 1]);
-        c.last_transcript = null;
-    }
+    c.freeTranscript();
     c.audio.startRecording();
 }
 
@@ -72,7 +74,7 @@ export fn boo_is_transcribing(ctx: ?*BooContext) bool {
 export fn boo_get_waveform(ctx: ?*BooContext, out_bars: ?*c_int) ?[*]const f32 {
     const c = ctx orelse return null;
     c.waveform_buf = c.audio.getWaveform();
-    if (out_bars) |p| p.* = 40;
+    if (out_bars) |p| p.* = WAVEFORM_BARS;
     return &c.waveform_buf;
 }
 
@@ -93,13 +95,11 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     c.transcribing = true;
     defer c.transcribing = false;
 
-    // Get audio data
     const samples = c.audio.getAudioData(c.allocator) catch return null;
     defer c.allocator.free(samples);
 
-    if (samples.len < 8000) return null;
+    if (samples.len < MIN_AUDIO_SAMPLES) return null;
 
-    // Transcribe
     const text = c.whisper.transcribe(c.allocator, samples) catch return null;
 
     if (text.len == 0) {
@@ -107,21 +107,18 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         return null;
     }
 
-    // Convert to null-terminated string
-    const result = c.allocator.allocSentinel(u8, text.len, 0) catch {
+    // Allocate null-terminated copy: text + null byte as one contiguous allocation
+    const buf = c.allocator.alloc(u8, text.len + 1) catch {
         c.allocator.free(text);
         return null;
     };
-    @memcpy(result[0..text.len], text);
+    @memcpy(buf[0..text.len], text);
+    buf[text.len] = 0;
     c.allocator.free(text);
 
-    // Store for later free
-    if (c.last_transcript) |t| c.allocator.free(t[0 .. t.len + 1]);
-    c.last_transcript = result;
+    // Replace previous transcript
+    c.freeTranscript();
+    c.last_transcript = buf;
 
-    return result.ptr;
-}
-
-export fn boo_free_string(str: ?[*:0]const u8) void {
-    _ = str; // Strings are freed when context is freed or new transcript replaces old
+    return @ptrCast(buf.ptr);
 }

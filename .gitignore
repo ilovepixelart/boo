@@ -6,3 +6,5 @@ zig-out/
 models/
 deps/
 .DS_Store
+.claude/
+CLAUDE.md
