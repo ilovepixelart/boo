@@ -72,8 +72,12 @@ pub const AudioCapture = struct {
     }
 
     /// Warm up the mic — start the queue but don't record yet.
-    /// Call this ~300ms before startRecording() to eliminate cold-start lag.
+    /// Call this ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
+        // Pre-allocate audio buffer for ~60s of recording to avoid reallocations
+        const pre_alloc = WHISPER_SAMPLE_RATE * 60; // 60 seconds
+        self.audio_buf.ensureTotalCapacity(self.allocator, pre_alloc) catch {};
+
         if (self.queue) |q| {
             _ = c.AudioQueueStart(q, null);
         }

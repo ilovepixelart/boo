@@ -8,7 +8,7 @@ pub const WhisperContext = struct {
 
     pub fn init(model_path: [:0]const u8) !WhisperContext {
         var params = c.whisper_context_default_params();
-        params.use_gpu = false; // CPU only — no Metal dependency
+        params.use_gpu = true; // Metal GPU acceleration on Apple Silicon
         params.flash_attn = false;
         const ctx = c.whisper_init_from_file_with_params(model_path.ptr, params);
         if (ctx == null) return error.ModelLoadFailed;

@@ -52,7 +52,7 @@ class OverlayWindow: NSWindow {
         }
 
         setupUI()
-        startDisplayLink()
+        createDisplayLink()
         startTrafficLightTimer()
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -238,8 +238,11 @@ class OverlayWindow: NSWindow {
         boo_warm_up(booCtx)
         statusLabel.stringValue = "warming up..."
 
-        // Start actual recording 250ms later — preroll captures the first words
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        // Start display link for waveform animation
+        startDisplayLink()
+
+        // Start actual recording 500ms later — preroll captures the first words
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self = self else { return }
             boo_start_recording(self.booCtx)
             self.isRecording = true
@@ -277,7 +280,6 @@ class OverlayWindow: NSWindow {
                         self.addTranscript(text)
                         if self.autoType {
                             self.typeTextIntoFocusedApp(text)
-                        } else {
                         }
                     } else {
                         self.statusLabel.stringValue = "no speech detected"
@@ -285,6 +287,8 @@ class OverlayWindow: NSWindow {
                 } else {
                     self.statusLabel.stringValue = "no speech detected"
                 }
+                // Stop display link — no animation needed when idle
+                self.stopDisplayLink()
             }
         }
     }
@@ -473,9 +477,9 @@ class OverlayWindow: NSWindow {
     }
 
 
-    // MARK: - Display Link
+    // MARK: - Display Link (only active during recording/transcribing)
 
-    func startDisplayLink() {
+    func createDisplayLink() {
         var dl: CVDisplayLink?
         CVDisplayLinkCreateWithActiveCGDisplays(&dl)
         guard let link = dl else { return }
@@ -488,8 +492,20 @@ class OverlayWindow: NSWindow {
         }
 
         CVDisplayLinkSetOutputCallback(link, callback, Unmanaged.passUnretained(self).toOpaque())
-        CVDisplayLinkStart(link)
         displayLink = link
+        // NOT started — only starts when recording begins
+    }
+
+    func startDisplayLink() {
+        if let link = displayLink, !CVDisplayLinkIsRunning(link) {
+            CVDisplayLinkStart(link)
+        }
+    }
+
+    func stopDisplayLink() {
+        if let link = displayLink, CVDisplayLinkIsRunning(link) {
+            CVDisplayLinkStop(link)
+        }
     }
 
     func updateWaveform() {
