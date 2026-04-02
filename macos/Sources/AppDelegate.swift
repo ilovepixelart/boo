@@ -10,6 +10,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Set Metal shader path so whisper.cpp can find ggml-metal.metal
+        if let resourcePath = Bundle.main.resourcePath {
+            setenv("GGML_METAL_PATH_RESOURCES", resourcePath, 1)
+        }
+
         // Request all permissions upfront
         PermissionsManager.ensurePermissions()
 

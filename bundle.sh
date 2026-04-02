@@ -12,8 +12,9 @@ mkdir -p "$MACOS" "$RESOURCES"
 
 cp "$PROJ/zig-out/Boo" "$MACOS/Boo"
 cp "$PROJ/assets/boo.icns" "$RESOURCES/boo.icns"
-# Metal shader for GPU-accelerated whisper inference
+# Metal shader + headers for GPU-accelerated whisper inference
 cp "$PROJ/assets/ggml-metal.metal" "$RESOURCES/ggml-metal.metal" 2>/dev/null || true
+cp "$PROJ/assets/ggml-common.h" "$RESOURCES/ggml-common.h" 2>/dev/null || true
 
 cat > "$CONTENTS/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
