@@ -4,7 +4,7 @@ class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-class OverlayWindow: NSPanel {
+class OverlayWindow: NSWindow {
     let booCtx: OpaquePointer
     let waveformView: WaveformView
     var isRecording = false
@@ -28,15 +28,15 @@ class OverlayWindow: NSPanel {
         let frame = NSRect(x: 0, y: 0, width: 400, height: 500)
         super.init(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         self.minSize = NSSize(width: 400, height: 300)
         self.maxSize = NSSize(width: 400, height: 800)
 
-        self.level = .floating
-        self.isFloatingPanel = true
+        // Normal window level — can go behind other windows like a regular app
+        self.level = .normal
         self.titlebarAppearsTransparent = true
         self.titleVisibility = .hidden
         self.isMovableByWindowBackground = true
