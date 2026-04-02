@@ -3,12 +3,18 @@
     .version = "0.1.0",
     .fingerprint = 0x8b7acdfdbdd79934,
     .minimum_zig_version = "0.15.2",
-    .dependencies = .{},
+    .dependencies = .{
+        .whisper_cpp = .{
+            .url = "https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.2.tar.gz",
+            .hash = "N-V-__8AAO47_ADweqz0iga6VKh3lY1QoFk3sDxjoHJrRJHI",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
         "include",
         "assets",
+        "deps",
     },
 }
