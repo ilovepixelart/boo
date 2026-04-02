@@ -56,6 +56,11 @@ export fn boo_start_recording(ctx: ?*BooContext) void {
     c.audio.startRecording();
 }
 
+export fn boo_warm_up(ctx: ?*BooContext) void {
+    const c = ctx orelse return;
+    c.audio.warmUp();
+}
+
 export fn boo_stop_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
     c.audio.stopRecording();

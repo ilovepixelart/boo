@@ -233,16 +233,25 @@ class OverlayWindow: NSWindow {
 
     func startRecording(viaHotkey: Bool = false) {
         startedViaHotkey = viaHotkey
-        boo_start_recording(booCtx)
-        isRecording = true
-        statusLabel.stringValue = "recording..."
 
-        // Circle → rounded square (like Voice Memos stop)
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.allowsImplicitAnimation = true
-            recordButton.layer?.cornerRadius = 6
-        })
+        // Warm up mic first (starts audio queue, captures preroll)
+        boo_warm_up(booCtx)
+        statusLabel.stringValue = "warming up..."
+
+        // Start actual recording 250ms later — preroll captures the first words
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self else { return }
+            boo_start_recording(self.booCtx)
+            self.isRecording = true
+            self.statusLabel.stringValue = "recording..."
+
+            // Circle → rounded square
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.2
+                ctx.allowsImplicitAnimation = true
+                self.recordButton.layer?.cornerRadius = 6
+            })
+        }
     }
 
     func stopAndTranscribe() {

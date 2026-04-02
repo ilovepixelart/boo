@@ -16,6 +16,7 @@ BooContext* boo_init(const char* model_path);
 void boo_deinit(BooContext* ctx);
 
 // Recording control
+void boo_warm_up(BooContext* ctx);       // Start mic early to avoid cold-start word loss
 void boo_start_recording(BooContext* ctx);
 void boo_stop_recording(BooContext* ctx);
 bool boo_is_recording(BooContext* ctx);

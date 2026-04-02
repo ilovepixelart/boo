@@ -71,8 +71,18 @@ pub const AudioCapture = struct {
         self.allocator.destroy(self);
     }
 
+    /// Warm up the mic — start the queue but don't record yet.
+    /// Call this ~300ms before startRecording() to eliminate cold-start lag.
+    pub fn warmUp(self: *AudioCapture) void {
+        if (self.queue) |q| {
+            _ = c.AudioQueueStart(q, null);
+        }
+        // Audio callback will run but `recording` is false,
+        // so samples go into the preroll buffer
+    }
+
     pub fn startRecording(self: *AudioCapture) void {
-        // Start the audio queue — mic turns ON (macOS indicator appears)
+        // If not already warmed up, start the queue now
         if (self.queue) |q| {
             _ = c.AudioQueueStart(q, null);
         }
@@ -80,8 +90,12 @@ pub const AudioCapture = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        // Move preroll data into the recording buffer — captures the warm-up audio
         self.audio_buf.clearRetainingCapacity();
-        self.preroll.clearRetainingCapacity();
+        if (self.preroll.items.len > 0) {
+            self.audio_buf.appendSlice(self.allocator, self.preroll.items) catch {};
+            self.preroll.clearRetainingCapacity();
+        }
         self.waveform = .{0.0} ** WAVEFORM_BARS;
         self.peak_rms = 0.0;
         self.recording = true;
@@ -92,9 +106,9 @@ pub const AudioCapture = struct {
         self.recording = false;
         self.mutex.unlock();
 
-        // Stop the audio queue — mic turns OFF (macOS indicator disappears)
+        // Stop the audio queue — mic turns OFF
         if (self.queue) |q| {
-            _ = c.AudioQueueStop(q, 0); // 0 = stop after processing queued buffers
+            _ = c.AudioQueueStop(q, 0);
         }
     }
 
@@ -140,13 +154,17 @@ pub const AudioCapture = struct {
         defer self.mutex.unlock();
 
         if (self.recording) {
-            self.audio_buf.appendSlice(self.allocator, samples[0..count]) catch {
-                // Audio data dropped — allocator exhausted. Non-fatal.
-            };
+            self.audio_buf.appendSlice(self.allocator, samples[0..count]) catch {};
             computeWaveform(self.audio_buf.items, &self.waveform);
             updatePeakRms(&self.peak_rms, &self.waveform);
+        } else {
+            // Warm-up phase: capture into preroll (last 500ms)
+            self.preroll.appendSlice(self.allocator, samples[0..count]) catch {};
+            if (self.preroll.items.len > PREROLL_SAMPLES) {
+                const excess = self.preroll.items.len - PREROLL_SAMPLES;
+                self.preroll.replaceRange(self.allocator, 0, excess, &.{}) catch {};
+            }
         }
-        // Queue only runs during recording — no preroll needed
 
         _ = c.AudioQueueEnqueueBuffer(queue, buffer, 0, null);
     }
