@@ -1,0 +1,93 @@
+# Xcode project spec for Boo's macOS app.
+# Generate with: xcodegen --spec macos/project.yml
+# Build with:    xcodebuild -project macos/Boo.xcodeproj -configuration Release
+#
+# The Zig core (libboo-core.a + libwhisper.a) is built by a pre-build phase
+# that calls scripts/build-zig-libs.sh. Apple's `ld` rejects Zig-emitted
+# archives directly — the script handles the repack.
+
+name: Boo
+
+options:
+  bundleIdPrefix: com.boo
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    # Default to ad-hoc signing so this repo doesn't bake in any personal
+    # signing identity. To produce a properly-signed build for distribution,
+    # re-sign post-build with `bundle.sh` after exporting BOO_CODESIGN_IDENTITY,
+    # or override at invocation time:
+    #   xcodebuild ... CODE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
+    #                  DEVELOPMENT_TEAM=TEAMID
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  Boo:
+    type: application
+    platform: macOS
+
+    sources:
+      - path: Sources
+
+    settings:
+      base:
+        PRODUCT_NAME: Boo
+        PRODUCT_BUNDLE_IDENTIFIER: com.boo.app
+        SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/../include/boo.h"
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/../zig-out/lib
+        OTHER_LDFLAGS:
+          - -lboo-core
+          - -lwhisper
+          - -lc++
+        CODE_SIGN_ENTITLEMENTS: Boo.entitlements
+        # Tell Xcode where to find ggml-metal.metal at runtime — the Swift
+        # AppDelegate sets GGML_METAL_PATH_RESOURCES to Resources/ at launch.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+
+    info:
+      path: Info.plist
+      properties:
+        CFBundleName: Boo
+        CFBundleDisplayName: Boo
+        CFBundleIdentifier: com.boo.app
+        CFBundleVersion: "0.1.0"
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIconFile: boo
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSMicrophoneUsageDescription: "Boo needs microphone access for speech-to-text."
+        NSSupportsAutomaticGraphicsSwitching: true
+        LSApplicationCategoryType: public.app-category.productivity
+
+    dependencies:
+      - sdk: Cocoa.framework
+      - sdk: Accelerate.framework
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: Carbon.framework
+
+    preBuildScripts:
+      - name: Build Zig libs (boo-core + whisper)
+        script: |
+          set -e
+          "$SRCROOT/../scripts/build-zig-libs.sh"
+        outputFiles:
+          - $(SRCROOT)/../zig-out/lib/libboo-core.a
+          - $(SRCROOT)/../zig-out/lib/libwhisper.a
+
+    resources:
+      - path: ../assets/boo.icns
+      - path: ../assets/ggml-metal.metal
+      - path: ../assets/ggml-common.h

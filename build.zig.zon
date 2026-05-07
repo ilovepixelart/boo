@@ -2,7 +2,7 @@
     .name = .boo,
     .version = "0.1.0",
     .fingerprint = 0x8b7acdfdbdd79934,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .whisper_cpp = .{
             .url = "https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.2.tar.gz",

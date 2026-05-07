@@ -49,8 +49,11 @@ cat > "$CONTENTS/Info.plist" << 'EOF'
 </plist>
 EOF
 
-# Code sign with stable identity so macOS remembers permissions across rebuilds
-codesign -s "Apple Development: REDACTED" --force --deep "$APP"
+# Code sign with stable identity so macOS remembers permissions across rebuilds.
+# Defaults to ad-hoc; override with BOO_CODESIGN_IDENTITY env var, e.g.
+#   BOO_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./bundle.sh
+CODESIGN_IDENTITY="${BOO_CODESIGN_IDENTITY:--}"
+codesign -s "$CODESIGN_IDENTITY" --force --deep "$APP"
 
 echo "Built: $APP"
 echo "Run: open '$APP'"

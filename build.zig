@@ -3,11 +3,19 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const target_os = target.result.os.tag;
 
     const whisper_dep = b.dependency("whisper_cpp", .{});
 
-    const c_flags = &[_][]const u8{ "-DGGML_USE_ACCELERATE", "-DNDEBUG", "-O2", "-pthread" };
-    const cpp_flags = c_flags ++ &[_][]const u8{"-std=c++11"};
+    // Apple's Accelerate framework is the preferred BLAS backend on macOS.
+    // On Linux, ggml falls back to its own CPU code path unless CUDA/Vulkan is wired in (later).
+    const c_flags_macos = &[_][]const u8{ "-DGGML_USE_ACCELERATE", "-DNDEBUG", "-O2", "-pthread" };
+    const c_flags_other = &[_][]const u8{ "-DNDEBUG", "-O2", "-pthread" };
+    const c_flags: []const []const u8 = if (target_os == .macos) c_flags_macos else c_flags_other;
+    const cpp_flags: []const []const u8 = if (target_os == .macos)
+        c_flags_macos ++ &[_][]const u8{"-std=c++11"}
+    else
+        c_flags_other ++ &[_][]const u8{"-std=c++11"};
 
     // ── whisper C library ──
     const whisper_lib = b.addLibrary(.{
@@ -20,19 +28,21 @@ pub fn build(b: *std.Build) void {
         }),
     });
     whisper_lib.root_module.addIncludePath(whisper_dep.path("."));
-    whisper_lib.addCSourceFiles(.{
+    whisper_lib.root_module.addCSourceFiles(.{
         .root = whisper_dep.path("."),
         .files = &.{ "ggml.c", "ggml-alloc.c", "ggml-backend.c", "ggml-quants.c" },
         .flags = c_flags,
     });
-    whisper_lib.addCSourceFiles(.{
+    whisper_lib.root_module.addCSourceFiles(.{
         .root = whisper_dep.path("."),
         .files = &.{"whisper.cpp"},
         .flags = cpp_flags,
     });
-    whisper_lib.root_module.linkFramework("Accelerate", .{});
+    if (target_os == .macos) {
+        whisper_lib.root_module.linkFramework("Accelerate", .{});
+    }
 
-    // ── Boo core static library (Zig → C API for Swift) ──
+    // ── Boo core static library (Zig → C API for the platform frontend) ──
     const boo_lib = b.addLibrary(.{
         .name = "boo-core",
         .root_module = b.createModule(.{
@@ -43,13 +53,10 @@ pub fn build(b: *std.Build) void {
             .link_libcpp = true,
         }),
     });
-    boo_lib.linkLibrary(whisper_lib);
+    boo_lib.root_module.linkLibrary(whisper_lib);
     boo_lib.root_module.addIncludePath(whisper_dep.path("."));
     boo_lib.root_module.addIncludePath(b.path("include"));
-    boo_lib.root_module.linkFramework("Accelerate", .{});
-    boo_lib.root_module.linkFramework("Foundation", .{});
-    boo_lib.root_module.linkFramework("CoreAudio", .{});
-    boo_lib.root_module.linkFramework("AudioToolbox", .{});
+    linkPlatformAudio(b, boo_lib.root_module, target_os);
     b.installArtifact(boo_lib);
 
     // ── CLI executable (for testing) ──
@@ -63,12 +70,9 @@ pub fn build(b: *std.Build) void {
             .link_libcpp = true,
         }),
     });
-    exe.linkLibrary(whisper_lib);
+    exe.root_module.linkLibrary(whisper_lib);
     exe.root_module.addIncludePath(whisper_dep.path("."));
-    exe.root_module.linkFramework("Accelerate", .{});
-    exe.root_module.linkFramework("Foundation", .{});
-    exe.root_module.linkFramework("CoreAudio", .{});
-    exe.root_module.linkFramework("AudioToolbox", .{});
+    linkPlatformAudio(b, exe.root_module, target_os);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -76,39 +80,86 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run Boo CLI").dependOn(&run_cmd.step);
 
+    // ── Linux GTK4 + libadwaita app ──
+    if (target_os == .linux) {
+        const linux_app = b.addExecutable(.{
+            .name = "boo-app",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        linux_app.root_module.linkLibrary(boo_lib);
+        linux_app.root_module.linkLibrary(whisper_lib);
+        // Link flags only — the C glue is already inside boo_lib's archive.
+        linkAudioSystemDepsOnly(linux_app.root_module, target_os);
+        // libadwaita-1 pulls gtk4, glib, gobject, gio, cairo transitively via pkg-config.
+        linux_app.root_module.linkSystemLibrary("libadwaita-1", .{});
+        linux_app.root_module.linkSystemLibrary("gtk4", .{});
+        linux_app.root_module.addIncludePath(b.path("include"));
+        linux_app.root_module.addIncludePath(b.path("linux/src"));
+        linux_app.root_module.addCSourceFiles(.{
+            .root = b.path("linux/src"),
+            .files = &.{
+                "main.c",
+                "overlay_window.c",
+                "waveform_widget.c",
+                "global_shortcut.c",
+            },
+            .flags = &.{ "-O2", "-std=c11", "-Wall", "-Wextra" },
+        });
+        b.installArtifact(linux_app);
+
+        const app_step = b.step("app", "Build Boo Linux app");
+        app_step.dependOn(&linux_app.step);
+    }
+
     // ── macOS app bundle ──
-    const bundle_step = b.step("app", "Build macOS Boo.app");
-    const swift_compile = b.addSystemCommand(&.{
-        "swiftc",
-        "-O",
-        "-import-objc-header",
-    });
-    swift_compile.addFileArg(b.path("include/boo.h"));
-    swift_compile.addArgs(&.{
-        "-L",
-    });
-    swift_compile.addDirectoryArg(boo_lib.getEmittedBinDirectory());
-    swift_compile.addArgs(&.{
-        "-lboo-core",
-        "-lwhisper",
-        "-lc++",
-        "-framework", "Cocoa",
-        "-framework", "Accelerate",
-        "-framework", "CoreAudio",
-        "-framework", "AudioToolbox",
-        "-framework", "Carbon",
-        "-o",
-    });
-    swift_compile.addArg(b.fmt("{s}/Boo", .{b.install_path}));
+    if (target_os == .macos) {
+        const bundle_step = b.step("app", "Build macOS Boo.app");
+        const swift_compile = b.addSystemCommand(&.{
+            "swiftc",
+            "-O",
+            "-import-objc-header",
+        });
+        swift_compile.addFileArg(b.path("include/boo.h"));
+        swift_compile.addArgs(&.{
+            "-L",
+        });
+        swift_compile.addDirectoryArg(boo_lib.getEmittedBinDirectory());
+        // whisper symbols are merged into libboo-core.a via linkLibrary, so we
+        // don't pass -lwhisper directly. Apple's ld also rejects whisper.cpp's
+        // object alignment in Zig-emitted archives, so this also sidesteps that.
+        swift_compile.addArgs(&.{
+            "-lboo-core",
+            "-lc++",
+            "-framework",
+            "Cocoa",
+            "-framework",
+            "Accelerate",
+            "-framework",
+            "CoreAudio",
+            "-framework",
+            "AudioToolbox",
+            "-framework",
+            "Carbon",
+            "-o",
+        });
+        swift_compile.addArg(b.fmt("{s}/Boo", .{b.install_path}));
 
-    // Add all Swift source files
-    swift_compile.addFileArg(b.path("macos/Sources/AppDelegate.swift"));
-    swift_compile.addFileArg(b.path("macos/Sources/OverlayWindow.swift"));
-    swift_compile.addFileArg(b.path("macos/Sources/WaveformView.swift"));
-    swift_compile.addFileArg(b.path("macos/Sources/main.swift"));
+        // Add all Swift source files
+        swift_compile.addFileArg(b.path("macos/Sources/AppDelegate.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/OverlayWindow.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/WaveformView.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/Theme.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/SettingsWindow.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/Permissions.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/main.swift"));
 
-    swift_compile.step.dependOn(&boo_lib.step);
-    bundle_step.dependOn(&swift_compile.step);
+        swift_compile.step.dependOn(&boo_lib.step);
+        bundle_step.dependOn(&swift_compile.step);
+    }
 
     // Tests
     const unit_tests = b.addTest(.{
@@ -119,4 +170,37 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.step("test", "Run unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
+}
+
+fn linkPlatformAudio(b: *std.Build, mod: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
+    // Adds C glue sources AND system link flags. Use for modules that compile
+    // the audio backend directly (boo-core lib, CLI exe).
+    linkAudioSystemDepsOnly(mod, os_tag);
+    switch (os_tag) {
+        .linux => {
+            // System dependency: apt install libpipewire-0.3-dev
+            //                    / pacman -S libpipewire
+            mod.addIncludePath(b.path("src"));
+            mod.addCSourceFile(.{
+                .file = b.path("src/audio/pipewire_glue.c"),
+                .flags = &.{ "-O2", "-fPIC" },
+            });
+        },
+        else => {},
+    }
+}
+
+fn linkAudioSystemDepsOnly(mod: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
+    // Just system library link flags. Use for binaries that already pull in
+    // the glue indirectly (e.g. by linking boo-core static lib).
+    switch (os_tag) {
+        .macos => {
+            mod.linkFramework("Accelerate", .{});
+            mod.linkFramework("Foundation", .{});
+            mod.linkFramework("CoreAudio", .{});
+            mod.linkFramework("AudioToolbox", .{});
+        },
+        .linux => mod.linkSystemLibrary("pipewire-0.3", .{}),
+        else => {},
+    }
 }

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Boo
+GenericName=Speech to Text
+Comment=Local speech-to-text overlay
+Exec=boo-app
+Icon=com.boo.app
+Type=Application
+Categories=Office;AudioVideo;Utility;
+Keywords=speech;dictation;transcribe;voice;whisper;
+StartupNotify=true

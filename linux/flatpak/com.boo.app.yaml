@@ -1,0 +1,78 @@
+# Flatpak manifest for Boo.
+#
+# Build locally:
+#   flatpak install --user flathub org.gnome.Platform//47 org.gnome.Sdk//47
+#   flatpak-builder --user --install --force-clean build-dir \
+#     linux/flatpak/com.boo.app.yaml
+#   flatpak run com.boo.app
+#
+# Place the whisper model at ~/.var/app/com.boo.app/data/models/ggml-base.en.bin
+# (the app reads from $XDG_DATA_HOME/boo/models inside the sandbox).
+#
+# TODOs before submission:
+#   - Fill in the Zig 0.16.0 tarball sha256s (run: sha256sum zig-*.tar.xz)
+#   - Provide assets/boo.png (256x256+) and uncomment the icon install step
+#   - Add a LICENSE file at the repo root and update metainfo project_license
+
+app-id: com.boo.app
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: boo-app
+
+finish-args:
+  # Display
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Audio capture
+  - --socket=pipewire
+  # Persistent storage for the user's model file
+  - --filesystem=xdg-data/boo:rw
+  # XDG portals we depend on
+  - --talk-name=org.freedesktop.portal.GlobalShortcuts
+  - --talk-name=org.freedesktop.portal.Notification
+
+modules:
+  # Zig 0.16 toolchain — not in the GNOME SDK, so we vendor it.
+  - name: zig-x86_64
+    buildsystem: simple
+    only-arches: [x86_64]
+    sources:
+      - type: archive
+        url: https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
+        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        strip-components: 1
+    build-commands:
+      - install -Dm755 zig "${FLATPAK_DEST}/bin/zig"
+      - mkdir -p "${FLATPAK_DEST}/lib/zig"
+      - cp -r lib/. "${FLATPAK_DEST}/lib/zig/"
+
+  - name: zig-aarch64
+    buildsystem: simple
+    only-arches: [aarch64]
+    sources:
+      - type: archive
+        url: https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz
+        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        strip-components: 1
+    build-commands:
+      - install -Dm755 zig "${FLATPAK_DEST}/bin/zig"
+      - mkdir -p "${FLATPAK_DEST}/lib/zig"
+      - cp -r lib/. "${FLATPAK_DEST}/lib/zig/"
+
+  - name: boo
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../..
+    build-commands:
+      - zig build app -Doptimize=ReleaseFast --prefix "${FLATPAK_DEST}"
+      - install -Dm644 linux/flatpak/com.boo.app.desktop
+        "${FLATPAK_DEST}/share/applications/com.boo.app.desktop"
+      - install -Dm644 linux/flatpak/com.boo.app.metainfo.xml
+        "${FLATPAK_DEST}/share/metainfo/com.boo.app.metainfo.xml"
+      # Icon — uncomment once assets/boo.png exists.
+      # - install -Dm644 assets/boo.png
+      #   "${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/com.boo.app.png"

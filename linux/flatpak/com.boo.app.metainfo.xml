@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.boo.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- TODO: replace with the actual project license once a LICENSE file is added. -->
+  <project_license>LicenseRef-proprietary</project_license>
+
+  <name>Boo</name>
+  <summary>Local speech-to-text overlay</summary>
+
+  <description>
+    <p>
+      Boo is a local speech-to-text overlay that captures audio from your
+      microphone and transcribes it on-device using whisper.cpp. Press
+      Ctrl+Shift+Space (when global shortcuts are configured) or click the
+      Record button, speak, and the transcript is auto-copied to the
+      clipboard.
+    </p>
+    <p>
+      Everything runs locally — no audio leaves your machine.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.boo.app.desktop</launchable>
+
+  <categories>
+    <category>Office</category>
+    <category>AudioVideo</category>
+    <category>Utility</category>
+  </categories>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <releases>
+    <release version="0.1.0" date="2026-05-06">
+      <description>
+        <p>Initial Linux preview build.</p>
+      </description>
+    </release>
+  </releases>
+</component>

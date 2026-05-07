@@ -3,17 +3,17 @@ const builtin = @import("builtin");
 const Whisper = @import("whisper.zig").WhisperContext;
 const AudioCapture = @import("audio.zig").AudioCapture;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     std.debug.print("Boo 👻 v0.1.0\n", .{});
     std.debug.print("Platform: {s} / {s}\n", .{ @tagName(builtin.os.tag), @tagName(builtin.cpu.arch) });
 
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-    const model_path: [:0]const u8 = if (args.len > 1) args[1] else "models/ggml-base.en.bin";
+    var arg_iter = std.process.Args.Iterator.init(init.args);
+    _ = arg_iter.skip(); // program name
+    const model_path: [:0]const u8 = arg_iter.next() orelse "models/ggml-base.en.bin";
 
     // Load whisper model
     std.debug.print("Loading model: {s}\n", .{model_path});
