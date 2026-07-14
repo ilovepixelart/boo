@@ -572,8 +572,13 @@ class OverlayWindow: NSWindow {
             app.activate()
         }
 
-        // Step 3: Paste via clipboard, most universally reliable method
-        let delay = startedViaHotkey ? 0.15 : 0.5
+        // Step 3: Paste via clipboard, most universally reliable method.
+        // Hotkey path: the target app is already focused and the pasteboard
+        // write above completed synchronously, so only a small settle delay
+        // remains; with streaming transcription at ~50ms these sleeps are the
+        // bulk of stop-to-pasted-text latency. Button path: 0.5s covers the
+        // app re-activation round trip.
+        let delay = startedViaHotkey ? 0.05 : 0.5
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.performPaste()
 
@@ -597,7 +602,9 @@ class OverlayWindow: NSWindow {
         }
         down.flags = .maskCommand
         down.post(tap: .cghidEventTap)
-        usleep(50000)
+        // Brief key-hold so slow event loops register the chord; 20ms is
+        // plenty for ⌘V, and this sleep runs on the main thread.
+        usleep(20000)
         up.flags = .maskCommand
         up.post(tap: .cghidEventTap)
     }
