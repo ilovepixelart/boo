@@ -17,12 +17,6 @@ typedef struct {
     BooContext *ctx;
 } AppState;
 
-// Pick a whisper model out of `dir`, or NULL if it holds none.
-//
-// Any of whisper.cpp's GGML models works, so this accepts any ggml-*.bin rather
-// than only the ggml-base.en.bin we happen to recommend, pinning the filename
-// meant a user who followed our own advice and fetched, say, large-v3-turbo
-// would be told no model was installed.
 // Models the README recommends, most capable first. Parakeet TDT tops the
 // list: near large-v3 accuracy at roughly base.en decode speed. Downloading
 // a bigger model is a deliberate act, so it wins over the default base.en
@@ -44,6 +38,12 @@ static unsigned model_rank(const char *name) {
     return G_N_ELEMENTS(preferred_models);
 }
 
+// Pick a whisper (or parakeet) model out of `dir`, or NULL if it holds none.
+//
+// Any GGML speech model works, so this accepts any ggml-*.bin rather than only
+// the ggml-base.en.bin we happen to recommend, pinning the filename meant a
+// user who followed our own advice and fetched, say, large-v3-turbo would be
+// told no model was installed.
 static char *find_model_in(const char *dir) {
     GDir *d = g_dir_open(dir, 0, NULL);
     if (!d) return NULL;
@@ -59,7 +59,8 @@ static char *find_model_in(const char *dir) {
         // Best rank wins; alphabetical order breaks ties among the
         // unrecognized, so the choice is at least deterministic.
         unsigned rank = model_rank(name);
-        if (!best || rank < best_rank || (rank == best_rank && g_strcmp0(name, best) < 0)) {
+        if (!best || rank < best_rank ||
+            (rank == best_rank && g_strcmp0(name, best) < 0)) {
             g_free(best);
             best = g_strdup(name);
             best_rank = rank;
@@ -73,16 +74,34 @@ static char *find_model_in(const char *dir) {
     return path;
 }
 
-// Search order: $BOO_MODEL, ./models, $XDG_DATA_HOME/boo/models (falling back to
-// ~/.local/share/boo/models), then /usr/share/boo/models.
-// Returns NULL when nothing is found, so the caller can say so properly.
-static char *find_model_path(void) {
-    const char *env = g_getenv("BOO_MODEL");
-    if (env && *env) {
-        if (g_file_test(env, G_FILE_TEST_EXISTS)) return g_strdup(env);
-        g_warning("Boo: BOO_MODEL points at %s, which does not exist", env);
-    }
+// The Silero VAD model that enables streaming transcription. First
+// alphabetically wins so a newer silero version beats an older one.
+static char *find_vad_model_in(const char *dir) {
+    GDir *d = g_dir_open(dir, 0, NULL);
+    if (!d) return NULL;
 
+    char *best = NULL;
+    const char *name;
+    while ((name = g_dir_read_name(d))) {
+        if (!g_str_has_prefix(name, "ggml-silero") || !g_str_has_suffix(name, ".bin"))
+            continue;
+        if (!best || g_strcmp0(name, best) < 0) {
+            g_free(best);
+            best = g_strdup(name);
+        }
+    }
+    g_dir_close(d);
+
+    if (!best) return NULL;
+    char *path = g_build_filename(dir, best, NULL);
+    g_free(best);
+    return path;
+}
+
+// Walk the model directories with a per-directory finder. Search order:
+// ./models, $XDG_DATA_HOME/boo/models (falling back to
+// ~/.local/share/boo/models), then /usr/share/boo/models.
+static char *search_model_dirs(char *(*find_in)(const char *dir)) {
     g_autofree char *xdg = NULL;
     const char *xdg_env = g_getenv("XDG_DATA_HOME");
     if (xdg_env && *xdg_env) {
@@ -94,10 +113,31 @@ static char *find_model_path(void) {
 
     const char *dirs[] = {"models", xdg, "/usr/share/boo/models", NULL};
     for (int i = 0; dirs[i]; i++) {
-        char *found = find_model_in(dirs[i]);
+        char *found = find_in(dirs[i]);
         if (found) return found;
     }
     return NULL;
+}
+
+// Returns NULL when nothing is found, so the caller can say so properly.
+// $BOO_MODEL wins outright.
+static char *find_model_path(void) {
+    const char *env = g_getenv("BOO_MODEL");
+    if (env && *env) {
+        if (g_file_test(env, G_FILE_TEST_EXISTS)) return g_strdup(env);
+        g_warning("Boo: BOO_MODEL points at %s, which does not exist", env);
+    }
+    return search_model_dirs(find_model_in);
+}
+
+// $BOO_VAD_MODEL wins outright, matching $BOO_MODEL.
+static char *find_vad_model_path(void) {
+    const char *env = g_getenv("BOO_VAD_MODEL");
+    if (env && *env) {
+        if (g_file_test(env, G_FILE_TEST_EXISTS)) return g_strdup(env);
+        g_warning("Boo: BOO_VAD_MODEL points at %s, which does not exist", env);
+    }
+    return search_model_dirs(find_vad_model_in);
 }
 
 static void show_error(GtkApplication *app, const char *heading, const char *body) {
@@ -147,6 +187,19 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
         return;
     }
     g_print("Model loaded.\n");
+
+    // Optional streaming VAD: with a Silero model present, utterances are
+    // transcribed at natural pauses while still recording, and only the final
+    // one remains after stop. Without it, batch mode as before.
+    g_autofree char *vad_path = find_vad_model_path();
+    if (vad_path) {
+        if (boo_load_vad(state->ctx, vad_path)) {
+            g_print("Streaming transcription enabled: %s\n", vad_path);
+        } else {
+            g_warning("Boo: could not load VAD model %s, staying in batch mode",
+                      vad_path);
+        }
+    }
 
     GtkWindow *window = boo_overlay_window_new(GTK_APPLICATION(app), state->ctx);
     gtk_window_present(window);

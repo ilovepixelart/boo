@@ -25,6 +25,13 @@ typedef struct {
     // boo_is_recording(): the core clears that when it hits the recording cap.
     gboolean ui_recording;
     guint auto_stop_poll; // 0 == not polling
+
+    // Streaming transcription: one dedicated thread polls boo_stream_tick
+    // while recording (the C API wants ticks from a single background thread;
+    // each call may block for one utterance's inference). The flag is the
+    // thread's stop signal; the handle is joined before reuse or teardown.
+    GThread *stream_thread; // NULL == no thread to join
+    gint stream_running;    // atomic
 } WindowState;
 
 typedef struct {
@@ -37,6 +44,11 @@ static void window_state_free(gpointer data) {
     // Cancel the auto-stop poll first: closing the window mid-recording would
     // otherwise leave a timer firing against freed state.
     if (state->auto_stop_poll != 0) g_source_remove(state->auto_stop_poll);
+    // The tick thread reads this state; it must be gone before the free.
+    if (state->stream_thread) {
+        g_atomic_int_set(&state->stream_running, 0);
+        g_thread_join(state->stream_thread);
+    }
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     g_free(state);
@@ -67,10 +79,47 @@ static void set_button_recording(WindowState *st) {
     gtk_widget_add_css_class(GTK_WIDGET(st->record_button), "destructive-action");
 }
 
+// Show committed-so-far text, dimmed, while still recording. Ordering with
+// the final transcript is safe: both this and transcribe_done run on the main
+// loop, and begin_transcription clears ui_recording there first, so a stale
+// live update queued behind the final text drops itself instead of
+// overwriting it.
+static gboolean live_text_update(gpointer user_data) {
+    TranscribeResult *res = user_data;
+    if (res->state->ui_recording && res->text && *res->text) {
+        gtk_widget_add_css_class(GTK_WIDGET(res->state->transcript_label), "dim-label");
+        gtk_label_set_text(res->state->transcript_label, res->text);
+    }
+    g_free(res->text);
+    g_free(res);
+    return G_SOURCE_REMOVE;
+}
+
+// 250ms cadence: when nothing ended, a tick is a cheap VAD scan; when an
+// utterance did end, the tick blocks for its inference and the next timer
+// slot simply starts late. Ticks become no-ops once recording stops.
+static gpointer stream_tick_worker(gpointer data) {
+    WindowState *state = data;
+    while (g_atomic_int_get(&state->stream_running)) {
+        if (boo_stream_tick(state->ctx)) {
+            const char *live = boo_get_live_transcript(state->ctx);
+            if (live) {
+                TranscribeResult *res = g_new0(TranscribeResult, 1);
+                res->state = state;
+                res->text = g_strdup(live);
+                g_idle_add(live_text_update, res);
+            }
+        }
+        g_usleep(250 * 1000);
+    }
+    return NULL;
+}
+
 static gboolean transcribe_done(gpointer user_data) {
     TranscribeResult *res = user_data;
     WindowState *state = res->state;
 
+    gtk_widget_remove_css_class(GTK_WIDGET(state->transcript_label), "dim-label");
     if (res->text && *res->text) {
         gtk_label_set_text(state->transcript_label, res->text);
         copy_to_clipboard(state, res->text);
@@ -110,6 +159,12 @@ static void begin_transcription(WindowState *state) {
         state->auto_stop_poll = 0;
     }
 
+    // Signal the tick thread to wind down, but don't join here: a tick mid-
+    // inference would stall the main thread. The core serializes tick against
+    // boo_transcribe internally, and the handle is joined before the next
+    // recording (or at window teardown).
+    g_atomic_int_set(&state->stream_running, 0);
+
     boo_stop_recording(state->ctx);
     gtk_button_set_label(state->record_button, "Transcribing…");
     gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
@@ -137,6 +192,13 @@ static void toggle_recording(WindowState *state) {
     if (state->ui_recording) {
         begin_transcription(state);
     } else {
+        // Collect the previous take's tick thread; it exits within one
+        // cadence of its stop signal, so this join is effectively instant.
+        if (state->stream_thread) {
+            g_thread_join(state->stream_thread);
+            state->stream_thread = NULL;
+        }
+
         boo_warm_up(state->ctx);
         boo_start_recording(state->ctx);
         gtk_label_set_text(state->transcript_label, "");
@@ -144,6 +206,11 @@ static void toggle_recording(WindowState *state) {
 
         state->ui_recording = TRUE;
         state->auto_stop_poll = g_timeout_add(500, check_auto_stop, state);
+
+        // Without a VAD model every tick is an immediate no-op, so the thread
+        // idles harmlessly; with one, utterances land as you pause.
+        g_atomic_int_set(&state->stream_running, 1);
+        state->stream_thread = g_thread_new("boo-stream", stream_tick_worker, state);
     }
 }
 
