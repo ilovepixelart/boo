@@ -73,8 +73,15 @@ modules:
     # build network access is fine for local and CI bundles.
     #
     # Flathub forbids this: a submission there must vendor whisper.cpp as a
-    # declared `sources:` archive (with its sha256) and build fully offline.
-    # That work is still to do — see the README's Linux status.
+    # declared `sources:` archive and build fully offline. That work is still to
+    # do — and note Zig 0.16 changed its offline-package mechanism from the
+    # `--system <p-dir>` layout older guides (and Ghostty) use, so it needs
+    # working out against 0.16 rather than copying an older recipe.
+    #
+    # For whoever picks it up: the whisper.cpp v1.6.2 tarball
+    #   https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.2.tar.gz
+    #   sha256 da7988072022acc3cfa61b370b3c51baad017f1900c3dc4e68cb276499f66894
+    # matches the build.zig.zon hash N-V-__8AAO47_ADweqz0iga6VKh3lY1QoFk3sDxjoHJrRJHI.
     build-options:
       build-args:
         - --share=network
