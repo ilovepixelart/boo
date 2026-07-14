@@ -36,6 +36,24 @@ pub const WhisperContext = struct {
         c.whisper_free(self.ctx);
     }
 
+    /// Language whisper transcribes in.
+    ///
+    /// Defaults to English, because the model we tell people to fetch
+    /// (ggml-base.en) is English-only. But whisper.cpp ships ~16 multilingual
+    /// models too, and forcing "en" on those would transcribe German speech as
+    /// garbled English — so $BOO_LANG overrides it. Use a language code
+    /// ("de", "fr", …) or "auto" to let whisper detect it.
+    ///
+    /// Only meaningful for multilingual models: the .en models can only ever
+    /// produce English, whatever this says.
+    fn language() [*:0]const u8 {
+        // std.c.getenv hands back a NUL-terminated C string owned by the
+        // environment, which is exactly what whisper wants — no copy needed.
+        const env = std.c.getenv("BOO_LANG") orelse return "en";
+        if (env[0] == 0) return "en";
+        return env;
+    }
+
     /// Transcribe PCM f32 audio at 16kHz mono. Returns allocated string.
     pub fn transcribe(self: *WhisperContext, allocator: std.mem.Allocator, samples: []const f32) ![]const u8 {
         var params = c.whisper_full_default_params(c.WHISPER_SAMPLING_GREEDY);
@@ -44,7 +62,7 @@ pub const WhisperContext = struct {
         params.print_realtime = false;
         params.print_timestamps = false;
         params.single_segment = false;
-        params.language = "en";
+        params.language = language();
         params.n_threads = @intCast(@min(std.Thread.getCpuCount() catch 4, 8));
 
         const result = c.whisper_full(self.ctx, params, samples.ptr, @intCast(samples.len));

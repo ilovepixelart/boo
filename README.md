@@ -67,7 +67,7 @@ Prefer not to run a shell command? Double-click Boo, dismiss the dialog, then go
 
 > Control-clicking the app and choosing **Open** does **not** work: [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa). Most guides on the internet still tell you to do it.
 
-**2. Get a model.** Boo needs a `whisper.cpp` GGML model — none is bundled (they're 140 MB+). Put `base.en` where Boo looks for it:
+**2. Get a model.** Boo needs a `whisper.cpp` GGML model — none is bundled (they're 140 MB+). `base.en` is a good default:
 
 ```sh
 mkdir -p ~/.boo/models
@@ -75,7 +75,7 @@ curl -L -o ~/.boo/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-Other sizes (`tiny`, `small`, `medium`, `large-v3`) work too — accuracy vs. CPU. Boo also checks `./models/` and, when run from a source checkout, the repo's own `models/`.
+Boo also checks `./models/` and, when run from a source checkout, the repo's own `models/`. See [Choosing a model](#choosing-a-model) for the alternatives.
 
 **3. Launch it and grant permissions.** Boo asks for the microphone on first launch, and for Accessibility (used to paste into apps). See [Permissions](#permissions) — if you skip these, Boo records but nothing lands anywhere.
 
@@ -119,6 +119,33 @@ Every transcript is **copied to the clipboard** and **pasted into whatever app w
 
 - **Auto-type** (on by default). Turn it off to make Boo clipboard-only — it will transcribe and copy, but never type into other apps.
 - **Theme** — 486 [Ghostty-format](https://ghostty.org) color themes, searchable. Defaults to Ghostty's own.
+
+## Choosing a model
+
+Any GGML model from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) works — 33 of them. Point Boo at one by dropping it in `~/.boo/models/`, or set `BOO_MODEL=/path/to/model.bin` (Linux).
+
+The ones worth knowing about:
+
+| Model | Size | Notes |
+|---|---|---|
+| `ggml-base.en.bin` | 148 MB | **The default.** English-only, fast, good enough for dictation. |
+| `ggml-base.en-q5_1.bin` | 60 MB | Same model, quantized. Nearly as accurate, less than half the size. |
+| `ggml-tiny.en-q5_1.bin` | 32 MB | Fastest, noticeably worse. For weak hardware. |
+| `ggml-small.en.bin` | 488 MB | Clearly better than base; still quick on Apple Silicon. |
+| `ggml-large-v3-turbo-q5_0.bin` | 574 MB | **Best accuracy per byte.** Multilingual, and far faster than large-v3. |
+
+The `.en` models are English-only. Everything else is multilingual — but see below, or they'll silently produce English.
+
+### Non-English dictation
+
+Boo transcribes in **English by default**, because the recommended model is English-only. With a multilingual model, that default would silently *translate* your speech into English rather than transcribe it. Override it:
+
+```sh
+BOO_LANG=de   boo-app      # German
+BOO_LANG=auto boo-app      # let whisper detect the language
+```
+
+`BOO_LANG` has no effect on `.en` models — they can only ever produce English.
 
 ## Ghostty integration
 
