@@ -56,6 +56,17 @@
   </requires>
 
   <releases>
+    <release version="0.1.4" date="2026-07-14">
+      <description>
+        <p>Correctness, security, and a project-wide quality pass.</p>
+        <ul>
+          <li>Boo now finds any whisper model, not only the one it recommends — previously dropping a different model where the docs said to put it was reported as "no model installed".</li>
+          <li>The RemoteDesktop restore token is written owner-only (0600); it was world-readable.</li>
+          <li>Fewer permission prompts: macOS asks for Accessibility only when it first needs it, and Linux no longer re-runs the shortcut approval dialog on every launch.</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.1.3" date="2026-07-14">
       <description>
         <p>Fixes found by running Boo on a real GNOME desktop, and by testing it the way a new user would.</p>
