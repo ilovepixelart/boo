@@ -10,11 +10,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Set Metal shader path so whisper.cpp can find ggml-metal.metal
-        if let resourcePath = Bundle.main.resourcePath {
-            setenv("GGML_METAL_PATH_RESOURCES", resourcePath, 1)
-        }
-
         // Microphone only. Accessibility is requested later, the first time a
         // paste actually needs it, see PermissionsManager.
         PermissionsManager.ensurePermissions()
@@ -41,6 +36,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         booCtx = ctx
+
+        // Optional streaming VAD: when a Silero model is present, utterances
+        // are transcribed at natural pauses while still recording, and only
+        // the final one remains after stop. Without it, batch mode as before.
+        if let vadPath = findVadModelPath() {
+            if boo_load_vad(ctx, vadPath) {
+                NSLog("Boo: streaming transcription enabled (%@)", vadPath)
+            } else {
+                NSLog("Boo: could not load VAD model %@, staying in batch mode", vadPath)
+            }
+        }
 
         overlayWindow = OverlayWindow(booCtx: ctx)
         overlayWindow?.makeKeyAndOrderFront(nil)
@@ -259,7 +265,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let models =
                 entries
-                .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") }
+                // ggml-silero-* is the VAD model, not a speech model; without
+                // this exclusion it could win the alphabetical tiebreak.
+                .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") && !$0.hasPrefix("ggml-silero") }
                 .sorted()
             guard !models.isEmpty else { continue }
 
@@ -267,6 +275,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // first alphabetically, so the choice is at least deterministic.
             let chosen = models.contains("ggml-base.en.bin") ? "ggml-base.en.bin" : models[0]
             return (dir as NSString).appendingPathComponent(chosen)
+        }
+        return nil
+    }
+
+    /// Find a Silero VAD model (ggml-silero-*.bin) in the same places as the
+    /// whisper model. $BOO_VAD_MODEL wins outright, matching $BOO_MODEL.
+    private func findVadModelPath() -> String? {
+        if let env = ProcessInfo.processInfo.environment["BOO_VAD_MODEL"], !env.isEmpty {
+            guard FileManager.default.fileExists(atPath: env) else {
+                NSLog("Boo: BOO_VAD_MODEL points at %@, which does not exist", env)
+                return nil
+            }
+            return env
+        }
+
+        let fm = FileManager.default
+        for dir in modelSearchDirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            let models =
+                entries
+                .filter { $0.hasPrefix("ggml-silero") && $0.hasSuffix(".bin") }
+                .sorted()
+            if let chosen = models.first {
+                return (dir as NSString).appendingPathComponent(chosen)
+            }
         }
         return nil
     }

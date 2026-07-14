@@ -182,6 +182,21 @@ pub const Capture = struct {
         return copy;
     }
 
+    /// Copy the take from `start` onward, for the streaming transcriber which
+    /// has already consumed everything before its watermark. A start beyond
+    /// the take yields an empty slice rather than an error: the caller races
+    /// against the audio thread by design. Caller owns the returned slice.
+    pub fn copyFrom(self: *Capture, allocator: std.mem.Allocator, start: usize) ![]f32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const items = self.audio_buf.items;
+        const from = @min(start, items.len);
+        const copy = try allocator.alloc(f32, items.len - from);
+        @memcpy(copy, items[from..]);
+        return copy;
+    }
+
     pub fn sampleCount(self: *Capture) usize {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -364,6 +379,32 @@ test "Capture: end() stops recording but keeps the audio for transcription" {
     defer testing.allocator.free(audio);
     try testing.expectEqual(@as(usize, 800), audio.len);
     try testing.expectApproxEqAbs(@as(f32, 0.5), audio[0], 0.0001);
+}
+
+test "Capture: copyFrom returns only the unconsumed region" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    cap.begin();
+    const block = [_]f32{0.5} ** 800;
+    cap.push(&block);
+
+    const tail = try cap.copyFrom(testing.allocator, 300);
+    defer testing.allocator.free(tail);
+    try testing.expectEqual(@as(usize, 500), tail.len);
+}
+
+test "Capture: copyFrom past the end is empty, not an error" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    cap.begin();
+    const block = [_]f32{0.5} ** 100;
+    cap.push(&block);
+
+    const tail = try cap.copyFrom(testing.allocator, 5000);
+    defer testing.allocator.free(tail);
+    try testing.expectEqual(@as(usize, 0), tail.len);
 }
 
 test "updatePeakRms: attacks instantly" {

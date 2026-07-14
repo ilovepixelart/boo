@@ -1,6 +1,9 @@
 const std = @import("std");
-const Whisper = @import("whisper.zig").WhisperContext;
+const whisper_mod = @import("whisper.zig");
+const Whisper = whisper_mod.WhisperContext;
 const AudioCapture = @import("audio.zig").AudioCapture;
+const stream = @import("stream.zig");
+const common = @import("audio/common.zig");
 
 const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
 const MIN_AUDIO_SAMPLES = 8000; // ~0.5s at 16kHz
@@ -17,11 +20,47 @@ const BooContext = struct {
     last_transcript: ?[]u8 = null,
     waveform_buf: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
 
+    // Streaming (VAD-chunked) state; stays absent unless boo_load_vad succeeds,
+    // in which case boo_stream_tick transcribes utterances during recording and
+    // boo_transcribe only pays for the final one.
+    vad: ?whisper_mod.Vad = null,
+    chunker: ?stream.Chunker = null,
+    /// Serializes whisper inference between boo_stream_tick (a background
+    /// thread, while recording) and boo_transcribe (a worker thread, after).
+    whisper_mutex: common.Mutex = .{},
+    /// Committed-so-far text handed out via boo_get_live_transcript. Replaced
+    /// buffers are retired, not freed, until the next take starts: a frontend
+    /// may still be reading the pointer it fetched a moment ago.
+    live_transcript: ?[:0]u8 = null,
+    retired_transcripts: std.ArrayList([:0]u8) = .empty,
+
     fn freeTranscript(self: *BooContext) void {
         if (self.last_transcript) |t| {
             self.allocator.free(t);
             self.last_transcript = null;
         }
+    }
+
+    fn freeLiveTranscripts(self: *BooContext) void {
+        if (self.live_transcript) |t| {
+            self.allocator.free(t);
+            self.live_transcript = null;
+        }
+        for (self.retired_transcripts.items) |t| self.allocator.free(t);
+        self.retired_transcripts.clearRetainingCapacity();
+    }
+
+    /// Snapshot the chunker's committed text into a fresh nul-terminated
+    /// buffer for the UI. Allocation failure just skips the update; the UI
+    /// keeps showing the previous state.
+    fn publishLiveTranscript(self: *BooContext) void {
+        const ch = if (self.chunker) |*it| it else return;
+        const buf = self.allocator.allocSentinel(u8, ch.committed.items.len, 0) catch return;
+        @memcpy(buf[0..ch.committed.items.len], ch.committed.items);
+        if (self.live_transcript) |old| {
+            self.retired_transcripts.append(self.allocator, old) catch self.allocator.free(old);
+        }
+        self.live_transcript = buf;
     }
 };
 
@@ -58,14 +97,33 @@ export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
 export fn boo_deinit(ctx: ?*BooContext) void {
     const c = ctx orelse return;
     c.freeTranscript();
+    c.freeLiveTranscripts();
+    c.retired_transcripts.deinit(c.allocator);
+    if (c.chunker) |*ch| ch.deinit();
+    if (c.vad) |*v| v.deinit();
     c.audio.deinit();
     c.whisper.deinit();
     c.allocator.destroy(c);
 }
 
+/// Load a Silero VAD model, enabling incremental transcription during
+/// recording (boo_stream_tick / boo_get_live_transcript). Without it, Boo
+/// behaves exactly as before: one batch transcription on stop. Idempotent.
+export fn boo_load_vad(ctx: ?*BooContext, vad_model_path: [*:0]const u8) bool {
+    const c = ctx orelse return false;
+    if (c.vad != null) return true;
+    c.vad = whisper_mod.Vad.init(std.mem.span(vad_model_path)) catch return false;
+    // Pointing into the optional's payload is safe: BooContext lives on the
+    // heap and vad is never reassigned after this.
+    c.chunker = stream.Chunker.init(c.allocator, &c.whisper, &c.vad.?);
+    return true;
+}
+
 export fn boo_start_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
     c.freeTranscript();
+    c.freeLiveTranscripts();
+    if (c.chunker) |*ch| ch.reset();
     c.audio.startRecording();
 }
 
@@ -106,17 +164,57 @@ export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
     return @intCast(c.audio.sampleCount());
 }
 
+/// Detect and transcribe finished utterances while recording. Call every
+/// 200-500ms from one background thread; each call either commits nothing
+/// (cheap VAD scan) or blocks for one utterance's inference. Returns true
+/// when new text was committed (see boo_get_live_transcript).
+export fn boo_stream_tick(ctx: ?*BooContext) bool {
+    const c = ctx orelse return false;
+    const ch = if (c.chunker) |*it| it else return false;
+    if (!c.audio.isRecording()) return false;
+    if (c.transcribing.load(.acquire)) return false;
+
+    c.whisper_mutex.lock();
+    defer c.whisper_mutex.unlock();
+
+    const pending = c.audio.copyAudioFrom(c.allocator, ch.consumed) catch return false;
+    defer c.allocator.free(pending);
+
+    const committed = ch.tick(pending) catch return false;
+    if (committed) c.publishLiveTranscript();
+    return committed;
+}
+
+/// Text committed so far in the current take, or null. Owned by Boo; the
+/// pointer stays valid until the next boo_start_recording or boo_deinit.
+export fn boo_get_live_transcript(ctx: ?*BooContext) ?[*:0]const u8 {
+    const c = ctx orelse return null;
+    const live = c.live_transcript orelse return null;
+    return live.ptr;
+}
+
 export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     const c = ctx orelse return null;
     c.transcribing.store(true, .release);
     defer c.transcribing.store(false, .release);
 
-    const samples = c.audio.getAudioData(c.allocator) catch return null;
-    defer c.allocator.free(samples);
+    c.whisper_mutex.lock();
+    defer c.whisper_mutex.unlock();
 
-    if (samples.len < MIN_AUDIO_SAMPLES) return null;
+    const text: []const u8 = blk: {
+        // Streaming path: everything but the tail is already transcribed.
+        if (c.chunker) |*ch| {
+            const tail = c.audio.copyAudioFrom(c.allocator, ch.consumed) catch return null;
+            defer c.allocator.free(tail);
+            break :blk ch.finalize(tail, MIN_AUDIO_SAMPLES) catch return null;
+        }
 
-    const text = c.whisper.transcribe(c.allocator, samples) catch return null;
+        // Batch path: no VAD model loaded, transcribe the whole take.
+        const samples = c.audio.getAudioData(c.allocator) catch return null;
+        defer c.allocator.free(samples);
+        if (samples.len < MIN_AUDIO_SAMPLES) return null;
+        break :blk c.whisper.transcribe(c.allocator, samples) catch return null;
+    };
 
     if (text.len == 0) {
         c.allocator.free(text);
@@ -142,14 +240,14 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
 // ── tests ────────────────────────────────────────────────────────────────────
 
 test {
-    // Pull the audio maths and WAV parser tests in, so `zig build test`
-    // covers them too.
+    // Pull the audio maths, WAV parser, and stream chunker tests in, so
+    // `zig build test` covers them too.
     _ = @import("audio/common.zig");
     _ = @import("wav.zig");
+    _ = @import("stream.zig");
 }
 
 const testing = std.testing;
-const whisper_mod = @import("whisper.zig");
 
 test "a failed init frees everything it had already allocated" {
     // This is the regression that motivated splitting initContext out.
@@ -188,6 +286,9 @@ test "every C entry point tolerates a null context" {
     try testing.expectEqual(@as(f32, 0.0), boo_get_peak_rms(null));
     try testing.expectEqual(@as(c_int, 0), boo_get_audio_samples(null));
     try testing.expect(boo_transcribe(null) == null);
+    try testing.expect(boo_load_vad(null, "/nonexistent/vad.bin") == false);
+    try testing.expect(boo_stream_tick(null) == false);
+    try testing.expect(boo_get_live_transcript(null) == null);
 
     var bars: c_int = -1;
     try testing.expect(boo_get_waveform(null, &bars) == null);

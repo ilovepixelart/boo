@@ -4,6 +4,7 @@
 //   zig build bench -- --cpu               # CPU baseline for comparison
 //   zig build bench -- --runs 10           # more warm iterations
 //   zig build bench -- --assert-rtf 20     # exit 1 if median falls below 20x
+//   zig build bench -- --stream            # VAD-chunked streaming vs batch
 //   zig build bench -- <model.bin> <audio.wav>
 //
 // Defaults: ~/.boo/models/ggml-base.en.bin and the jfk.wav sample that ships
@@ -16,6 +17,7 @@
 const std = @import("std");
 const whisper = @import("whisper.zig");
 const wav = @import("wav.zig");
+const stream = @import("stream.zig");
 const build_options = @import("build_options");
 
 const c = @cImport({
@@ -84,12 +86,15 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var use_gpu = true;
     var warm_runs: usize = DEFAULT_WARM_RUNS;
     var assert_rtf: ?f64 = null;
+    var stream_mode = false;
 
     var args = std.process.Args.Iterator.init(init.args);
     _ = args.skip();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--cpu")) {
             use_gpu = false;
+        } else if (std.mem.eql(u8, arg, "--stream")) {
+            stream_mode = true;
         } else if (std.mem.eql(u8, arg, "--runs")) {
             const v = args.next() orelse fatal("--runs needs a number", .{});
             warm_runs = std.fmt.parseInt(usize, v, 10) catch fatal("bad --runs value: {s}", .{v});
@@ -147,6 +152,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         \\
     , .{ model_path, wav_path, audio_seconds, if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
 
+    if (stream_mode) {
+        try runStreamBench(allocator, &ctx, samples);
+        return;
+    }
+
     // Cold run: includes Metal pipeline warm-up, worth knowing but not
     // representative of dictation steady state.
     _ = timer.lap();
@@ -180,4 +190,73 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         std.debug.print("\nOK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
     }
+}
+
+/// Simulate a dictation session: several utterances separated by pauses,
+/// fed to the VAD chunker in 250ms ticks exactly as a frontend would, then
+/// "stop". The number that matters is stop-to-text: what the user waits for
+/// after releasing the hotkey, streaming vs batch.
+fn runStreamBench(allocator: std.mem.Allocator, ctx: *whisper.WhisperContext, utterance: []const f32) !void {
+    const home = std.c.getenv("HOME") orelse fatal("no HOME; cannot find VAD model", .{});
+    const vad_joined = try std.mem.concat(allocator, u8, &.{ std.mem.span(home), "/.boo/models/ggml-silero-v6.2.0.bin" });
+    defer allocator.free(vad_joined);
+    const vad_path = try allocator.dupeZ(u8, vad_joined);
+    defer allocator.free(vad_path);
+
+    var vad = whisper.Vad.init(vad_path) catch
+        fatal("cannot load VAD model {s}\nDownload it first:\n  curl -L -o ~/.boo/models/ggml-silero-v6.2.0.bin \\\n    https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin", .{vad_path});
+    defer vad.deinit();
+
+    // The take: three utterances with 1.5s pauses, stop right at speech end.
+    const gap = WHISPER_SAMPLE_RATE * 3 / 2;
+    var take: std.ArrayList(f32) = .empty;
+    defer take.deinit(allocator);
+    for (0..3) |i| {
+        if (i != 0) try take.appendNTimes(allocator, 0.0, gap);
+        try take.appendSlice(allocator, utterance);
+    }
+    const take_seconds = @as(f64, @floatFromInt(take.items.len)) / WHISPER_SAMPLE_RATE;
+
+    // Pay the backend warm-up outside the measurements.
+    const warmup = ctx.transcribe(allocator, utterance) catch fatal("warm-up transcription failed", .{});
+    allocator.free(warmup);
+
+    var chunker = stream.Chunker.init(allocator, ctx, &vad);
+    defer chunker.deinit();
+
+    const step = WHISPER_SAMPLE_RATE / 4; // 250ms tick, like a frontend timer
+    var pos: usize = 0;
+    var ticks: usize = 0;
+    var commits: usize = 0;
+    var worst_tick_ms: f64 = 0;
+    var timer = Timer.start();
+    while (pos < take.items.len) {
+        pos = @min(pos + step, take.items.len);
+        _ = timer.lap();
+        const committed = try chunker.tick(take.items[chunker.consumed..pos]);
+        const ms = msFromNs(timer.lap());
+        ticks += 1;
+        if (committed) commits += 1;
+        if (ms > worst_tick_ms) worst_tick_ms = ms;
+    }
+
+    _ = timer.lap();
+    const final = try chunker.finalize(take.items[chunker.consumed..], 8000);
+    const stop_ms = msFromNs(timer.lap());
+    defer allocator.free(final);
+
+    _ = timer.lap();
+    const batch = ctx.transcribe(allocator, take.items) catch fatal("batch transcription failed", .{});
+    const batch_ms = msFromNs(timer.lap());
+    allocator.free(batch);
+
+    std.debug.print(
+        \\  streaming simulation ({d:.1}s take, 3 utterances):
+        \\  ticks:        {d} (250ms cadence), {d} commits
+        \\  worst tick:   {d:.0} ms (must stay well under the cadence)
+        \\  stop-to-text: {d:.0} ms streaming vs {d:.0} ms batch ({d:.1}x faster)
+        \\
+        \\transcript:{s}
+        \\
+    , .{ take_seconds, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms, final });
 }

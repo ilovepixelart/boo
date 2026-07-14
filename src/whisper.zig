@@ -92,3 +92,62 @@ pub const WhisperContext = struct {
         return text.toOwnedSlice(allocator);
     }
 };
+
+/// whisper's VAD timestamps are centiseconds (the same 10ms unit as its
+/// segment timestamps); at 16kHz that is 160 samples per tick.
+const SAMPLES_PER_CS = 160;
+
+/// Silero VAD (ggml-silero-*.bin, ~2MB): finds speech segments so the
+/// streaming path can transcribe utterances at natural pauses instead of
+/// batching the whole recording at the end.
+pub const Vad = struct {
+    ctx: *c.whisper_vad_context,
+
+    pub fn init(model_path: [:0]const u8) !Vad {
+        var params = c.whisper_vad_default_context_params();
+        // Silero is a tiny LSTM: instant on CPU, and keeping it there leaves
+        // the GPU free for whisper itself.
+        params.use_gpu = false;
+        const ctx = c.whisper_vad_init_from_file_with_params(model_path.ptr, params) orelse
+            return error.ModelLoadFailed;
+        return .{ .ctx = ctx };
+    }
+
+    pub fn deinit(self: *Vad) void {
+        c.whisper_vad_free(self.ctx);
+    }
+
+    pub const Segment = struct {
+        /// Sample offsets into the audio passed to segments().
+        start: usize,
+        end: usize,
+    };
+
+    /// Speech segments found in `samples` (16kHz mono f32), in order.
+    /// Caller owns the returned slice.
+    pub fn segments(self: *Vad, allocator: std.mem.Allocator, samples: []const f32) ![]Segment {
+        const params = c.whisper_vad_default_params();
+        const segs = c.whisper_vad_segments_from_samples(
+            self.ctx,
+            params,
+            samples.ptr,
+            @intCast(samples.len),
+        ) orelse return error.VadFailed;
+        defer c.whisper_vad_free_segments(segs);
+
+        const n: usize = @intCast(c.whisper_vad_segments_n_segments(segs));
+        const out = try allocator.alloc(Segment, n);
+        errdefer allocator.free(out);
+        for (out, 0..) |*seg, i| {
+            const t0 = c.whisper_vad_segments_get_segment_t0(segs, @intCast(i));
+            const t1 = c.whisper_vad_segments_get_segment_t1(segs, @intCast(i));
+            const start: usize = @intFromFloat(@max(t0, 0) * SAMPLES_PER_CS);
+            const end: usize = @intFromFloat(@max(t1, 0) * SAMPLES_PER_CS);
+            seg.* = .{
+                .start = @min(start, samples.len),
+                .end = @min(end, samples.len),
+            };
+        }
+        return out;
+    }
+};

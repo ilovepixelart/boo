@@ -237,6 +237,75 @@ class OverlayWindow: NSWindow {
         toggleRecording(viaHotkey: false)
     }
 
+    // MARK: - Streaming (VAD-chunked) transcription
+
+    /// One serial queue for boo_stream_tick, per the C API contract; a tick
+    /// blocks for one utterance's inference, so it must never run on main.
+    private let streamQueue = DispatchQueue(label: "com.boo.stream", qos: .userInitiated)
+    private var streamTimer: DispatchSourceTimer?
+    private var liveBubbleContainer: NSView?
+    private var liveBubbleLabel: NSTextField?
+
+    private func startStreamTicks() {
+        let timer = DispatchSource.makeTimerSource(queue: streamQueue)
+        timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            guard boo_stream_tick(self.booCtx), let cStr = boo_get_live_transcript(self.booCtx) else {
+                return
+            }
+            let text = String(cString: cStr)
+            DispatchQueue.main.async { self.updateLiveTranscript(text) }
+        }
+        timer.resume()
+        streamTimer = timer
+    }
+
+    private func stopStreamTicks() {
+        streamTimer?.cancel()
+        streamTimer = nil
+    }
+
+    /// Show the committed-so-far text in a dimmed, button-less bubble while
+    /// still recording. Replaced by the real transcript bubble on stop.
+    private func updateLiveTranscript(_ text: String) {
+        guard isRecording, !text.isEmpty else { return }
+
+        if liveBubbleContainer == nil {
+            let container = NSView()
+            container.wantsLayer = true
+            container.layer?.cornerRadius = 10
+            container.layer?.backgroundColor = NSColor(white: 1, alpha: 0.03).cgColor
+
+            let label = NSTextField(wrappingLabelWithString: "")
+            label.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+            label.textColor = ThemeManager.shared.current.dim
+            label.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+                label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+                label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            ])
+
+            container.translatesAutoresizingMaskIntoConstraints = false
+            transcriptStack.addArrangedSubview(container)
+            container.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor).isActive = true
+            liveBubbleContainer = container
+            liveBubbleLabel = label
+        }
+
+        liveBubbleLabel?.stringValue = text
+        layoutTranscriptStack()
+    }
+
+    private func removeLiveBubble() {
+        liveBubbleContainer?.removeFromSuperview()
+        liveBubbleContainer = nil
+        liveBubbleLabel = nil
+    }
+
     func startRecording(viaHotkey: Bool = false) {
         startedViaHotkey = viaHotkey
 
@@ -267,10 +336,12 @@ class OverlayWindow: NSWindow {
         // Audio queue starts and recording flag set atomically
         boo_warm_up(booCtx)
         boo_start_recording(booCtx)
+        startStreamTicks()
     }
 
     func stopAndTranscribe() {
         isRecording = false
+        stopStreamTicks()
         statusLabel.stringValue = "thinking..."
         NotificationCenter.default.post(name: .booRecordingStopped, object: nil)
 
@@ -294,6 +365,9 @@ class OverlayWindow: NSWindow {
             }
 
             DispatchQueue.main.async {
+                // The provisional live bubble is superseded by the final
+                // transcript (or by "no speech") either way.
+                self.removeLiveBubble()
                 if let cStr = result {
                     let text = String(cString: cStr)
                     if !text.isEmpty {
@@ -324,14 +398,17 @@ class OverlayWindow: NSWindow {
         transcriptStack.addArrangedSubview(bubble)
         bubble.widthAnchor.constraint(equalTo: transcriptStack.widthAnchor).isActive = true
 
-        // Update document view size
+        layoutTranscriptStack()
+    }
+
+    /// Resize the document view to the stack and keep the newest text visible.
+    private func layoutTranscriptStack() {
         transcriptStack.layoutSubtreeIfNeeded()
         if let docView = transcriptScroll.documentView {
             let h = transcriptStack.fittingSize.height + 8
             docView.frame = NSRect(x: 0, y: 0, width: transcriptScroll.frame.width, height: h)
         }
 
-        // Scroll to bottom
         DispatchQueue.main.async {
             if let docView = self.transcriptScroll.documentView {
                 let maxY = max(0, docView.frame.height - self.transcriptScroll.contentView.bounds.height)

@@ -32,6 +32,22 @@ int boo_get_audio_samples(BooContext *ctx);
 // boo_deinit(), each of these frees the previous transcript.
 const char *boo_transcribe(BooContext *ctx);
 
+// Streaming transcription (optional). Load a Silero VAD model
+// (ggml-silero-*.bin) to enable transcribing utterances at natural pauses
+// while still recording; boo_transcribe then only pays for the final
+// utterance. Without it Boo keeps the plain batch behavior.
+// Idempotent; returns false if the model cannot be loaded.
+bool boo_load_vad(BooContext *ctx, const char *vad_model_path);
+
+// Call every 200-500ms from ONE background thread while recording. Cheap
+// when nothing ended; blocks for one utterance's inference when it did.
+// Returns true when new committed text is available.
+bool boo_stream_tick(BooContext *ctx);
+
+// Text committed so far in the current take, or NULL. Owned by Boo; valid
+// until the next boo_start_recording() or boo_deinit().
+const char *boo_get_live_transcript(BooContext *ctx);
+
 #ifdef __cplusplus
 }
 #endif

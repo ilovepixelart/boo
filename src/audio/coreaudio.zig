@@ -199,6 +199,10 @@ pub const AudioCapture = struct {
         return self.capture.takeAudio(allocator);
     }
 
+    pub fn copyAudioFrom(self: *AudioCapture, allocator: std.mem.Allocator, start: usize) ![]f32 {
+        return self.capture.copyFrom(allocator, start);
+    }
+
     pub fn getWaveform(self: *AudioCapture) [WAVEFORM_BARS]f32 {
         return self.capture.getWaveform();
     }
