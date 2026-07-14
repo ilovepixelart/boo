@@ -56,9 +56,19 @@
   </requires>
 
   <releases>
+    <release version="0.1.1" date="2026-07-14">
+      <description>
+        <p>First Linux preview, and the first build for Intel Macs.</p>
+        <ul>
+          <li>Linux ships as a Flatpak. The global hotkey and auto-paste are verified end to end against a live D-Bus; audio capture is not yet verified on real hardware.</li>
+          <li>macOS now builds for Intel as well as Apple Silicon.</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.1.0" date="2026-07-14">
       <description>
-        <p>First release.</p>
+        <p>First release. macOS (Apple Silicon) only.</p>
         <ul>
           <li>On-device speech-to-text with whisper.cpp — audio never leaves the machine.</li>
           <li>Global hotkey (Ctrl+Shift+Space) via the GlobalShortcuts portal.</li>
