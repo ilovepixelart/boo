@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (build + bundle)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build app
+        # ReleaseFast is required: Debug C objects reference the UBSan runtime,
+        # which swiftc's link step does not provide.
+        run: zig build app -Doptimize=ReleaseFast
+
+      - name: Bundle Boo.app
+        run: ./bundle.sh
+
+      - name: Verify bundle
+        run: |
+          test -x zig-out/Boo.app/Contents/MacOS/Boo
+          codesign -v zig-out/Boo.app
+          # A bundle without themes silently falls back to one built-in theme.
+          test "$(ls zig-out/Boo.app/Contents/Resources/themes | wc -l)" -gt 400
+          # The Ghostty injector must actually be linked in.
+          strings zig-out/Boo.app/Contents/MacOS/Boo | grep -q com.mitchellh.ghostty
+          echo "bundle ok"
+
+  linux:
+    name: Linux (build + portal tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libpipewire-0.3-dev pkg-config
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build GTK4 app
+        # First real check that the Linux frontend compiles AND links against
+        # gtk4/libadwaita/pipewire — it cannot be linked on a macOS dev box.
+        run: zig build app -Doptimize=ReleaseFast
+
+      - name: Verify binary
+        run: |
+          test -x zig-out/bin/boo-app
+          file zig-out/bin/boo-app
+          echo "linux app ok"
+
+      - name: Portal payload tests
+        # GVariant format strings are parsed at runtime, so a malformed payload
+        # would otherwise crash on a user's desktop rather than fail the build.
+        run: ./linux/tests/run.sh
+
+  flatpak:
+    name: Linux (flatpak manifest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest and AppStream metadata
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            appstream flatpak-builder
+          # Catches a malformed manifest without a full (very slow) flatpak build.
+          flatpak-builder --show-manifest linux/flatpak/com.boo.app.yaml > /dev/null
+          appstreamcli validate --no-net linux/flatpak/com.boo.app.metainfo.xml
+          desktop-file-validate linux/flatpak/com.boo.app.desktop
+          echo "flatpak metadata ok"

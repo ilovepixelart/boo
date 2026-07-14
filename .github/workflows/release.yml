@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos-dmg:
+    name: macOS DMG (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build, bundle, package
+        run: |
+          zig build app -Doptimize=ReleaseFast
+          ./bundle.sh
+          ./scripts/make-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: zig-out/*.dmg
+
+  release:
+    name: Publish release
+    needs: macos-dmg
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmg
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/*.dmg \
+            --title "Boo $TAG" \
+            --generate-notes \
+            --notes "
+
+          > **Note on the macOS build**
+          >
+          > The app is ad-hoc signed, not notarized (that needs a paid Apple
+          > Developer ID). macOS will refuse to open it on first launch. To run it:
+          >
+          > \`\`\`sh
+          > xattr -dr com.apple.quarantine /Applications/Boo.app
+          > \`\`\`
+          >
+          > …or right-click the app → **Open** → **Open**.
+
+          Requires a whisper model — see the README for how to fetch one."
