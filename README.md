@@ -31,7 +31,9 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Implemented, needs on-device verification |
 | Windows | — | — | — | Not planned |
 
-On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented; the code compiles and its portal payloads are test-verified, but it has not yet been exercised against a live compositor. **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
+On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented, and CI builds and links the GTK4 frontend on every push. What's **not** yet proven is behavior against a live compositor: no one has run it on a real GNOME/KDE session, so the portal grant flows are verified only at the payload level. Treat Linux as "should work, unconfirmed" — and please report what you find.
+
+**Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
 
 ## Quick start (macOS)
 
