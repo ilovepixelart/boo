@@ -110,12 +110,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Streaming-simulation take length; CI's valgrind pass shrinks it because
     // memcheck runs ~25x slower than native.
     var utterances: usize = 3;
+    // Coverage-not-timing mode for the valgrind job: one inference per path,
+    // no warm-up, no warm runs, no stream batch comparison.
+    var quick = false;
 
     var args = std.process.Args.Iterator.init(init.args);
     _ = args.skip();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--cpu")) {
             use_gpu = false;
+        } else if (std.mem.eql(u8, arg, "--quick")) {
+            quick = true;
         } else if (std.mem.eql(u8, arg, "--stream")) {
             stream_mode = true;
         } else if (std.mem.eql(u8, arg, "--runs")) {
@@ -203,7 +208,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (stream_mode) {
-        try runStreamBench(allocator, &ctx, samples, utterances, reference, assert_wer);
+        try runStreamBench(allocator, &ctx, samples, utterances, reference, assert_wer, quick);
         return;
     }
 
@@ -215,20 +220,23 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (cold_text.len == 0) fatal("empty transcript; model or audio is broken", .{});
     std.debug.print("  cold run:   {d:.0} ms (includes backend warm-up)\n", .{msFromNs(cold_ns)});
 
-    const times = try allocator.alloc(u64, warm_runs);
+    const times = try allocator.alloc(u64, if (quick) 0 else warm_runs);
     defer allocator.free(times);
-    std.debug.print("  warm runs: ", .{});
-    for (times) |*t| {
-        _ = timer.lap();
-        const text = ctx.transcribe(allocator, samples) catch fatal("transcription failed", .{});
-        t.* = timer.lap();
-        allocator.free(text);
-        std.debug.print(" {d:.0}", .{msFromNs(t.*)});
+    if (!quick) {
+        std.debug.print("  warm runs: ", .{});
+        for (times) |*t| {
+            _ = timer.lap();
+            const text = ctx.transcribe(allocator, samples) catch fatal("transcription failed", .{});
+            t.* = timer.lap();
+            allocator.free(text);
+            std.debug.print(" {d:.0}", .{msFromNs(t.*)});
+        }
+        std.debug.print(" ms\n", .{});
     }
-    std.debug.print(" ms\n", .{});
 
     std.mem.sort(u64, times, {}, std.sort.asc(u64));
-    const median_ms = msFromNs(times[times.len / 2]);
+    // Quick mode has only the cold run to report against.
+    const median_ms = if (quick) msFromNs(cold_ns) else msFromNs(times[times.len / 2]);
     const rtf = audio_seconds * std.time.ms_per_s / median_ms;
     std.debug.print("  median:     {d:.0} ms -> {d:.1}x realtime\n", .{ median_ms, rtf });
 
@@ -389,6 +397,7 @@ fn runStreamBench(
     utterances: usize,
     reference: ?[]const u8,
     assert_wer: ?f64,
+    quick: bool,
 ) !void {
     const home = std.c.getenv("HOME") orelse fatal("no HOME; cannot find VAD model", .{});
     const vad_joined = try std.mem.concat(allocator, u8, &.{ std.mem.span(home), "/.boo/models/ggml-silero-v6.2.0.bin" });
@@ -410,9 +419,12 @@ fn runStreamBench(
     }
     const take_seconds = @as(f64, @floatFromInt(take.items.len)) / WHISPER_SAMPLE_RATE;
 
-    // Pay the backend warm-up outside the measurements.
-    const warmup = ctx.transcribe(allocator, utterance) catch fatal("warm-up transcription failed", .{});
-    allocator.free(warmup);
+    // Pay the backend warm-up outside the measurements; pointless in quick
+    // mode, which measures coverage, not time.
+    if (!quick) {
+        const warmup = ctx.transcribe(allocator, utterance) catch fatal("warm-up transcription failed", .{});
+        allocator.free(warmup);
+    }
 
     var chunker = stream.Chunker.init(allocator, ctx, &vad);
     defer chunker.deinit();
@@ -438,25 +450,28 @@ fn runStreamBench(
     const stop_ms = msFromNs(timer.lap());
     defer allocator.free(final);
 
-    _ = timer.lap();
-    const batch = ctx.transcribe(allocator, take.items) catch fatal("batch transcription failed", .{});
-    const batch_ms = msFromNs(timer.lap());
-    defer allocator.free(batch);
-
     std.debug.print(
         \\  streaming simulation ({d:.1}s take, {d} utterances):
         \\  ticks:        {d} (250ms cadence), {d} commits
         \\  worst tick:   {d:.0} ms (must stay well under the cadence)
-        \\  stop-to-text: {d:.0} ms streaming vs {d:.0} ms batch ({d:.1}x faster)
+        \\  stop-to-text: {d:.0} ms streaming
         \\
-    , .{ take_seconds, utterances, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms });
+    , .{ take_seconds, utterances, ticks, commits, worst_tick_ms, stop_ms });
 
     // Agreement with the batch output needs no ground truth and directly
     // measures what VAD chunking costs (the NeMo compare-vs-offline pattern):
     // a seam bug that drops or duplicates words at utterance boundaries
-    // shows up here even on audio we have no reference for.
-    const divergence = try wer.wordErrorRate(allocator, final, batch);
-    std.debug.print("  streaming vs batch divergence: {d:.1}%\n", .{divergence * 100.0});
+    // shows up here even on audio we have no reference for. Skipped in quick
+    // mode: the comparison costs a second full-take inference.
+    if (!quick) {
+        _ = timer.lap();
+        const batch = ctx.transcribe(allocator, take.items) catch fatal("batch transcription failed", .{});
+        defer allocator.free(batch);
+        const batch_ms = msFromNs(timer.lap());
+        std.debug.print("  batch comparison: {d:.0} ms ({d:.1}x slower than streaming stop)\n", .{ batch_ms, batch_ms / stop_ms });
+        const divergence = try wer.wordErrorRate(allocator, final, batch);
+        std.debug.print("  streaming vs batch divergence: {d:.1}%\n", .{divergence * 100.0});
+    }
 
     // The take repeats the utterance, so the reference repeats with it.
     var wer_pct: ?f64 = null;

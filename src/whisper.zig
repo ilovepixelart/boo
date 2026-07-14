@@ -72,7 +72,7 @@ pub const WhisperContext = struct {
         params.print_timestamps = false;
         params.single_segment = false;
         params.language = language();
-        params.n_threads = @intCast(@min(std.Thread.getCpuCount() catch 4, 8));
+        params.n_threads = threadCount();
 
         const result = c.whisper_full(self.ctx, params, samples.ptr, @intCast(samples.len));
         if (result != 0) return error.TranscriptionFailed;
@@ -92,6 +92,18 @@ pub const WhisperContext = struct {
         return text.toOwnedSlice(allocator);
     }
 };
+
+/// Decode thread count: min(cores, 8), overridable with $BOO_THREADS.
+/// The valgrind CI job sets 1: memcheck serializes every thread onto a single
+/// core, where ggml's spin-waiting workers starve the one doing the work and
+/// a minutes-long job becomes hours.
+pub fn threadCount() c_int {
+    if (std.c.getenv("BOO_THREADS")) |env| {
+        const n = std.fmt.parseInt(u8, std.mem.span(env), 10) catch 0;
+        if (n > 0) return n;
+    }
+    return @intCast(@min(std.Thread.getCpuCount() catch 4, 8));
+}
 
 /// whisper's VAD timestamps are centiseconds (the same 10ms unit as its
 /// segment timestamps); at 16kHz that is 160 samples per tick.

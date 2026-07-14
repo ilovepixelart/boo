@@ -48,7 +48,7 @@ pub const ParakeetContext = struct {
     /// engine, $BOO_LANG has no effect here.
     pub fn transcribe(self: *ParakeetContext, allocator: std.mem.Allocator, samples: []const f32) ![]const u8 {
         var params = c.parakeet_full_default_params(c.PARAKEET_SAMPLING_GREEDY);
-        params.n_threads = @intCast(@min(std.Thread.getCpuCount() catch 4, 8));
+        params.n_threads = @import("whisper.zig").threadCount();
 
         const result = c.parakeet_full(self.ctx, params, samples.ptr, @intCast(samples.len));
         if (result != 0) return error.TranscriptionFailed;

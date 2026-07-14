@@ -227,13 +227,21 @@ jobs:
         # C++ deallocation in whisper.cpp (~100k false errors). The pairing is
         # malloc-compatible by construction; OOB, use-after-free, and leak
         # checking are unaffected.
+        #
+        # BOO_THREADS=1 is essential, not a tweak: memcheck serializes all
+        # threads onto one core, where ggml's spin-waiting workers starve the
+        # one doing the work and the job runs for hours. --quick + a short
+        # eval clip keep it to one inference per code path.
+        env:
+          BOO_THREADS: 1
         run: |
           valgrind --leak-check=full --errors-for-leak-kinds=definite \
             --show-mismatched-frees=no --error-exitcode=1 \
-            ./zig-out/bin/boo-bench --cpu --runs 1
+            ./zig-out/bin/boo-bench --cpu --quick \
+            ~/.boo/models/ggml-base.en.bin tests/eval/2094-142345-0007.wav
           valgrind --leak-check=full --errors-for-leak-kinds=definite \
             --show-mismatched-frees=no --error-exitcode=1 \
-            ./zig-out/bin/boo-bench --cpu --stream --utterances 1
+            ./zig-out/bin/boo-bench --cpu --quick --stream --utterances 1
 
   flatpak-metadata:
     name: Linux (flatpak metadata)
