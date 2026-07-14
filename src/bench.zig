@@ -7,6 +7,7 @@
 //   zig build bench -- --stream            # VAD-chunked streaming vs batch
 //   zig build bench -- --expect "text"     # score WER against a reference
 //   zig build bench -- --assert-wer 5      # exit 1 if WER exceeds 5%
+//   zig build bench -- --suite tests/eval  # multi-clip accuracy suite
 //   zig build bench -- <model.bin> <audio.wav>
 //
 // With the default jfk.wav the reference transcript is built in, so
@@ -32,6 +33,7 @@ const build_options = @import("build_options");
 const c = @cImport({
     @cInclude("stdio.h");
     @cInclude("time.h");
+    @cInclude("dirent.h");
 });
 
 const WHISPER_SAMPLE_RATE = 16000;
@@ -104,6 +106,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var stream_mode = false;
     var expect_arg: ?[]const u8 = null;
     var assert_wer: ?f64 = null;
+    var suite_arg: ?[:0]const u8 = null;
 
     var args = std.process.Args.Iterator.init(init.args);
     _ = args.skip();
@@ -119,6 +122,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else if (std.mem.eql(u8, arg, "--assert-rtf")) {
             const v = args.next() orelse fatal("--assert-rtf needs a number", .{});
             assert_rtf = std.fmt.parseFloat(f64, v) catch fatal("bad --assert-rtf value: {s}", .{v});
+        } else if (std.mem.eql(u8, arg, "--suite")) {
+            suite_arg = args.next() orelse fatal("--suite needs a directory", .{});
         } else if (std.mem.eql(u8, arg, "--expect")) {
             expect_arg = args.next() orelse fatal("--expect needs the reference text", .{});
         } else if (std.mem.eql(u8, arg, "--assert-wer")) {
@@ -176,7 +181,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         \\
         \\  model load: {d:.0} ms
         \\
-    , .{ model_path, wav_path, audio_seconds, @tagName(ctx), if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
+    , .{ model_path, if (suite_arg) |s| s else wav_path, audio_seconds, @tagName(ctx), if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
+
+    if (suite_arg) |suite_dir| {
+        try runSuite(allocator, &ctx, suite_dir, assert_rtf, assert_wer);
+        return;
+    }
 
     if (stream_mode) {
         try runStreamBench(allocator, &ctx, samples, reference, assert_wer);
@@ -222,6 +232,113 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
     checkWerGate(wer_pct, assert_wer, &failed);
+    if (failed) std.process.exit(1);
+}
+
+/// Multi-clip accuracy suite: every NAME.wav in the directory is transcribed
+/// and scored against its NAME.txt reference. The gate applies to the
+/// aggregate WER (total errors over total reference words), so short clips
+/// aren't over-weighted and one flaky token on one clip can't flip CI.
+fn runSuite(
+    allocator: std.mem.Allocator,
+    ctx: *engine_mod.Engine,
+    suite_dir: [:0]const u8,
+    assert_rtf: ?f64,
+    assert_wer: ?f64,
+) !void {
+    var names: std.ArrayList([]u8) = .empty;
+    defer {
+        for (names.items) |n| allocator.free(n);
+        names.deinit(allocator);
+    }
+
+    const dir = c.opendir(suite_dir.ptr);
+    if (dir == null) fatal("cannot open suite directory {s}", .{suite_dir});
+    while (true) {
+        const entry = c.readdir(dir);
+        if (entry == null) break;
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(&entry.*.d_name)));
+        if (!std.mem.endsWith(u8, name, ".wav")) continue;
+        try names.append(allocator, try allocator.dupe(u8, name[0 .. name.len - 4]));
+    }
+    _ = c.closedir(dir);
+    if (names.items.len == 0) fatal("no .wav clips in {s}", .{suite_dir});
+    std.mem.sort([]u8, names.items, {}, struct {
+        fn lessThan(_: void, a: []u8, b: []u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    var total_errors: usize = 0;
+    var total_ref_words: usize = 0;
+    var total_audio_s: f64 = 0;
+    var total_infer_ms: f64 = 0;
+    var warmed_up = false;
+
+    std.debug.print("  {s:<28} {s:>6} {s:>8} {s:>7}\n", .{ "clip", "audio", "time", "WER" });
+    for (names.items) |name| {
+        const wav_path = try std.fmt.allocPrintSentinel(allocator, "{s}/{s}.wav", .{ suite_dir, name }, 0);
+        defer allocator.free(wav_path);
+        const ref_path = try std.fmt.allocPrintSentinel(allocator, "{s}/{s}.txt", .{ suite_dir, name }, 0);
+        defer allocator.free(ref_path);
+
+        const bytes = readFile(allocator, wav_path) catch |err|
+            fatal("cannot read {s}: {t}", .{ wav_path, err });
+        defer allocator.free(bytes);
+        const parsed = wav.parse(bytes) catch |err|
+            fatal("cannot parse {s}: {t}", .{ wav_path, err });
+        if (parsed.sample_rate != WHISPER_SAMPLE_RATE or parsed.channels != 1)
+            fatal("{s} is {d} Hz / {d}ch; the suite needs 16000 Hz mono", .{ wav_path, parsed.sample_rate, parsed.channels });
+        const samples = try wav.toF32(allocator, parsed);
+        defer allocator.free(samples);
+
+        const ref_raw = readFile(allocator, ref_path) catch |err|
+            fatal("cannot read {s}: {t} (every clip needs a reference)", .{ ref_path, err });
+        defer allocator.free(ref_raw);
+        const ref = std.mem.trim(u8, ref_raw, " \t\r\n");
+
+        // The first inference pays one-time backend warm-up; keep it out of
+        // the timings by burning a run on the first clip.
+        if (!warmed_up) {
+            const warmup = ctx.transcribe(allocator, samples) catch fatal("warm-up failed", .{});
+            allocator.free(warmup);
+            warmed_up = true;
+        }
+
+        var timer = Timer.start();
+        const text = ctx.transcribe(allocator, samples) catch fatal("transcription failed on {s}", .{name});
+        defer allocator.free(text);
+        const infer_ms = msFromNs(timer.lap());
+
+        const counts = try wer.wordErrors(allocator, text, ref);
+        total_errors += counts.errors;
+        total_ref_words += counts.reference_words;
+        total_audio_s += parsed.durationSeconds();
+        total_infer_ms += infer_ms;
+
+        std.debug.print("  {s:<28} {d:5.1}s {d:6.0}ms {d:6.1}%\n", .{
+            name, parsed.durationSeconds(), infer_ms, counts.rate() * 100.0,
+        });
+    }
+
+    const aggregate_pct = @as(f64, @floatFromInt(total_errors)) /
+        @as(f64, @floatFromInt(total_ref_words)) * 100.0;
+    const rtf = total_audio_s * std.time.ms_per_s / total_infer_ms;
+    std.debug.print(
+        "\n  aggregate: {d} clips, {d:.1}s audio, WER {d:.1}% ({d}/{d} words), {d:.1}x realtime\n",
+        .{ names.items.len, total_audio_s, aggregate_pct, total_errors, total_ref_words, rtf },
+    );
+
+    var failed = false;
+    if (assert_rtf) |threshold| {
+        if (rtf < threshold) {
+            std.debug.print("FAIL: {d:.1}x realtime is below the required {d:.1}x\n", .{ rtf, threshold });
+            failed = true;
+        } else {
+            std.debug.print("OK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
+        }
+    }
+    checkWerGate(aggregate_pct, assert_wer, &failed);
     if (failed) std.process.exit(1);
 }
 

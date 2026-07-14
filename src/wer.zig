@@ -5,6 +5,14 @@
 //
 // Scoring follows the usual ASR normalization: case and punctuation must not
 // count as errors, since "Ask not!" and "ask not" are the same dictation.
+//
+// Deliberately NOT normalized: number formats ("36" vs "thirty six" counts as
+// errors). OpenAI's full normalizer handles that, but its number grammar is
+// large and subtly wrong at the edges; with pinned models a strict score is
+// stable, and eval thresholds are calibrated against measured baselines that
+// already include the strictness. It also means a model update that changes
+// number formatting shows up as a visible baseline shift instead of being
+// silently absorbed.
 
 const std = @import("std");
 
@@ -31,12 +39,34 @@ fn splitWords(allocator: std.mem.Allocator, normalized: []const u8) ![][]const u
 
 pub const WerError = error{EmptyReference} || std.mem.Allocator.Error;
 
+pub const Counts = struct {
+    /// Word-level edit distance.
+    errors: usize,
+    reference_words: usize,
+
+    pub fn rate(self: Counts) f64 {
+        return @as(f64, @floatFromInt(self.errors)) / @as(f64, @floatFromInt(self.reference_words));
+    }
+};
+
 /// Word error rate of `hypothesis` against `reference`, after normalization.
 pub fn wordErrorRate(
     allocator: std.mem.Allocator,
     hypothesis: []const u8,
     reference: []const u8,
 ) WerError!f64 {
+    const counts = try wordErrors(allocator, hypothesis, reference);
+    return counts.rate();
+}
+
+/// Raw error and reference-word counts, so a multi-clip suite can aggregate
+/// (total errors / total reference words) instead of averaging per-clip
+/// rates, which over-weights short clips.
+pub fn wordErrors(
+    allocator: std.mem.Allocator,
+    hypothesis: []const u8,
+    reference: []const u8,
+) WerError!Counts {
     const hyp_norm = try normalize(allocator, hypothesis);
     defer allocator.free(hyp_norm);
     const ref_norm = try normalize(allocator, reference);
@@ -68,8 +98,7 @@ pub fn wordErrorRate(
     }
 
     // The swap leaves the last computed row in `above`.
-    const distance = above[hyp.len];
-    return @as(f64, @floatFromInt(distance)) / @as(f64, @floatFromInt(ref.len));
+    return .{ .errors = above[hyp.len], .reference_words = ref.len };
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────

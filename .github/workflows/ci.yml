@@ -70,6 +70,9 @@ jobs:
         run: |
           zig build bench -Doptimize=ReleaseFast -- --cpu --assert-rtf 3 --assert-wer 5
           zig build bench -Doptimize=ReleaseFast -- --cpu --stream --assert-wer 5
+          # 12-speaker LibriSpeech suite; 12% is 1.5x the measured base.en
+          # baseline (7.9%), per tests/eval/README.md.
+          zig build bench -Doptimize=ReleaseFast -- --cpu --suite tests/eval --assert-wer 12
 
       - name: Bundle Boo.app
         run: ./bundle.sh

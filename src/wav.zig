@@ -51,7 +51,16 @@ pub fn parse(bytes: []const u8) ParseError!Wav {
         if (std.mem.eql(u8, id, "fmt ")) {
             if (payload.len < 16) return error.Truncated;
             const audio_format = std.mem.readInt(u16, payload[0..2], .little);
-            if (audio_format != 1) return error.UnsupportedFormat; // PCM only
+            if (audio_format == 0xFFFE) {
+                // WAVE_FORMAT_EXTENSIBLE (what afconvert and most pro tools
+                // write): the real format is the first two bytes of the
+                // SubFormat GUID at offset 24.
+                if (payload.len < 40) return error.Truncated;
+                const sub_format = std.mem.readInt(u16, payload[24..26], .little);
+                if (sub_format != 1) return error.UnsupportedFormat; // PCM only
+            } else if (audio_format != 1) {
+                return error.UnsupportedFormat; // PCM only
+            }
             channels = std.mem.readInt(u16, payload[2..4], .little);
             sample_rate = std.mem.readInt(u32, payload[4..8], .little);
             bits_per_sample = std.mem.readInt(u16, payload[14..16], .little);
@@ -128,6 +137,60 @@ test "toF32: values land in [-1, 1) with correct scaling" {
     try testing.expectApproxEqAbs(@as(f32, 0.0), samples[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0.5), samples[1], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -1.0), samples[2], 0.0001);
+}
+
+test "parse: accepts WAVE_FORMAT_EXTENSIBLE PCM16 (afconvert output)" {
+    // 40-byte extensible fmt chunk: format 0xFFFE, then cbSize, valid bits,
+    // channel mask, and the PCM SubFormat GUID.
+    var buf: [68 + 4]u8 = undefined;
+    buf[0..4].* = "RIFF".*;
+    std.mem.writeInt(u32, buf[4..8], 68 + 4 - 8, .little);
+    buf[8..12].* = "WAVE".*;
+    buf[12..16].* = "fmt ".*;
+    std.mem.writeInt(u32, buf[16..20], 40, .little);
+    std.mem.writeInt(u16, buf[20..22], 0xFFFE, .little); // extensible
+    std.mem.writeInt(u16, buf[22..24], 1, .little); // mono
+    std.mem.writeInt(u32, buf[24..28], 16000, .little);
+    std.mem.writeInt(u32, buf[28..32], 32000, .little);
+    std.mem.writeInt(u16, buf[32..34], 2, .little);
+    std.mem.writeInt(u16, buf[34..36], 16, .little);
+    std.mem.writeInt(u16, buf[36..38], 22, .little); // cbSize
+    std.mem.writeInt(u16, buf[38..40], 16, .little); // valid bits
+    std.mem.writeInt(u32, buf[40..44], 4, .little); // channel mask
+    buf[44..60].* = .{ 1, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71 };
+    buf[60..64].* = "data".*;
+    std.mem.writeInt(u32, buf[64..68], 4, .little);
+    std.mem.writeInt(i16, buf[68..70], 1000, .little);
+    std.mem.writeInt(i16, buf[70..72], -1000, .little);
+
+    const parsed = try parse(&buf);
+    try testing.expectEqual(@as(u32, 16000), parsed.sample_rate);
+    try testing.expectEqual(@as(usize, 2), parsed.sampleCount());
+}
+
+test "parse: rejects extensible non-PCM subformats" {
+    // Same as above but with the IEEE-float GUID (subformat 3).
+    var buf: [72]u8 = undefined;
+    buf[0..4].* = "RIFF".*;
+    std.mem.writeInt(u32, buf[4..8], 64, .little);
+    buf[8..12].* = "WAVE".*;
+    buf[12..16].* = "fmt ".*;
+    std.mem.writeInt(u32, buf[16..20], 40, .little);
+    std.mem.writeInt(u16, buf[20..22], 0xFFFE, .little);
+    std.mem.writeInt(u16, buf[22..24], 1, .little);
+    std.mem.writeInt(u32, buf[24..28], 16000, .little);
+    std.mem.writeInt(u32, buf[28..32], 32000, .little);
+    std.mem.writeInt(u16, buf[32..34], 2, .little);
+    std.mem.writeInt(u16, buf[34..36], 16, .little);
+    std.mem.writeInt(u16, buf[36..38], 22, .little);
+    std.mem.writeInt(u16, buf[38..40], 16, .little);
+    std.mem.writeInt(u32, buf[40..44], 4, .little);
+    buf[44..60].* = .{ 3, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71 };
+    buf[60..64].* = "data".*;
+    std.mem.writeInt(u32, buf[64..68], 4, .little);
+    std.mem.writeInt(u32, buf[68..72], 0, .little);
+
+    try testing.expectError(error.UnsupportedFormat, parse(&buf));
 }
 
 test "parse: rejects non-RIFF garbage" {
