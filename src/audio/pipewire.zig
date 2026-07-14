@@ -28,18 +28,18 @@ pub const AudioCapture = struct {
     stream_listener: c.spa_hook = undefined,
     stream_events: c.pw_stream_events = std.mem.zeroes(c.pw_stream_events),
 
-    mutex: common.Mutex = .{},
-    recording: bool = false,
-    audio_buf: std.ArrayList(f32) = .empty,
-    preroll: std.ArrayList(f32) = .empty,
-    waveform: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
-    peak_rms: f32 = 0.0,
+    /// Buffers, locking, preroll and the recording cap — shared with the
+    /// CoreAudio backend so the two cannot drift apart. See common.Capture.
+    capture: common.Capture,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*AudioCapture {
         const self = try allocator.create(AudioCapture);
         errdefer allocator.destroy(self);
-        self.* = .{ .allocator = allocator };
+        self.* = .{
+            .capture = .{ .allocator = allocator },
+            .allocator = allocator,
+        };
 
         // Initialize PipeWire library (refcounted internally — safe to call repeatedly)
         c.pw_init(null, null);
@@ -124,88 +124,53 @@ pub const AudioCapture = struct {
         }
         if (self.pw_initialized) c.pw_deinit();
 
-        self.audio_buf.deinit(self.allocator);
-        self.preroll.deinit(self.allocator);
+        self.capture.deinit();
         self.allocator.destroy(self);
+    }
+
+    fn setStreamActive(self: *AudioCapture, active: bool) void {
+        const loop = self.loop orelse return;
+        c.pw_thread_loop_lock(loop);
+        defer c.pw_thread_loop_unlock(loop);
+        if (self.stream) |s| _ = c.pw_stream_set_active(s, active);
     }
 
     /// Warm up the mic — activate the stream but stay in preroll mode.
     /// Call ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
-        // Reserve ~60s up front so onProcess never has to reallocate mid-stream.
-        // This MUST hold the mutex: growing the buffer moves it, and the
-        // PipeWire realtime thread may be appending to it at the same time — it
-        // would then write through a dangling pointer. The frontends happen to
-        // call warmUp only while stopped, but boo_warm_up is public C API and
-        // nothing enforces that.
-        self.mutex.lock();
-        self.audio_buf.ensureTotalCapacity(self.allocator, WHISPER_SAMPLE_RATE * 60) catch {};
-        self.mutex.unlock();
-
-        if (self.loop) |l| {
-            c.pw_thread_loop_lock(l);
-            defer c.pw_thread_loop_unlock(l);
-            if (self.stream) |s| _ = c.pw_stream_set_active(s, true);
-        }
-        // onProcess will run but `recording` is false, so samples land in preroll.
+        self.capture.reserve(WHISPER_SAMPLE_RATE * 60);
+        self.setStreamActive(true);
+        // onProcess runs, but `recording` is false, so samples land in preroll.
     }
 
     pub fn startRecording(self: *AudioCapture) void {
-        if (self.loop) |l| {
-            c.pw_thread_loop_lock(l);
-            if (self.stream) |s| _ = c.pw_stream_set_active(s, true);
-            c.pw_thread_loop_unlock(l);
-        }
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        self.audio_buf.clearRetainingCapacity();
-        if (self.preroll.items.len > 0) {
-            self.audio_buf.appendSlice(self.allocator, self.preroll.items) catch {};
-            self.preroll.clearRetainingCapacity();
-        }
-        self.waveform = .{0.0} ** WAVEFORM_BARS;
-        self.peak_rms = 0.0;
-        self.recording = true;
+        self.setStreamActive(true); // no-op if warmUp already did it
+        self.capture.begin();
     }
 
     pub fn stopRecording(self: *AudioCapture) void {
-        self.mutex.lock();
-        self.recording = false;
-        self.mutex.unlock();
-
-        if (self.loop) |l| {
-            c.pw_thread_loop_lock(l);
-            defer c.pw_thread_loop_unlock(l);
-            if (self.stream) |s| _ = c.pw_stream_set_active(s, false);
-        }
+        self.capture.end();
+        self.setStreamActive(false); // mic off
     }
 
     pub fn getAudioData(self: *AudioCapture, allocator: std.mem.Allocator) ![]f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        const copy = try allocator.alloc(f32, self.audio_buf.items.len);
-        @memcpy(copy, self.audio_buf.items);
-        return copy;
+        return self.capture.takeAudio(allocator);
     }
 
     pub fn getWaveform(self: *AudioCapture) [WAVEFORM_BARS]f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.waveform;
+        return self.capture.getWaveform();
     }
 
     pub fn getPeakRms(self: *AudioCapture) f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.peak_rms;
+        return self.capture.getPeakRms();
     }
 
     pub fn isRecording(self: *AudioCapture) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.recording;
+        return self.capture.isRecording();
+    }
+
+    pub fn sampleCount(self: *AudioCapture) usize {
+        return self.capture.sampleCount();
     }
 
     fn onProcess(user_data: ?*anyopaque) callconv(.c) void {
@@ -225,36 +190,12 @@ pub const AudioCapture = struct {
             return;
         }
 
-        const byte_size = data.chunk.*.size;
-        const n_samples: usize = byte_size / @sizeOf(f32);
+        const n_samples: usize = data.chunk.*.size / @sizeOf(f32);
         const samples: [*]const f32 = @ptrCast(@alignCast(data.data));
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.recording) {
-            // Stop exactly on the cap rather than overshooting by a buffer.
-            const take = common.samplesUntilCap(self.audio_buf.items.len, n_samples);
-            if (take > 0) {
-                self.audio_buf.appendSlice(self.allocator, samples[0..take]) catch {};
-                common.computeWaveform(self.audio_buf.items, &self.waveform);
-                common.updatePeakRms(&self.peak_rms, &self.waveform);
-            }
-            if (self.audio_buf.items.len >= common.MAX_RECORDING_SAMPLES) {
-                // Cap reached. Just drop the recording flag — the frontend polls
-                // isRecording(), notices, and transcribes what we captured.
-                // Deactivating the stream from inside the realtime callback
-                // would deadlock on the thread-loop lock, so leave that to the
-                // frontend's stopRecording().
-                self.recording = false;
-            }
-        } else {
-            self.preroll.appendSlice(self.allocator, samples[0..n_samples]) catch {};
-            if (self.preroll.items.len > PREROLL_SAMPLES) {
-                const excess = self.preroll.items.len - PREROLL_SAMPLES;
-                self.preroll.replaceRange(self.allocator, 0, excess, &.{}) catch {};
-            }
-        }
+        // Everything that happens to these samples — preroll, the recording cap,
+        // the waveform — is shared with the CoreAudio backend.
+        self.capture.push(samples[0..n_samples]);
 
         _ = c.pw_stream_queue_buffer(stream, pw_buffer);
     }

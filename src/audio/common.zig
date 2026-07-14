@@ -82,6 +82,131 @@ pub fn updatePeakRms(peak: *f32, waveform: *const [WAVEFORM_BARS]f32) void {
     }
 }
 
+/// Everything the two audio backends share: the buffers, the lock that guards
+/// them, and the rules for what happens to an incoming block of samples.
+///
+/// CoreAudio and PipeWire differ only in how they open a device and hand us
+/// audio. Everything after that — preroll, the recording cap, the waveform, the
+/// mutex discipline — is identical, and when it was written out twice the two
+/// copies drifted: one backend gained an errdefer the other never got, and
+/// leaked. So it lives here once.
+///
+/// Locking: `push` is called from a realtime audio thread; every other method is
+/// called from the UI thread. All of them take the mutex.
+pub const Capture = struct {
+    mutex: Mutex = .{},
+    recording: bool = false,
+    audio_buf: std.ArrayList(f32) = .empty,
+    preroll: std.ArrayList(f32) = .empty,
+    waveform: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
+    peak_rms: f32 = 0.0,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *Capture) void {
+        self.audio_buf.deinit(self.allocator);
+        self.preroll.deinit(self.allocator);
+    }
+
+    /// Reserve capacity up front so the audio thread never has to reallocate.
+    /// Takes the lock: growing the list moves it, and the audio thread may be
+    /// appending to it at the same moment.
+    pub fn reserve(self: *Capture, samples: usize) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.audio_buf.ensureTotalCapacity(self.allocator, samples) catch {};
+    }
+
+    /// Start a take: keep the preroll (the half-second captured during warm-up,
+    /// which holds the beginning of the first word) and reset the meters.
+    pub fn begin(self: *Capture) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.audio_buf.clearRetainingCapacity();
+        if (self.preroll.items.len > 0) {
+            self.audio_buf.appendSlice(self.allocator, self.preroll.items) catch {};
+            self.preroll.clearRetainingCapacity();
+        }
+        self.waveform = .{0.0} ** WAVEFORM_BARS;
+        self.peak_rms = 0.0;
+        self.recording = true;
+    }
+
+    pub fn end(self: *Capture) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.recording = false;
+    }
+
+    /// Take a block of samples from the audio thread.
+    ///
+    /// While recording they land in the take, up to MAX_RECORDING_SAMPLES —
+    /// after which capture simply stops and the frontend, which polls
+    /// isRecording(), transcribes what it has. Otherwise they roll through the
+    /// preroll ring, so warm-up audio is there when recording starts.
+    pub fn push(self: *Capture, samples: []const f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (!self.recording) {
+            self.preroll.appendSlice(self.allocator, samples) catch {};
+            if (self.preroll.items.len > PREROLL_SAMPLES) {
+                const excess = self.preroll.items.len - PREROLL_SAMPLES;
+                self.preroll.replaceRange(self.allocator, 0, excess, &.{}) catch {};
+            }
+            return;
+        }
+
+        const take = samplesUntilCap(self.audio_buf.items.len, samples.len);
+        if (take > 0) {
+            self.audio_buf.appendSlice(self.allocator, samples[0..take]) catch {};
+            computeWaveform(self.audio_buf.items, &self.waveform);
+            updatePeakRms(&self.peak_rms, &self.waveform);
+        }
+
+        // Stopping the device from inside its own callback is unsafe — on
+        // PipeWire it would deadlock on the thread-loop lock we are already
+        // under — so just drop the flag and let the frontend finish up.
+        if (self.audio_buf.items.len >= MAX_RECORDING_SAMPLES) {
+            self.recording = false;
+        }
+    }
+
+    /// Caller owns the returned slice.
+    pub fn takeAudio(self: *Capture, allocator: std.mem.Allocator) ![]f32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const copy = try allocator.alloc(f32, self.audio_buf.items.len);
+        @memcpy(copy, self.audio_buf.items);
+        return copy;
+    }
+
+    pub fn sampleCount(self: *Capture) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.audio_buf.items.len;
+    }
+
+    pub fn getWaveform(self: *Capture) [WAVEFORM_BARS]f32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.waveform;
+    }
+
+    pub fn getPeakRms(self: *Capture) f32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.peak_rms;
+    }
+
+    pub fn isRecording(self: *Capture) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.recording;
+    }
+};
+
 // ── tests ────────────────────────────────────────────────────────────────────
 // These run on every platform: the maths here is pure, and it drives the
 // waveform the user actually watches while dictating.
@@ -161,6 +286,84 @@ test "the recording cap is a sane duration" {
     try testing.expectEqual(@as(usize, 600), MAX_RECORDING_SECONDS);
     // ~38MB of f32 — bounded, and small enough that whisper still finishes.
     try testing.expectEqual(@as(usize, 9_600_000), MAX_RECORDING_SAMPLES);
+}
+
+// The buffer rules used to live inside two hardware-driven audio callbacks, so
+// they could not be tested at all. Now they can.
+
+test "Capture: warm-up audio is kept, so the first word isn't clipped" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    // Warm-up: not recording yet, so samples roll through the preroll.
+    const warm = [_]f32{0.3} ** 1000;
+    cap.push(&warm);
+    try testing.expectEqual(@as(usize, 0), cap.sampleCount());
+
+    // Hitting record must carry that preroll into the take — it holds the
+    // beginning of the first word.
+    cap.begin();
+    try testing.expectEqual(@as(usize, 1000), cap.sampleCount());
+}
+
+test "Capture: the preroll is a ring, not an unbounded buffer" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    // Idle for a long time — far more than the preroll window.
+    const block = [_]f32{0.1} ** 4000;
+    for (0..10) |_| cap.push(&block);
+
+    cap.begin();
+    try testing.expectEqual(PREROLL_SAMPLES, cap.sampleCount());
+}
+
+test "Capture: recording stops exactly on the cap" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    cap.begin();
+    try testing.expect(cap.isRecording());
+
+    // Push past the cap in blocks that don't divide it evenly.
+    const block = [_]f32{0.4} ** 4096;
+    var pushed: usize = 0;
+    while (pushed < MAX_RECORDING_SAMPLES + 4096 * 2) : (pushed += block.len) {
+        cap.push(&block);
+    }
+
+    try testing.expectEqual(MAX_RECORDING_SAMPLES, cap.sampleCount());
+    try testing.expect(!cap.isRecording()); // auto-stopped, not still running
+}
+
+test "Capture: samples after the cap are dropped, not silently appended" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    cap.begin();
+    const block = [_]f32{0.4} ** 4096;
+    while (cap.isRecording()) cap.push(&block);
+
+    const at_cap = cap.sampleCount();
+    cap.push(&block); // long after the cap
+    try testing.expectEqual(at_cap, cap.sampleCount());
+}
+
+test "Capture: end() stops recording but keeps the audio for transcription" {
+    var cap: Capture = .{ .allocator = testing.allocator };
+    defer cap.deinit();
+
+    cap.begin();
+    const block = [_]f32{0.5} ** 800;
+    cap.push(&block);
+    cap.end();
+
+    try testing.expect(!cap.isRecording());
+
+    const audio = try cap.takeAudio(testing.allocator);
+    defer testing.allocator.free(audio);
+    try testing.expectEqual(@as(usize, 800), audio.len);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), audio[0], 0.0001);
 }
 
 test "updatePeakRms: attacks instantly" {

@@ -103,9 +103,7 @@ export fn boo_get_peak_rms(ctx: ?*BooContext) f32 {
 
 export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
     const c = ctx orelse return 0;
-    c.audio.mutex.lock();
-    defer c.audio.mutex.unlock();
-    return @intCast(c.audio.audio_buf.items.len);
+    return @intCast(c.audio.sampleCount());
 }
 
 export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {

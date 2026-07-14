@@ -127,18 +127,18 @@ pub const AudioCapture = struct {
     buffers: [NUM_BUFFERS]AudioQueueBufferRef = undefined,
     format: AudioStreamBasicDescription = undefined,
 
-    mutex: common.Mutex = .{},
-    recording: bool = false,
-    audio_buf: std.ArrayList(f32) = .empty,
-    preroll: std.ArrayList(f32) = .empty,
-    waveform: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
-    peak_rms: f32 = 0.0,
+    /// Buffers, locking, preroll and the recording cap — shared with the
+    /// PipeWire backend so the two cannot drift apart. See common.Capture.
+    capture: common.Capture,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*AudioCapture {
         const self = try allocator.create(AudioCapture);
         errdefer allocator.destroy(self);
-        self.* = .{ .allocator = allocator };
+        self.* = .{
+            .capture = .{ .allocator = allocator },
+            .allocator = allocator,
+        };
 
         // 16kHz mono float32
         self.format = std.mem.zeroes(AudioStreamBasicDescription);
@@ -173,86 +173,46 @@ pub const AudioCapture = struct {
             _ = AudioQueueStop(self.queue, 1);
             _ = AudioQueueDispose(self.queue, 1);
         }
-        self.audio_buf.deinit(self.allocator);
-        self.preroll.deinit(self.allocator);
+        self.capture.deinit();
         self.allocator.destroy(self);
     }
 
     /// Warm up the mic — start the queue but don't record yet.
     /// Call this ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
-        // Reserve ~60s up front so the audio callback never has to reallocate
-        // mid-recording. This MUST hold the mutex: growing the buffer moves it,
-        // and the audio thread may be appending to it at the same time — the
-        // callback would then write through a dangling pointer. The frontends
-        // happen to call warmUp only while stopped, but boo_warm_up is public C
-        // API and nothing enforces that.
-        self.mutex.lock();
-        self.audio_buf.ensureTotalCapacity(self.allocator, WHISPER_SAMPLE_RATE * 60) catch {};
-        self.mutex.unlock();
-
-        if (self.queue) |_| {
-            _ = AudioQueueStart(self.queue, null);
-        }
-        // Audio callback will run but `recording` is false,
-        // so samples go into the preroll buffer
+        self.capture.reserve(WHISPER_SAMPLE_RATE * 60);
+        if (self.queue) |q| _ = AudioQueueStart(q, null);
+        // The callback runs, but `recording` is false, so samples land in preroll.
     }
 
     pub fn startRecording(self: *AudioCapture) void {
-        // If not already warmed up, start the queue now
-        if (self.queue) |_| {
-            _ = AudioQueueStart(self.queue, null);
-        }
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        // Move preroll data into the recording buffer — captures the warm-up audio
-        self.audio_buf.clearRetainingCapacity();
-        if (self.preroll.items.len > 0) {
-            self.audio_buf.appendSlice(self.allocator, self.preroll.items) catch {};
-            self.preroll.clearRetainingCapacity();
-        }
-        self.waveform = .{0.0} ** WAVEFORM_BARS;
-        self.peak_rms = 0.0;
-        self.recording = true;
+        if (self.queue) |q| _ = AudioQueueStart(q, null); // no-op if warmed up
+        self.capture.begin();
     }
 
     pub fn stopRecording(self: *AudioCapture) void {
-        self.mutex.lock();
-        self.recording = false;
-        self.mutex.unlock();
-
-        // Stop the audio queue — mic turns OFF
-        if (self.queue) |_| {
-            _ = AudioQueueStop(self.queue, 0);
-        }
+        self.capture.end();
+        if (self.queue) |q| _ = AudioQueueStop(q, 0); // mic off
     }
 
     pub fn getAudioData(self: *AudioCapture, allocator: std.mem.Allocator) ![]f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        const copy = try allocator.alloc(f32, self.audio_buf.items.len);
-        @memcpy(copy, self.audio_buf.items);
-        return copy;
+        return self.capture.takeAudio(allocator);
     }
 
     pub fn getWaveform(self: *AudioCapture) [WAVEFORM_BARS]f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.waveform;
+        return self.capture.getWaveform();
     }
 
     pub fn getPeakRms(self: *AudioCapture) f32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.peak_rms;
+        return self.capture.getPeakRms();
     }
 
     pub fn isRecording(self: *AudioCapture) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.recording;
+        return self.capture.isRecording();
+    }
+
+    pub fn sampleCount(self: *AudioCapture) usize {
+        return self.capture.sampleCount();
     }
 
     fn audioCallback(
@@ -267,32 +227,9 @@ pub const AudioCapture = struct {
         const samples: [*]const f32 = @ptrCast(@alignCast(buffer.mAudioData));
         const count: usize = @intCast(num_packets);
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.recording) {
-            // Stop exactly on the cap rather than overshooting by a buffer.
-            const take = common.samplesUntilCap(self.audio_buf.items.len, count);
-            if (take > 0) {
-                self.audio_buf.appendSlice(self.allocator, samples[0..take]) catch {};
-                common.computeWaveform(self.audio_buf.items, &self.waveform);
-                common.updatePeakRms(&self.peak_rms, &self.waveform);
-            }
-            if (self.audio_buf.items.len >= common.MAX_RECORDING_SAMPLES) {
-                // Cap reached. Just drop the recording flag — the frontend polls
-                // isRecording(), notices, and transcribes what we captured.
-                // Stopping the queue must not happen from inside its own
-                // callback, so leave that to the frontend's stopRecording().
-                self.recording = false;
-            }
-        } else {
-            // Warm-up phase: capture into preroll (last 500ms)
-            self.preroll.appendSlice(self.allocator, samples[0..count]) catch {};
-            if (self.preroll.items.len > PREROLL_SAMPLES) {
-                const excess = self.preroll.items.len - PREROLL_SAMPLES;
-                self.preroll.replaceRange(self.allocator, 0, excess, &.{}) catch {};
-            }
-        }
+        // Everything that happens to these samples — preroll, the recording cap,
+        // the waveform — is shared with the PipeWire backend.
+        self.capture.push(samples[0..count]);
 
         _ = AudioQueueEnqueueBuffer(queue, buffer, 0, null);
     }
