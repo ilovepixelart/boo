@@ -25,6 +25,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Unit tests (Zig core)
+        run: zig build test
+
       - name: Build app
         # ReleaseFast is required: Debug C objects reference the UBSan runtime,
         # which swiftc's link step does not provide.
@@ -59,6 +62,11 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+
+      - name: Unit tests (Zig core)
+        # Runs on Linux too: the core selects its audio backend at comptime, so
+        # the Linux build compiles a different backend than macOS does.
+        run: zig build test
 
       - name: Build GTK4 app
         # First real check that the Linux frontend compiles AND links against

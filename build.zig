@@ -198,14 +198,25 @@ pub fn build(b: *std.Build) void {
         bundle_step.dependOn(&b.addInstallFile(swift_out, "Boo").step);
     }
 
-    // Tests
+    // ── Tests ──
+    // Rooted at c_api.zig, not main.zig: main.zig is the CLI's entry point and
+    // pulls in none of the C ABI, so a test step rooted there analyzed almost
+    // nothing and passed vacuously. c_api.zig reaches the whisper wrapper and
+    // the platform audio backend, and pulls in audio/common.zig's tests itself.
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
+            .link_libcpp = true,
         }),
     });
+    unit_tests.root_module.linkLibrary(whisper_lib);
+    unit_tests.root_module.addIncludePath(whisper_dep.path("."));
+    unit_tests.root_module.addIncludePath(b.path("include"));
+    linkPlatformAudio(b, unit_tests.root_module, target_os);
+
     b.step("test", "Run unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
 }
 

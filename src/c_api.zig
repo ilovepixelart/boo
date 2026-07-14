@@ -24,22 +24,32 @@ const BooContext = struct {
 
 const c_allocator = std.heap.c_allocator;
 
-export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
-    const ctx = c_allocator.create(BooContext) catch return null;
-    errdefer c_allocator.destroy(ctx);
+/// The real body of boo_init. Returns an error union rather than an optional so
+/// that `errdefer` actually works: errdefer fires on an *error* return, not on a
+/// `return null`, so an optional-returning init silently skips its own cleanup.
+/// Taking the allocator as a parameter also lets the failure paths be tested
+/// with a leak-checking allocator.
+fn initContext(allocator: std.mem.Allocator, model_path: [:0]const u8) !*BooContext {
+    const ctx = try allocator.create(BooContext);
+    errdefer allocator.destroy(ctx);
 
-    const path: [:0]const u8 = std.mem.span(model_path);
-    var whisper = Whisper.init(path) catch return null;
+    var whisper = try Whisper.init(model_path);
     errdefer whisper.deinit();
 
-    const audio = AudioCapture.init(c_allocator) catch return null;
+    // If this fails, the errdefer above frees the model — otherwise a missing
+    // microphone would strand the whole ~150MB whisper context.
+    const audio = try AudioCapture.init(allocator);
 
     ctx.* = .{
         .whisper = whisper,
         .audio = audio,
-        .allocator = c_allocator,
+        .allocator = allocator,
     };
     return ctx;
+}
+
+export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
+    return initContext(c_allocator, std.mem.span(model_path)) catch null;
 }
 
 export fn boo_deinit(ctx: ?*BooContext) void {
@@ -126,4 +136,68 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     c.last_transcript = buf;
 
     return @ptrCast(buf.ptr);
+}
+
+// ── tests ────────────────────────────────────────────────────────────────────
+
+test {
+    // Pull the audio maths tests in, so `zig build test` covers them too.
+    _ = @import("audio/common.zig");
+}
+
+const testing = std.testing;
+const whisper_mod = @import("whisper.zig");
+
+test "a failed init frees everything it had already allocated" {
+    // This is the regression that motivated splitting initContext out.
+    //
+    // boo_init returns an optional, and `errdefer` only fires on an *error*
+    // return — so its cleanup never ran on the `return null` paths. A bad model
+    // path leaked the context, and a failure to open the microphone leaked the
+    // whole ~150MB whisper model along with it. Both are silent: the caller just
+    // sees null.
+    //
+    // testing.allocator fails the test if a single byte is left behind, so this
+    // would have caught it.
+    whisper_mod.setLogSilent();
+    try testing.expectError(
+        error.ModelLoadFailed,
+        initContext(testing.allocator, "/nonexistent/model.bin"),
+    );
+}
+
+test "boo_init reports a missing model as null rather than crashing" {
+    whisper_mod.setLogSilent();
+    try testing.expect(boo_init("/nonexistent/model.bin") == null);
+}
+
+test "every C entry point tolerates a null context" {
+    // A frontend whose boo_init failed still has a live UI, and its timers and
+    // button handlers keep firing against a null context. Every one of these is
+    // reachable in that state, so none may dereference it.
+    boo_deinit(null);
+    boo_warm_up(null);
+    boo_start_recording(null);
+    boo_stop_recording(null);
+
+    try testing.expect(boo_is_recording(null) == false);
+    try testing.expect(boo_is_transcribing(null) == false);
+    try testing.expectEqual(@as(f32, 0.0), boo_get_peak_rms(null));
+    try testing.expectEqual(@as(c_int, 0), boo_get_audio_samples(null));
+    try testing.expect(boo_transcribe(null) == null);
+
+    var bars: c_int = -1;
+    try testing.expect(boo_get_waveform(null, &bars) == null);
+
+    // boo_get_waveform may also be called with a null out-param.
+    try testing.expect(boo_get_waveform(null, null) == null);
+}
+
+test "boo_deinit is safe to call twice via a nulled-out handle" {
+    // The frontends null their pointer after deinit; a second shutdown path
+    // (window close, then app quit) must not double-free.
+    var ctx: ?*BooContext = null;
+    boo_deinit(ctx);
+    ctx = null;
+    boo_deinit(ctx);
 }

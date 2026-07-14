@@ -275,13 +275,17 @@ git tag v0.1.0 && git push origin v0.1.0
 ## Tests
 
 ```sh
-zig build test                  # Zig core (no test blocks yet — see below)
+zig build test                  # Zig core — audio maths + the C ABI contract
 ./linux/tests/run.sh            # portal payloads — needs gtk4; runs on macOS too
 ./linux/tests/integration.sh    # portal handshakes — Linux only, needs a D-Bus
 ./linux/tests/audio.sh MODEL WAV  # PipeWire capture -> whisper — needs a real
                                   # PipeWire graph, so a VM or desktop, NOT a
                                   # container (WirePlumber needs systemd-logind)
 ```
+
+**`zig build test`** covers the pure audio maths (waveform windowing, RMS, clamping, peak attack/decay) and the C ABI contract every frontend depends on: that a failed `boo_init` frees what it allocated, and that every entry point survives a null context — which a frontend whose init failed will absolutely hand it, since its timers and buttons keep firing regardless.
+
+The leak test earns its keep. `boo_init` returns an *optional*, and Zig's `errdefer` only fires on an **error** return — so its cleanup silently never ran, and a failure to open the microphone leaked the entire ~150 MB whisper model. Tested with a leak-checking allocator, so the regression fails the build rather than quietly bloating memory.
 
 **`run.sh`** checks the D-Bus payloads are well-formed. That matters more than it looks: GVariant format strings are parsed at *runtime*, so a malformed payload compiles cleanly and then aborts on a user's desktop.
 
@@ -300,7 +304,7 @@ limactl start --name=boo template://ubuntu-lts
 
 Given a WAV it builds a virtual microphone out of a null sink's monitor, plays the file into it, and asserts a transcript comes back — so it runs unattended. Given no WAV it records from your default source and you just speak.
 
-`zig build test` compiles the Zig core but contains **no test blocks yet** — it is not meaningful coverage, and saying otherwise would be a lie. The core's audio, whisper and C-ABI code is currently only exercised indirectly, through the tests above.
+Still untested: the platform audio backends themselves (`coreaudio.zig`, `pipewire.zig`) have no unit tests — they're driven by hardware callbacks and are covered only end-to-end, by `audio.sh` and by actually using the app.
 
 CI runs everything except `audio.sh` on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work — neither can be checked on a macOS dev box.
 

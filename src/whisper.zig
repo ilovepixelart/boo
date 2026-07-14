@@ -3,6 +3,23 @@ const c = @cImport({
     @cInclude("whisper.h");
 });
 
+fn silentLog(
+    level: c.ggml_log_level,
+    text: [*c]const u8,
+    user_data: ?*anyopaque,
+) callconv(.c) void {
+    _ = level;
+    _ = text;
+    _ = user_data;
+}
+
+/// Silence whisper.cpp's own logging. It is chatty on load and writes to
+/// stdout, which corrupts the Zig test runner's IPC stream — a passing test
+/// binary then reports as a failed build step with no useful message.
+pub fn setLogSilent() void {
+    c.whisper_log_set(silentLog, null);
+}
+
 pub const WhisperContext = struct {
     ctx: *c.whisper_context,
 
