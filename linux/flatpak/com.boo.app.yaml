@@ -66,6 +66,16 @@ modules:
 
   - name: boo
     buildsystem: simple
+    # `zig build` resolves the whisper.cpp dependency in build.zig.zon over the
+    # network, and flatpak-builder's sandbox is offline by default. Granting the
+    # build network access is fine for local and CI bundles.
+    #
+    # Flathub forbids this: a submission there must vendor whisper.cpp as a
+    # declared `sources:` archive (with its sha256) and build fully offline.
+    # That work is still to do — see the README's Linux status.
+    build-options:
+      build-args:
+        - --share=network
     sources:
       - type: dir
         path: ../..

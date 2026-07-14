@@ -27,11 +27,15 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 
 | Platform | Audio backend | Frontend | Build path | Status |
 |---|---|---|---|---|
-| macOS 14+ | CoreAudio | Swift + AppKit | xcodegen → Xcode | ✅ Working |
-| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Implemented, needs on-device verification |
+| macOS 14+ (Apple Silicon + Intel) | CoreAudio | Swift + AppKit | xcodegen → Xcode | ✅ Working |
+| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Preview — portals verified, audio untested |
 | Windows | — | — | — | Not planned |
 
-On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented, and CI builds and links the GTK4 frontend on every push. What's **not** yet proven is behavior against a live compositor: no one has run it on a real GNOME/KDE session, so the portal grant flows are verified only at the payload level. Treat Linux as "should work, unconfirmed" — and please report what you find.
+Linux ships as a **preview** Flatpak. Precisely what that means:
+
+- **Verified.** It builds and links (CI, every push). Both XDG portal clients complete their real D-Bus handshakes against a live session bus: GlobalShortcuts (CreateSession → BindShortcuts → `Activated` reaches Boo's callback) and RemoteDesktop (CreateSession → SelectDevices → Start, then a correctly-formed Ctrl+Shift+V chord). The restore token persists, so the permission prompt appears once rather than every launch.
+- **Not verified.** *Audio capture has never run on Linux.* Boo's PipeWire backend has not captured a single sample on real hardware. For a dictation app that is the whole product — so the preview may simply record silence. Reports welcome.
+- **Not verified.** Behavior against a real GNOME/KDE compositor. The portal handshakes above were driven against a faithful mock portal, not `xdg-desktop-portal-gnome`.
 
 **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
 

@@ -14,8 +14,19 @@ permissions:
 
 jobs:
   macos-dmg:
-    name: macOS DMG (arm64)
-    runs-on: macos-14
+    name: macOS DMG (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners per architecture — cross-compiling Swift + Zig +
+          # whisper and lipo-ing them is far more fragile than just building
+          # each on its own machine.
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+          - runner: macos-13   # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,22 +42,60 @@ jobs:
           ./bundle.sh
           ./scripts/make-dmg.sh
 
+      - name: Confirm architecture
+        run: |
+          BIN=zig-out/Boo.app/Contents/MacOS/Boo
+          file "$BIN"
+          file "$BIN" | grep -q "${{ matrix.arch }}" || {
+            echo "::error::binary is not ${{ matrix.arch }}"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: dmg
+          name: dmg-${{ matrix.arch }}
           path: zig-out/*.dmg
+
+  linux-flatpak:
+    name: Linux Flatpak (x86_64, preview)
+    runs-on: ubuntu-24.04
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: boo.flatpak
+          manifest-path: linux/flatpak/com.boo.app.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Name the bundle by version
+        run: mv boo.flatpak "boo-${{ github.event.inputs.tag || github.ref_name }}-x86_64.flatpak"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: '*.flatpak'
 
   release:
     name: Publish release
-    needs: macos-dmg
+    needs: [macos-dmg, linux-flatpak]
+    # Publish whatever built. The Linux bundle is a preview; a failure there
+    # should not block the macOS release.
+    if: always() && !cancelled()
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: dmg
           path: dist
+          merge-multiple: true
+
+      - name: Show what we're publishing
+        run: ls -la dist/
 
       - name: Create release
         env:
@@ -56,7 +105,8 @@ jobs:
         # block would carry their leading whitespace and render as a code block.
         # --generate-notes appends the auto-generated changelog underneath.
         run: |
-          gh release create "$TAG" dist/*.dmg \
+          gh release create "$TAG" dist/* \
             --title "Boo $TAG" \
             --notes-file .github/release-notes.md \
-            --generate-notes
+            --generate-notes \
+            || gh release upload "$TAG" dist/* --clobber
