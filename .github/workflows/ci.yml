@@ -8,7 +8,11 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Only supersede runs on a PR branch. On master, cancelling means a commit can
+  # land with its slowest job (the Linux build) killed mid-flight and therefore
+  # never actually verified — which is precisely how the Linux target stayed
+  # broken while CI looked fine.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   macos:
