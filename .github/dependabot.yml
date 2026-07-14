@@ -1,10 +1,21 @@
 version: 2
 updates:
-  # The workflows pin actions/checkout, mlugg/setup-zig, flatpak-github-actions.
-  # Keep them patched without having to notice a release by hand.
+  # The workflows pin actions/checkout, mlugg/setup-zig, flatpak-github-actions,
+  # and the artifact actions. Keep them patched without noticing a release by hand.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     commit-message:
       prefix: ci
+    ignore:
+      # The upload/download-artifact pair must stay a matched, validated set, and
+      # the only place they run is release.yml — which fires on a tag, so CI can
+      # never exercise a bump. download-artifact v8 also hard-errors on hash
+      # mismatch and gates unzip on Content-Type, either of which could break the
+      # DMG/flatpak round-trip. Pinned at v5 until a release validates a move;
+      # patch/minor security updates still come through.
+      - dependency-name: actions/upload-artifact
+        update-types: [version-update:semver-major]
+      - dependency-name: actions/download-artifact
+        update-types: [version-update:semver-major]
