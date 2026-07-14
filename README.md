@@ -25,10 +25,19 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Platform | Audio backend | Frontend | Build path | Status |
 |---|---|---|---|---|
 | macOS 14+ | CoreAudio | Swift + AppKit | xcodegen → Xcode | ✅ Working |
-| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Scaffolded, unverified |
+| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Implemented, needs on-device verification |
 | Windows | — | — | — | Not planned |
 
-**Known limitations on Linux** (deferred work): global hotkey (XDG GlobalShortcuts portal — interface defined, impl stubbed), 487-theme port from macOS, settings dialog, layer-shell always-on-top, auto-typing into focused window (Wayland injection is fragmented across compositors).
+On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented; the code compiles and its portal payloads are test-verified, but it has not yet been exercised against a live compositor. **Still deferred on Linux:** the 487-theme port from macOS, settings dialog, layer-shell always-on-top.
+
+## Ghostty integration
+
+Boo is a companion for [Ghostty](https://ghostty.org), and gets text into it differently per platform:
+
+- **macOS** — Ghostty 1.3+ ships an AppleScript API, and Boo uses it: `input text` writes straight into the focused terminal's pty. No clipboard clobber, works under Secure Input (i.e. at password prompts), and needs only the one-time Automation permission. Older Ghostty versions and all other apps get the generic clipboard + ⌘V fallback (Accessibility permission).
+- **Linux** — Ghostty has no injection API (its D-Bus surface only opens windows), so Boo copies the transcript to the clipboard and synthesizes `Ctrl+Shift+V` — Ghostty's default paste binding — through the XDG RemoteDesktop portal. One permission grant, persisted across runs with a restore token. Works in any app that pastes on `Ctrl+Shift+V`, inside or outside Flatpak, on GNOME and KDE alike.
+
+Transcripts that contain newlines may trigger Ghostty's paste-protection prompt on Linux (the macOS path is exempt); at a shell with bracketed paste — any modern shell — no prompt appears.
 
 ## Get a model
 
@@ -142,4 +151,4 @@ bundle.sh           macOS: ad-hoc / re-sign helper
 
 ## License
 
-TBD — currently all rights reserved. License will be added before the repo flips to public.
+[MIT](LICENSE) — same as whisper.cpp and Ghostty, the projects Boo stands on.

@@ -43,6 +43,8 @@ cat > "$CONTENTS/Info.plist" << 'EOF'
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Boo needs microphone access for speech-to-text.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Boo sends dictated text to Ghostty through its scripting interface.</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
 </dict>
@@ -53,7 +55,8 @@ EOF
 # Defaults to ad-hoc; override with BOO_CODESIGN_IDENTITY env var, e.g.
 #   BOO_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./bundle.sh
 CODESIGN_IDENTITY="${BOO_CODESIGN_IDENTITY:--}"
-codesign -s "$CODESIGN_IDENTITY" --force --deep "$APP"
+codesign -s "$CODESIGN_IDENTITY" --force --deep \
+    --entitlements "$PROJ/macos/Boo.entitlements" "$APP"
 
 echo "Built: $APP"
 echo "Run: open '$APP'"
