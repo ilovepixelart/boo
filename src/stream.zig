@@ -14,7 +14,9 @@
 // same on macOS and Linux.
 
 const std = @import("std");
-const whisper = @import("whisper.zig");
+const engine_mod = @import("engine.zig");
+const whisper = engine_mod.whisper;
+const Engine = engine_mod.Engine;
 
 const WHISPER_SAMPLE_RATE = @import("audio/common.zig").WHISPER_SAMPLE_RATE;
 const SAMPLES_PER_MS = WHISPER_SAMPLE_RATE / 1000;
@@ -38,7 +40,7 @@ const SILENT_KEEP_SAMPLES = 1 * WHISPER_SAMPLE_RATE;
 
 pub const Chunker = struct {
     allocator: std.mem.Allocator,
-    whisper: *whisper.WhisperContext,
+    engine: *Engine,
     vad: *whisper.Vad,
     /// Transcripts of finished utterances, space-joined as they complete.
     committed: std.ArrayList(u8) = .empty,
@@ -46,8 +48,8 @@ pub const Chunker = struct {
     /// transcribed or discarded as silence.
     consumed: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, whisper_ctx: *whisper.WhisperContext, vad: *whisper.Vad) Chunker {
-        return .{ .allocator = allocator, .whisper = whisper_ctx, .vad = vad };
+    pub fn init(allocator: std.mem.Allocator, engine: *Engine, vad: *whisper.Vad) Chunker {
+        return .{ .allocator = allocator, .engine = engine, .vad = vad };
     }
 
     pub fn deinit(self: *Chunker) void {
@@ -92,7 +94,7 @@ pub const Chunker = struct {
         // prompt back into the output when consecutive utterances sound
         // alike, inserting text that was never spoken. Choppier punctuation
         // at chunk seams is the safer failure mode.
-        const text = try self.whisper.transcribe(self.allocator, pending[0..cut_at]);
+        const text = try self.engine.transcribe(self.allocator, pending[0..cut_at]);
         defer self.allocator.free(text);
         try self.appendCommitted(text);
         self.consumed += cut_at;
@@ -106,7 +108,7 @@ pub const Chunker = struct {
     /// empty, matching the batch path's "too short" behavior.
     pub fn finalize(self: *Chunker, tail: []const f32, min_samples: usize) ![]u8 {
         if (tail.len >= min_samples) {
-            const text = try self.whisper.transcribe(self.allocator, tail);
+            const text = try self.engine.transcribe(self.allocator, tail);
             defer self.allocator.free(text);
             try self.appendCommitted(text);
         }
@@ -138,7 +140,7 @@ fn homeModel(allocator: std.mem.Allocator, name: []const u8) ![:0]u8 {
 }
 
 test "Chunker: commits utterances during the take and finalizes the tail" {
-    whisper.setLogSilent();
+    engine_mod.setLogSilent();
     const allocator = testing.allocator;
 
     const model_path = try homeModel(allocator, "ggml-base.en.bin");
@@ -146,12 +148,12 @@ test "Chunker: commits utterances during the take and finalizes the tail" {
     const vad_path = try homeModel(allocator, "ggml-silero-v6.2.0.bin");
     defer allocator.free(vad_path);
 
-    var wctx = whisper.WhisperContext.init(model_path, .{}) catch return error.SkipZigTest;
-    defer wctx.deinit();
+    var eng = Engine.init(model_path, .{}) catch return error.SkipZigTest;
+    defer eng.deinit();
     var vad = whisper.Vad.init(vad_path) catch return error.SkipZigTest;
     defer vad.deinit();
 
-    var chunker = Chunker.init(allocator, &wctx, &vad);
+    var chunker = Chunker.init(allocator, &eng, &vad);
     defer chunker.deinit();
 
     // Synthesize a take with an unambiguous utterance boundary: speech,
@@ -201,7 +203,7 @@ test "Chunker: commits utterances during the take and finalizes the tail" {
 }
 
 test "Chunker: pure silence commits nothing and bounds the pending window" {
-    whisper.setLogSilent();
+    engine_mod.setLogSilent();
     const allocator = testing.allocator;
 
     const model_path = try homeModel(allocator, "ggml-base.en.bin");
@@ -209,12 +211,12 @@ test "Chunker: pure silence commits nothing and bounds the pending window" {
     const vad_path = try homeModel(allocator, "ggml-silero-v6.2.0.bin");
     defer allocator.free(vad_path);
 
-    var wctx = whisper.WhisperContext.init(model_path, .{}) catch return error.SkipZigTest;
-    defer wctx.deinit();
+    var eng = Engine.init(model_path, .{}) catch return error.SkipZigTest;
+    defer eng.deinit();
     var vad = whisper.Vad.init(vad_path) catch return error.SkipZigTest;
     defer vad.deinit();
 
-    var chunker = Chunker.init(allocator, &wctx, &vad);
+    var chunker = Chunker.init(allocator, &eng, &vad);
     defer chunker.deinit();
 
     const silence = try allocator.alloc(f32, MAX_SILENT_PENDING_SAMPLES + WHISPER_SAMPLE_RATE);

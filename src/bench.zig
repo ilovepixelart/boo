@@ -15,7 +15,8 @@
 // pipeline compilation that steady-state dictation never pays again.
 
 const std = @import("std");
-const whisper = @import("whisper.zig");
+const engine_mod = @import("engine.zig");
+const whisper = engine_mod.whisper;
 const wav = @import("wav.zig");
 const stream = @import("stream.zig");
 const build_options = @import("build_options");
@@ -134,10 +135,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     const audio_seconds = parsed.durationSeconds();
 
     // Whisper's load/init logging would drown the report.
-    whisper.setLogSilent();
+    engine_mod.setLogSilent();
 
     var timer = Timer.start();
-    var ctx = whisper.WhisperContext.init(model_path, .{ .use_gpu = use_gpu }) catch
+    var ctx = engine_mod.Engine.init(model_path, .{ .use_gpu = use_gpu }) catch
         fatal("cannot load model {s}\nDownload one first:\n  mkdir -p ~/.boo/models\n  curl -L -o ~/.boo/models/ggml-base.en.bin \\\n    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", .{model_path});
     defer ctx.deinit();
     const load_ns = timer.lap();
@@ -146,11 +147,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         \\Boo transcription benchmark
         \\  model:  {s}
         \\  audio:  {s} ({d:.1}s)
-        \\  device: {s}
+        \\  engine: {s}, device: {s}
         \\
         \\  model load: {d:.0} ms
         \\
-    , .{ model_path, wav_path, audio_seconds, if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
+    , .{ model_path, wav_path, audio_seconds, @tagName(ctx), if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
 
     if (stream_mode) {
         try runStreamBench(allocator, &ctx, samples);
@@ -196,7 +197,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 /// fed to the VAD chunker in 250ms ticks exactly as a frontend would, then
 /// "stop". The number that matters is stop-to-text: what the user waits for
 /// after releasing the hotkey, streaming vs batch.
-fn runStreamBench(allocator: std.mem.Allocator, ctx: *whisper.WhisperContext, utterance: []const f32) !void {
+fn runStreamBench(allocator: std.mem.Allocator, ctx: *engine_mod.Engine, utterance: []const f32) !void {
     const home = std.c.getenv("HOME") orelse fatal("no HOME; cannot find VAD model", .{});
     const vad_joined = try std.mem.concat(allocator, u8, &.{ std.mem.span(home), "/.boo/models/ggml-silero-v6.2.0.bin" });
     defer allocator.free(vad_joined);

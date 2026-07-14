@@ -226,6 +226,17 @@ pub fn build(b: *std.Build) void {
             &(base_flags_linux ++ cpp_std ++ [_][]const u8{"-DWHISPER_VERSION=\"1.9.1\""}),
     });
 
+    // Parakeet TDT (upstream target: parakeet), the fast-ASR alternative that
+    // rides the same ggml runtime. Same backends, separate model format.
+    whisper_lib.root_module.addCSourceFiles(.{
+        .root = whisper_dep.path("."),
+        .files = &.{"src/parakeet.cpp"},
+        .flags = if (is_macos)
+            &(base_flags_macos ++ cpp_std ++ [_][]const u8{"-DPARAKEET_VERSION=\"1.9.1\""})
+        else
+            &(base_flags_linux ++ cpp_std ++ [_][]const u8{"-DPARAKEET_VERSION=\"1.9.1\""}),
+    });
+
     // ── Boo core static library (Zig → C API for the platform frontend) ──
     const boo_lib = b.addLibrary(.{
         .name = "boo-core",

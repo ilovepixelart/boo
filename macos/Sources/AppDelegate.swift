@@ -242,10 +242,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ].filter { !$0.isEmpty }
     }
 
-    /// Models the README recommends, most capable first. Downloading
-    /// large-v3-turbo is a deliberate act; with Metal it stays fast enough
-    /// for dictation, so it wins over the default base.en when both exist.
+    /// Models the README recommends, most capable first. Parakeet TDT tops
+    /// the list: near large-v3 accuracy at roughly base.en decode speed.
+    /// Downloading a bigger model is a deliberate act, so it wins over the
+    /// default base.en when both exist.
     private static let preferredModels = [
+        "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+        "ggml-parakeet-tdt-0.6b-v3-f16.bin",
         "ggml-large-v3-turbo-q5_0.bin",
         "ggml-large-v3-turbo.bin",
         "ggml-small.en.bin",

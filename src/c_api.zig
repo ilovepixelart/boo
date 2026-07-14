@@ -1,6 +1,7 @@
 const std = @import("std");
-const whisper_mod = @import("whisper.zig");
-const Whisper = whisper_mod.WhisperContext;
+const engine_mod = @import("engine.zig");
+const whisper_mod = engine_mod.whisper;
+const Engine = engine_mod.Engine;
 const AudioCapture = @import("audio.zig").AudioCapture;
 const stream = @import("stream.zig");
 const common = @import("audio/common.zig");
@@ -9,7 +10,7 @@ const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
 const MIN_AUDIO_SAMPLES = 8000; // ~0.5s at 16kHz
 
 const BooContext = struct {
-    whisper: Whisper,
+    engine: Engine,
     audio: *AudioCapture,
     allocator: std.mem.Allocator,
     /// Atomic: boo_transcribe runs on a worker thread (it blocks for seconds),
@@ -75,15 +76,15 @@ fn initContext(allocator: std.mem.Allocator, model_path: [:0]const u8) !*BooCont
     const ctx = try allocator.create(BooContext);
     errdefer allocator.destroy(ctx);
 
-    var whisper = try Whisper.init(model_path, .{});
-    errdefer whisper.deinit();
+    var engine = try Engine.init(model_path, .{});
+    errdefer engine.deinit();
 
     // If this fails, the errdefer above frees the model, otherwise a missing
-    // microphone would strand the whole ~150MB whisper context.
+    // microphone would strand the whole (hundreds of MB) model context.
     const audio = try AudioCapture.init(allocator);
 
     ctx.* = .{
-        .whisper = whisper,
+        .engine = engine,
         .audio = audio,
         .allocator = allocator,
     };
@@ -102,7 +103,7 @@ export fn boo_deinit(ctx: ?*BooContext) void {
     if (c.chunker) |*ch| ch.deinit();
     if (c.vad) |*v| v.deinit();
     c.audio.deinit();
-    c.whisper.deinit();
+    c.engine.deinit();
     c.allocator.destroy(c);
 }
 
@@ -115,7 +116,7 @@ export fn boo_load_vad(ctx: ?*BooContext, vad_model_path: [*:0]const u8) bool {
     c.vad = whisper_mod.Vad.init(std.mem.span(vad_model_path)) catch return false;
     // Pointing into the optional's payload is safe: BooContext lives on the
     // heap and vad is never reassigned after this.
-    c.chunker = stream.Chunker.init(c.allocator, &c.whisper, &c.vad.?);
+    c.chunker = stream.Chunker.init(c.allocator, &c.engine, &c.vad.?);
     return true;
 }
 
@@ -213,7 +214,7 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         const samples = c.audio.getAudioData(c.allocator) catch return null;
         defer c.allocator.free(samples);
         if (samples.len < MIN_AUDIO_SAMPLES) return null;
-        break :blk c.whisper.transcribe(c.allocator, samples) catch return null;
+        break :blk c.engine.transcribe(c.allocator, samples) catch return null;
     };
 
     if (text.len == 0) {
@@ -245,6 +246,7 @@ test {
     _ = @import("audio/common.zig");
     _ = @import("wav.zig");
     _ = @import("stream.zig");
+    _ = @import("engine.zig");
 }
 
 const testing = std.testing;

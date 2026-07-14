@@ -23,10 +23,13 @@ typedef struct {
 // than only the ggml-base.en.bin we happen to recommend, pinning the filename
 // meant a user who followed our own advice and fetched, say, large-v3-turbo
 // would be told no model was installed.
-// Models the README recommends, most capable first. Downloading
-// large-v3-turbo is a deliberate act, so it wins over the default base.en
+// Models the README recommends, most capable first. Parakeet TDT tops the
+// list: near large-v3 accuracy at roughly base.en decode speed. Downloading
+// a bigger model is a deliberate act, so it wins over the default base.en
 // when both exist. Matches the macOS frontend.
 static const char *const preferred_models[] = {
+    "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+    "ggml-parakeet-tdt-0.6b-v3-f16.bin",
     "ggml-large-v3-turbo-q5_0.bin",
     "ggml-large-v3-turbo.bin",
     "ggml-small.en.bin",

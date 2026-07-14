@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Whisper = @import("whisper.zig").WhisperContext;
+const Engine = @import("engine.zig").Engine;
 const AudioCapture = @import("audio.zig").AudioCapture;
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -17,7 +17,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     // Load whisper model
     std.debug.print("Loading model: {s}\n", .{model_path});
-    var ctx = Whisper.init(model_path, .{}) catch |err| {
+    var ctx = Engine.init(model_path, .{}) catch |err| {
         std.debug.print("Failed to load model: {}\n", .{err});
         std.debug.print("\nDownload a model first:\n  mkdir -p models\n  curl -L -o models/ggml-base.en.bin \\\n    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n", .{});
         return;

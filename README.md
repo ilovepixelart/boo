@@ -124,19 +124,20 @@ Every transcript is **copied to the clipboard** and **pasted into whatever app w
 
 ## Choosing a model
 
-Any GGML model from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) works, 33 of them. Point Boo at one by dropping it in `~/.boo/models/`, or set `BOO_MODEL=/path/to/model.bin` (Linux).
+Any GGML model from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) works, 33 of them, plus NVIDIA Parakeet from [ggml-org/parakeet-GGUF](https://huggingface.co/ggml-org/parakeet-GGUF). Point Boo at one by dropping it in `~/.boo/models/`, or set `BOO_MODEL=/path/to/model.bin` (Linux).
 
 The ones worth knowing about:
 
 | Model | Size | Notes |
 |---|---|---|
+| `ggml-parakeet-tdt-0.6b-v3-q8_0.bin` | 669 MB | **The best pick.** Near large-v3 accuracy at base.en speed; 25 European languages, auto-detected. |
 | `ggml-base.en.bin` | 148 MB | **The default.** English-only, fast, good enough for dictation. |
 | `ggml-base.en-q5_1.bin` | 60 MB | Same model, quantized. Nearly as accurate, less than half the size. |
 | `ggml-tiny.en-q5_1.bin` | 32 MB | Fastest, noticeably worse. For weak hardware. |
 | `ggml-small.en.bin` | 488 MB | Clearly better than base; still quick on Apple Silicon. |
-| `ggml-large-v3-turbo-q5_0.bin` | 574 MB | **Best accuracy per byte.** Multilingual, and far faster than large-v3. |
+| `ggml-large-v3-turbo-q5_0.bin` | 574 MB | **Best whisper accuracy per byte.** Multilingual, far faster than large-v3. |
 
-With several models installed, Boo picks the most capable one it recognizes: `large-v3-turbo` (either flavor), then `small.en`, then `base.en`, before falling back alphabetically. On Apple Silicon the GPU build runs turbo at ~20x realtime, and with streaming transcription the stop-to-text wait stays near half a second.
+With several models installed, Boo picks the most capable one it recognizes: `parakeet`, then `large-v3-turbo` (either flavor), then `small.en`, then `base.en`, before falling back alphabetically. On an Apple Silicon GPU, Parakeet transcribes at ~120x realtime (11s of audio in under 100ms); turbo runs at ~20x.
 
 The `.en` models are English-only. Everything else is multilingual, but see below, or they'll silently produce English.
 
@@ -160,7 +161,7 @@ BOO_LANG=de   boo-app      # German
 BOO_LANG=auto boo-app      # let whisper detect the language
 ```
 
-`BOO_LANG` has no effect on `.en` models: they can only ever produce English.
+`BOO_LANG` has no effect on `.en` models: they can only ever produce English. It also has no effect on Parakeet models, which auto-detect the language on their own.
 
 ## Ghostty integration
 
