@@ -110,10 +110,24 @@ export fn boo_deinit(ctx: ?*BooContext) void {
 /// Load a Silero VAD model, enabling incremental transcription during
 /// recording (boo_stream_tick / boo_get_live_transcript). Without it, Boo
 /// behaves exactly as before: one batch transcription on stop. Idempotent.
+///
+/// Safe to call at any time, including mid-recording (the macOS frontend
+/// downloads the model in the background on first run): the mutex orders the
+/// chunker's appearance against ticks and transcriptions, and a chunker born
+/// mid-take simply starts consuming from the take's beginning.
 export fn boo_load_vad(ctx: ?*BooContext, vad_model_path: [*:0]const u8) bool {
     const c = ctx orelse return false;
     if (c.vad != null) return true;
-    c.vad = whisper_mod.Vad.init(std.mem.span(vad_model_path)) catch return false;
+    var vad = whisper_mod.Vad.init(std.mem.span(vad_model_path)) catch return false;
+
+    c.whisper_mutex.lock();
+    defer c.whisper_mutex.unlock();
+    if (c.vad != null) {
+        // Lost a load race; keep the winner.
+        vad.deinit();
+        return true;
+    }
+    c.vad = vad;
     // Pointing into the optional's payload is safe: BooContext lives on the
     // heap and vad is never reassigned after this.
     c.chunker = stream.Chunker.init(c.allocator, &c.engine, &c.vad.?);
@@ -171,12 +185,15 @@ export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
 /// when new text was committed (see boo_get_live_transcript).
 export fn boo_stream_tick(ctx: ?*BooContext) bool {
     const c = ctx orelse return false;
-    const ch = if (c.chunker) |*it| it else return false;
     if (!c.audio.isRecording()) return false;
     if (c.transcribing.load(.acquire)) return false;
 
     c.whisper_mutex.lock();
     defer c.whisper_mutex.unlock();
+
+    // Checked under the lock: boo_load_vad may install the chunker at any
+    // moment (the frontend downloads the VAD model in the background).
+    const ch = if (c.chunker) |*it| it else return false;
 
     const pending = c.audio.copyAudioFrom(c.allocator, ch.consumed) catch return false;
     defer c.allocator.free(pending);

@@ -46,6 +46,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 NSLog("Boo: could not load VAD model %@, staying in batch mode", vadPath)
             }
+        } else {
+            downloadVadModel()
         }
 
         overlayWindow = OverlayWindow(booCtx: ctx)
@@ -316,6 +318,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return nil
+    }
+
+    /// Fetch the Silero VAD model in the background on first run. It is under
+    /// 1 MB and carries no size/language decision the user needs to make
+    /// (unlike the speech models), so streaming transcription just starts
+    /// working; batch mode covers the seconds until it lands. boo_load_vad is
+    /// safe to call at any time, including mid-recording.
+    private func downloadVadModel() {
+        let dir = NSHomeDirectory() + "/.boo/models"
+        let dest = URL(fileURLWithPath: dir + "/ggml-silero-v6.2.0.bin")
+        let url = URL(
+            string: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
+        )!
+
+        NSLog("Boo: fetching the VAD model to enable streaming transcription")
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tmp, response, error in
+            guard let tmp = tmp, error == nil,
+                (response as? HTTPURLResponse)?.statusCode == 200
+            else {
+                NSLog(
+                    "Boo: VAD model download failed (%@); staying in batch mode",
+                    error?.localizedDescription ?? "bad response")
+                return
+            }
+            do {
+                try FileManager.default.createDirectory(
+                    atPath: dir, withIntermediateDirectories: true)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+            } catch {
+                NSLog("Boo: could not save the VAD model: %@", error.localizedDescription)
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self = self, let ctx = self.booCtx else { return }
+                if boo_load_vad(ctx, dest.path) {
+                    NSLog("Boo: streaming transcription enabled (%@)", dest.path)
+                }
+            }
+        }
+        task.resume()
     }
 
     private func showModelNotFoundAlert() {
