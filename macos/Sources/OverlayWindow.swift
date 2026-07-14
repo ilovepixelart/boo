@@ -357,15 +357,6 @@ class OverlayWindow: NSWindow {
         buttonBar.spacing = 6
         buttonBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let speakBtn = NSButton(
-            image: NSImage(systemSymbolName: "speaker.wave.2", accessibilityDescription: "Read aloud")!,
-            target: self, action: #selector(speakBubbleText(_:)))
-        speakBtn.bezelStyle = .accessoryBarAction
-        speakBtn.isBordered = false
-        speakBtn.tag = index
-        speakBtn.contentTintColor = ThemeManager.shared.current.dim
-        buttonBar.addArrangedSubview(speakBtn)
-
         let copyBtn = NSButton(
             image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")!, target: self,
             action: #selector(copyBubbleText(_:)))
@@ -415,39 +406,29 @@ class OverlayWindow: NSWindow {
         return container
     }
 
-    /// The transcript text of the bubble a button belongs to. Read from the view
-    /// rather than an index, so it survives other bubbles being dismissed.
-    private func bubbleText(for sender: NSView) -> String? {
+    @objc func copyBubbleText(_ sender: NSButton) {
+        // Find the bubble container, then find the text label inside it
         var view: NSView? = sender
         while let v = view {
             if v.superview == transcriptStack {
+                // Found the bubble — find the NSTextField with transcript text
                 for subview in v.subviews {
                     if let label = subview as? NSTextField, label.font?.pointSize == 13 {
-                        return label.stringValue
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(label.stringValue, forType: .string)
+                        break
                     }
                 }
-                return nil
+                break
             }
             view = v.superview
         }
-        return nil
-    }
-
-    @objc func copyBubbleText(_ sender: NSButton) {
-        guard let text = bubbleText(for: sender) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
 
         // Visual feedback
         sender.contentTintColor = ThemeManager.shared.current.cyan
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             sender.contentTintColor = ThemeManager.shared.current.dim
         }
-    }
-
-    @objc func speakBubbleText(_ sender: NSButton) {
-        guard let text = bubbleText(for: sender) else { return }
-        Speaker.toggle(text)
     }
 
     @objc func dismissBubble(_ sender: NSButton) {
