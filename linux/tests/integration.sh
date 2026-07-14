@@ -112,3 +112,38 @@ EXPECT="65507:1 65505:1 118:1 118:0 65505:0 65507:0"
 echo "[integration] paste chord correct: Ctrl+Shift+V, press/release ordered"
 
 echo "[integration] PASS — both portal handshakes completed against a live bus"
+
+# ── Second launch: the shortcut is already bound, so Boo must NOT call
+# BindShortcuts again. That call is what raises the approval dialog, so
+# re-issuing it would re-prompt the user on every single launch.
+echo
+echo "── second launch (shortcut already bound) ──"
+kill "$PORTAL" 2>/dev/null
+sleep 1
+
+python3 "$TESTS/mock_portal.py" --prebound > "$WORK/events2.jsonl" 2>&1 &
+PORTAL=$!
+EVENTS_FILE="$WORK/events2.jsonl"
+( deadline=$((SECONDS + 30))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+      grep -q '"event": "ready"' "$WORK/events2.jsonl" 2>/dev/null && exit 0
+      sleep 0.2
+  done
+  exit 1 ) || { echo "[integration] FAIL: mock portal (prebound) did not start"; exit 1; }
+
+# No shortcut is fired here; we only care about which portal calls Boo makes.
+timeout 30 "$WORK/harness" >/dev/null 2>&1 || true
+sleep 1
+kill "$PORTAL" 2>/dev/null
+EVENTS2="$(cat "$WORK/events2.jsonl")"
+
+echo "$EVENTS2" | grep -E '"event": "gs\.' || true
+
+grep -q '"event": "gs.ListShortcuts"' <<<"$EVENTS2" \
+    || fail "second launch did not call ListShortcuts"
+
+if grep -q '"event": "gs.BindShortcuts"' <<<"$EVENTS2"; then
+    fail "second launch called BindShortcuts again — the user would be re-prompted"
+fi
+
+echo "[integration] PASS — already-bound shortcut is reused, so no approval dialog"

@@ -47,6 +47,11 @@ NODE_XML = f"""
       <arg type='a{{sv}}' name='options' direction='in'/>
       <arg type='o' name='handle' direction='out'/>
     </method>
+    <method name='ListShortcuts'>
+      <arg type='o' name='session_handle' direction='in'/>
+      <arg type='a{{sv}}' name='options' direction='in'/>
+      <arg type='o' name='handle' direction='out'/>
+    </method>
     <signal name='Activated'>
       <arg type='o' name='session_handle'/>
       <arg type='s' name='shortcut_id'/>
@@ -99,11 +104,16 @@ def sanitize(sender):
 
 
 class MockPortal:
-    def __init__(self):
+    def __init__(self, prebound=False):
         self.conn = None
         self.gs_session = None
         self.rd_session = None
         self.keysyms = []
+        # Pretend a previous run already bound the shortcut. A real portal
+        # remembers bindings per app, so this is what a second launch sees —
+        # and Boo must then skip BindShortcuts, which is the call that raises
+        # the approval dialog.
+        self.prebound = prebound
 
     # -- Request/Response ------------------------------------------------
 
@@ -140,6 +150,21 @@ class MockPortal:
             handle = self.respond(
                 sender, options,
                 {"session_handle": GLib.Variant("s", self.gs_session)})
+            invocation.return_value(GLib.Variant("(o)", (handle,)))
+
+        elif iface == IFACE_GS and method == "ListShortcuts":
+            session, options = args
+            shortcuts = []
+            if self.prebound:
+                shortcuts = [(
+                    "toggle-record",
+                    {"description": GLib.Variant("s", "Toggle Boo recording"),
+                     "trigger_description": GLib.Variant("s", "Ctrl+Shift+Space")},
+                )]
+            emit("gs.ListShortcuts", prebound=self.prebound)
+            handle = self.respond(sender, options, {
+                "shortcuts": GLib.Variant("a(sa{sv})", shortcuts),
+            })
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
         elif iface == IFACE_GS and method == "BindShortcuts":
@@ -223,7 +248,9 @@ class MockPortal:
 
 
 def main():
-    portal = MockPortal()
+    # --prebound simulates a second launch, where the portal already remembers
+    # our shortcut from a previous session.
+    portal = MockPortal(prebound="--prebound" in sys.argv)
     Gio.bus_own_name(
         Gio.BusType.SESSION, BUS_NAME, Gio.BusNameOwnerFlags.NONE,
         portal.on_bus_acquired, None, portal.on_name_lost,

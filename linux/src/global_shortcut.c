@@ -42,6 +42,7 @@
 
 typedef enum {
     BOO_METHOD_CREATE_SESSION,
+    BOO_METHOD_LIST_SHORTCUTS,
     BOO_METHOD_BIND_SHORTCUTS,
 } BooPortalMethod;
 
@@ -56,6 +57,8 @@ struct BooGlobalShortcut {
     guint response_subscription; // 0 == no request in flight
     guint activate_subscription; // 0 == not subscribed
     gboolean reported_unavailable; // report at most once
+
+    BooPortalMethod pending; // which request the next Response belongs to
 };
 
 // Tell the frontend the hotkey is dead, so it can say so instead of leaving the
@@ -127,7 +130,35 @@ static void boo_on_session_created(BooGlobalShortcut *gs, GVariant *results) {
         PORTAL_OBJECT_PATH, gs->session_handle,
         G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH, on_shortcut_activated, gs, NULL);
 
-    boo_portal_request(gs, BOO_METHOD_BIND_SHORTCUTS);
+    // Ask what we already have before asking for anything new. BindShortcuts is
+    // what raises the approval dialog, and the portal remembers bindings across
+    // sessions — so calling it unconditionally would re-prompt the user on every
+    // single launch. ListShortcuts returns "the shortcuts that were successfully
+    // bound in a previous session by this application", and needs no dialog.
+    boo_portal_request(gs, BOO_METHOD_LIST_SHORTCUTS);
+}
+
+// Did a previous run already bind our shortcut? If so we're done, and the user
+// sees no dialog at all.
+static gboolean boo_already_bound(GVariant *results) {
+    GVariant *shortcuts = g_variant_lookup_value(results, "shortcuts",
+                                                 G_VARIANT_TYPE("a(sa{sv})"));
+    if (!shortcuts) return FALSE;
+
+    gboolean found = FALSE;
+    GVariantIter iter;
+    const char *id = NULL;
+    GVariant *props = NULL;
+
+    g_variant_iter_init(&iter, shortcuts);
+    while (g_variant_iter_next(&iter, "(&s@a{sv})", &id, &props)) {
+        if (id && g_str_equal(id, BOO_SHORTCUT_ID)) found = TRUE;
+        if (props) g_variant_unref(props);
+        if (found) break;
+    }
+
+    g_variant_unref(shortcuts);
+    return found;
 }
 
 // org.freedesktop.portal.Request.Response
@@ -151,14 +182,27 @@ static void on_portal_response(GDBusConnection *dbus, const char *sender,
 
     switch (response) {
     case 0:
-        // CreateSession is the only reply with a payload we need. We know which
-        // request this is by whether a session exists yet.
-        if (!gs->session_handle) {
+        switch (gs->pending) {
+        case BOO_METHOD_CREATE_SESSION:
             boo_on_session_created(gs, results);
-        } else {
+            break;
+
+        case BOO_METHOD_LIST_SHORTCUTS:
+            if (boo_already_bound(results)) {
+                // Bound on an earlier run. Skipping BindShortcuts is the whole
+                // point: it is the call that raises the approval dialog.
+                g_debug("Boo: shortcut already bound — no dialog needed");
+            } else {
+                boo_portal_request(gs, BOO_METHOD_BIND_SHORTCUTS);
+            }
+            break;
+
+        case BOO_METHOD_BIND_SHORTCUTS:
             g_debug("Boo: global shortcut bound");
+            break;
         }
         break;
+
     case 1:
         boo_report_unavailable(gs, "the shortcut was declined");
         break;
@@ -223,6 +267,13 @@ static GVariant *boo_make_payload(BooGlobalShortcut *gs, BooPortalMethod method,
         return payload;
     }
 
+    case BOO_METHOD_LIST_SHORTCUTS: {
+        if (!gs->session_handle) return NULL;
+        // ListShortcuts(session, options) — no dialog, unlike BindShortcuts.
+        return g_variant_new_parsed("(%o, {'handle_token': <%s>})",
+                                    gs->session_handle, request_token);
+    }
+
     case BOO_METHOD_BIND_SHORTCUTS: {
         if (!gs->session_handle) return NULL;
 
@@ -256,6 +307,7 @@ static void boo_portal_request(BooGlobalShortcut *gs, BooPortalMethod method) {
         g_free(request_token);
         return;
     }
+    gs->pending = method; // so the Response handler knows what it's answering
 
     char *request_path = boo_request_path(gs->dbus, request_token);
     if (!request_path) {
@@ -271,10 +323,13 @@ static void boo_portal_request(BooGlobalShortcut *gs, BooPortalMethod method) {
         gs->dbus, NULL, PORTAL_IFACE_REQUEST, "Response", request_path, NULL,
         G_DBUS_SIGNAL_FLAGS_NONE, on_portal_response, gs, NULL);
 
+    const char *method_name = method == BOO_METHOD_CREATE_SESSION ? "CreateSession"
+                            : method == BOO_METHOD_LIST_SHORTCUTS ? "ListShortcuts"
+                                                                  : "BindShortcuts";
+
     g_dbus_connection_call(
         gs->dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH,
-        PORTAL_IFACE_GLOBAL_SHORTCUTS,
-        method == BOO_METHOD_CREATE_SESSION ? "CreateSession" : "BindShortcuts",
+        PORTAL_IFACE_GLOBAL_SHORTCUTS, method_name,
         payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_call_done, gs);
 
     g_free(request_path);

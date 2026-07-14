@@ -175,8 +175,10 @@ Boo can't do its job without these, and the failure mode is silent — it record
 | Permission | What breaks without it | When you're asked |
 |---|---|---|
 | **Microphone** | Everything | First launch |
-| **Accessibility** | Typing into apps (the ⌘V fallback) | First launch |
 | **Automation** → Ghostty | The Ghostty fast path; falls back to ⌘V | First dictation into Ghostty |
+| **Accessibility** | Auto-paste into apps other than Ghostty | First time it's actually needed |
+
+Boo asks for **Accessibility only when it first has to synthesize a ⌘V** — never at launch. Dictating into Ghostty uses its AppleScript API instead, so if that's all you do, you'll never see the "Boo would like to control this computer" prompt at all. Decline it and Boo still transcribes and copies to the clipboard; it just won't paste for you.
 
 Grant them under **System Settings → Privacy & Security**. If you dismissed a prompt, add Boo manually there.
 
@@ -190,7 +192,7 @@ Grant them under **System Settings → Privacy & Security**. If you dismissed a 
 | **GlobalShortcuts** portal | The Ctrl+Shift+Space hotkey | First launch |
 | **RemoteDesktop** portal | Auto-paste into other apps | First launch |
 
-Both portal grants persist across restarts (Boo stores a restore token), so you approve them once. Decline either and Boo stays usable — it just falls back to the Record button and clipboard-only.
+**You approve each of these exactly once, ever.** For auto-paste, Boo stores the portal's restore token and replays it. For the hotkey, it asks the portal what it already has (`ListShortcuts`) before asking to bind anything — so a shortcut approved on a previous run is reused silently rather than re-prompting you at every launch. Decline either and Boo stays usable: it falls back to the Record button and the clipboard.
 
 > ### ⚠️ The global hotkey needs GNOME 48+, KDE Plasma, or Hyprland
 >

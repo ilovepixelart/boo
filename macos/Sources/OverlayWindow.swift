@@ -461,6 +461,19 @@ class OverlayWindow: NSWindow {
             return
         }
 
+        // Everything below synthesizes a ⌘V keystroke, which needs Accessibility.
+        // Ask for it here — the first time it's actually required — rather than at
+        // launch: the Ghostty path above never needs it, so a Ghostty user should
+        // never see the "control this computer" prompt at all.
+        guard PermissionsManager.requestAccessibilityIfNeeded() else {
+            // Not granted (yet). The transcript is already on screen and about to
+            // be copied, so say what happened instead of silently doing nothing.
+            statusLabel.stringValue = "copied — grant Accessibility to auto-paste"
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return
+        }
+
         // Step 1: Put text on clipboard
         let pasteboard = NSPasteboard.general
         let oldContents = pasteboard.string(forType: .string)
