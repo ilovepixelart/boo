@@ -49,6 +49,8 @@ curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
 
 Then press **Ctrl+Shift+Space**, speak, and press it again.
 
+A single recording is capped at **10 minutes**: Boo stops on its own and transcribes what it captured, rather than growing without limit and then freezing inside whisper.
+
 On macOS, Boo needs **Microphone** and **Accessibility** permissions, plus **Automation** the first time it dictates into Ghostty. Without them it records fine and the text silently never arrives — see the [README](https://github.com/ilovepixelart/boo#permissions).
 
 ---
