@@ -121,8 +121,8 @@ static void test_global_shortcuts(void) {
     g_free(gs.session_handle);
 }
 
-// ListShortcuts is what lets Boo skip BindShortcuts — the call that raises the
-// approval dialog — when an earlier run already bound the shortcut.
+// ListShortcuts is what lets Boo skip BindShortcuts, the call that raises the
+// approval dialog, when an earlier run already bound the shortcut.
 static void test_already_bound(void) {
     g_print("ListShortcuts response:\n");
 
@@ -141,7 +141,7 @@ static void test_already_bound(void) {
     g_print("  ok  a different shortcut, or none, means we must still bind\n");
 }
 
-// The handle arrives as a plain string, not an object path — reading it with the
+// The handle arrives as a plain string, not an object path, reading it with the
 // wrong type would silently yield NULL and disable the hotkey.
 static void test_session_handle_lookup(void) {
     g_print("CreateSession response:\n");

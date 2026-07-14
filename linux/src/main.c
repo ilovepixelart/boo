@@ -1,4 +1,4 @@
-// Boo Linux apprt — entry point.
+// Boo Linux apprt, entry point.
 // Creates an AdwApplication, initializes the Boo Zig core, opens the overlay
 // window, and tears everything down on shutdown.
 //
@@ -20,7 +20,7 @@ typedef struct {
 // Pick a whisper model out of `dir`, or NULL if it holds none.
 //
 // Any of whisper.cpp's GGML models works, so this accepts any ggml-*.bin rather
-// than only the ggml-base.en.bin we happen to recommend — pinning the filename
+// than only the ggml-base.en.bin we happen to recommend, pinning the filename
 // meant a user who followed our own advice and fetched, say, large-v3-turbo
 // would be told no model was installed.
 static char *find_model_in(const char *dir) {
@@ -95,7 +95,7 @@ static char *model_install_hint(void) {
                                                           "share", "boo", "models", NULL);
 
     return g_strdup_printf(
-        "Boo needs a whisper model, which isn't bundled — they're 140 MB+.\n\n"
+        "Boo needs a whisper model, which isn't bundled, they're 140 MB+.\n\n"
         "Download one and relaunch:\n\n"
         "  mkdir -p %s\n"
         "  curl -L -o %s/ggml-base.en.bin \\\n"
@@ -114,13 +114,13 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
         show_error(GTK_APPLICATION(app), "No speech model found", hint);
         return;
     }
-    g_print("Boo 👻 — loading model: %s\n", model_path);
+    g_print("Boo 👻 loading model: %s\n", model_path);
 
     state->ctx = boo_init(model_path);
     if (!state->ctx) {
         g_autofree char *body = g_strdup_printf(
             "%s\n\nThe file exists but whisper could not read it. It may be "
-            "corrupt or truncated — try downloading it again.",
+            "corrupt or truncated, try downloading it again.",
             model_path);
         show_error(GTK_APPLICATION(app), "Could not load the model", body);
         return;

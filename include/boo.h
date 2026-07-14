@@ -27,9 +27,9 @@ const float *boo_get_waveform(BooContext *ctx, int *out_bars);
 float boo_get_peak_rms(BooContext *ctx);
 int boo_get_audio_samples(BooContext *ctx);
 
-// Transcription — returns null-terminated string owned by context.
+// Transcription, returns null-terminated string owned by context.
 // Valid until the next boo_start_recording(), boo_transcribe(), or
-// boo_deinit() — each of these frees the previous transcript.
+// boo_deinit(), each of these frees the previous transcript.
 const char *boo_transcribe(BooContext *ctx);
 
 #ifdef __cplusplus

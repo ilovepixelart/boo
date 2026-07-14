@@ -1,4 +1,4 @@
-# Python here is test-support only — the mock XDG portal that linux/tests/
+# Python here is test-support only, the mock XDG portal that linux/tests/
 # drives Boo's portal clients against. Ruff (Astral) is the formatter and linter.
 #   ruff format linux/tests
 #   ruff check linux/tests

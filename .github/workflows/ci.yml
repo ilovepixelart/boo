@@ -10,7 +10,7 @@ concurrency:
   group: ci-${{ github.ref }}
   # Only supersede runs on a PR branch. On master, cancelling means a commit can
   # land with its slowest job (the Linux build) killed mid-flight and therefore
-  # never actually verified — which is precisely how the Linux target stayed
+  # never actually verified, which is precisely how the Linux target stayed
   # broken while CI looked fine.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -71,7 +71,7 @@ jobs:
       - uses: astral-sh/ruff-action@v3
 
       - name: Shell (shellcheck + shfmt)
-        # A broken build/test harness fails quietly — an unquoted expansion or a
+        # A broken build/test harness fails quietly, an unquoted expansion or a
         # trap that expands too early is the kind of bug that makes a suite lie.
         run: |
           shellcheck -S warning bundle.sh scripts/*.sh linux/tests/*.sh
@@ -84,14 +84,14 @@ jobs:
         # build.zig.zon is the source of truth; catch any file that drifted.
         run: ./scripts/check-version.sh
 
-      - name: Python (ruff — Astral)
+      - name: Python (ruff, Astral)
         run: |
           ruff check linux/tests
           ruff format --check linux/tests
 
       - name: YAML (workflows + dependabot + flatpak)
-        # A malformed workflow or dependabot file fails silently — GitHub just
-        # ignores it — so lint them here rather than discover it isn't running.
+        # A malformed workflow or dependabot file fails silently, GitHub just
+        # ignores it, so lint them here rather than discover it isn't running.
         run: |
           pipx install yamllint
           yamllint -d '{extends: relaxed, rules: {line-length: disable}}' \
@@ -121,7 +121,7 @@ jobs:
 
       - name: Build GTK4 app
         # First real check that the Linux frontend compiles AND links against
-        # gtk4/libadwaita/pipewire — it cannot be linked on a macOS dev box.
+        # gtk4/libadwaita/pipewire, it cannot be linked on a macOS dev box.
         run: zig build app -Doptimize=ReleaseFast
 
       - name: Verify binary
@@ -138,7 +138,7 @@ jobs:
       - name: Portal integration tests
         # Runs both portal handshakes end to end against a live session bus.
         # This is what proves Boo's predicted Request path matches the one the
-        # portal replies on — get that wrong and Boo waits forever.
+        # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
 
   flatpak-metadata:
@@ -170,7 +170,7 @@ jobs:
       # Actually build the bundle. Metadata validation is not enough: it does
       # not check finish-args, so an invalid permission (e.g. a socket type
       # that does not exist) sails through --show-manifest and only blows up
-      # in a real build — after which the app would have shipped with no
+      # in a real build, after which the app would have shipped with no
       # access to what it asked for.
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:

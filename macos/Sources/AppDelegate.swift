@@ -16,7 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Microphone only. Accessibility is requested later, the first time a
-        // paste actually needs it — see PermissionsManager.
+        // paste actually needs it, see PermissionsManager.
         PermissionsManager.ensurePermissions()
 
         guard let modelPath = findModelPath() else {
@@ -33,7 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 \(modelPath)
 
                 The file exists but whisper could not read it. It may be corrupt \
-                or truncated — try downloading it again.
+                or truncated, try downloading it again.
                 """
             alert.alertStyle = .warning
             alert.runModal()
@@ -95,7 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem?.menu = menu
 
-        // Status bar updates — only poll when recording/transcribing
+        // Status bar updates, only poll when recording/transcribing
         NotificationCenter.default.addObserver(
             self, selector: #selector(recordingStateChanged), name: .booRecordingStarted, object: nil)
         NotificationCenter.default.addObserver(
@@ -112,7 +112,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Red waveform plus a live timer.
             button.image = NSImage(
                 systemSymbolName: "waveform",
-                accessibilityDescription: "Boo — recording")
+                accessibilityDescription: "Boo, recording")
             button.contentTintColor = .systemRed
 
             let totalSecs = Int(Float(boo_get_audio_samples(ctx)) / 16000.0)
@@ -126,7 +126,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // happened.
             button.image = NSImage(
                 systemSymbolName: "waveform.badge.magnifyingglass",
-                accessibilityDescription: "Boo — transcribing")
+                accessibilityDescription: "Boo, transcribing")
             button.contentTintColor = .secondaryLabelColor
             button.title = ""
         } else {
@@ -239,7 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Find a whisper model.
     ///
     /// Any of whisper.cpp's GGML models works, so this accepts any `ggml-*.bin`
-    /// rather than only the `ggml-base.en.bin` we happen to recommend — pinning
+    /// rather than only the `ggml-base.en.bin` we happen to recommend, pinning
     /// the filename meant a user who followed our own advice and downloaded, say,
     /// large-v3-turbo would be told no model was installed.
     ///
@@ -275,7 +275,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "No speech model found"
         alert.informativeText = """
-            Boo needs a whisper model, which isn't bundled — they're 140 MB+.
+            Boo needs a whisper model, which isn't bundled, they're 140 MB+.
 
             Download one into ~/.boo/models/ and relaunch:
 

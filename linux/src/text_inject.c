@@ -1,17 +1,17 @@
-// XDG RemoteDesktop portal client — synthesizes the paste chord.
+// XDG RemoteDesktop portal client, synthesizes the paste chord.
 //
 // Session setup is a three-step Request/Response chain:
 //
 //   CreateSession -> SelectDevices(KEYBOARD, persist) -> Start
 //
 // after which NotifyKeyboardKeysym() calls are plain fire-and-forget methods on
-// the session. The Request/Response plumbing — including the subscribe-before-
-// call dance the protocol requires — lives in portal.c, shared with the
+// the session. The Request/Response plumbing, including the subscribe-before-
+// call dance the protocol requires, lives in portal.c, shared with the
 // GlobalShortcuts client.
 //
 // Persistence: SelectDevices asks for persist_mode=2 ("until revoked") and
 // replays the restore token from the previous run, so the user sees the portal
-// permission dialog exactly once, ever. Tokens are single-use — every Start
+// permission dialog exactly once, ever. Tokens are single-use, every Start
 // response carries a fresh one, which we write back to disk each time.
 //
 // See:
@@ -30,7 +30,7 @@
 #define KEY_PRESSED  1u
 #define KEY_RELEASED 0u
 
-// X11 keysyms — the portal resolves these against the active layout. Every
+// X11 keysyms, the portal resolves these against the active layout. Every
 // layout can produce Control, Shift, and the letter V, which is the whole point
 // of pasting instead of typing out each character.
 #define XKS_CONTROL_L 0xffe3
@@ -40,7 +40,7 @@
 // Wayland clipboard offers propagate through the compositor asynchronously; if
 // the paste keystroke beats the new offer, the target pastes stale data. A small
 // fixed delay after the caller sets the clipboard is the same mitigation every
-// injection tool uses — there is no "offer is visible to peers" event.
+// injection tool uses, there is no "offer is visible to peers" event.
 #define PASTE_DELAY_MS 75
 
 typedef enum {
@@ -63,7 +63,7 @@ struct BooTextInject {
 };
 
 // ---------------------------------------------------------------------------
-// Restore token — what turns the second launch into a silent one
+// Restore token, what turns the second launch into a silent one
 
 static char *token_path(void) {
     return g_build_filename(g_get_user_state_dir(), "boo", "remote-desktop-token", NULL);
@@ -90,7 +90,7 @@ static void save_restore_token(const char *token) {
     // 0600, not g_file_set_contents' default 0644. This token is a capability:
     // it restores a RemoteDesktop session that can synthesize keyboard input
     // into the user's desktop. It has no business being world-readable, and it
-    // outlives the process — it is the whole point that it persists.
+    // outlives the process, it is the whole point that it persists.
     g_autoptr(GError) error = NULL;
     if (!g_file_set_contents_full(path, token, -1, G_FILE_SET_CONTENTS_CONSISTENT, 0600,
                                   &error)) {
@@ -140,7 +140,7 @@ static void request(BooTextInject *ti, BooInjectState step);
 static void fail(BooTextInject *ti, const char *why) {
     ti->state = BOO_INJECT_FAILED;
     ti->pending_paste = FALSE;
-    g_message("Boo: auto-paste disabled — %s. The transcript is still copied "
+    g_message("Boo: auto-paste disabled: %s. The transcript is still copied "
               "to the clipboard.",
               why);
 }
@@ -194,7 +194,7 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
     BooTextInject *ti = user_data;
 
     if (response != 0) {
-        // A stale restore token can sour the whole chain, so drop it — the next
+        // A stale restore token can sour the whole chain, so drop it, the next
         // run then gets a fresh permission dialog instead of failing forever.
         clear_restore_token();
         fail(ti, response == 1 ? "permission was declined" : "the portal request failed");
@@ -275,7 +275,7 @@ BooTextInject *boo_text_inject_new(GtkWindow *parent_window) {
     GDBusConnection *dbus = app ? g_application_get_dbus_connection(app) : NULL;
 
     if (!dbus) {
-        g_message("Boo: no session bus — auto-paste disabled");
+        g_message("Boo: no session bus, so auto-paste is disabled");
         return ti;
     }
 

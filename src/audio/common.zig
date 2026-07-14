@@ -11,7 +11,7 @@ pub const PEAK_DECAY_FACTOR: f32 = 0.995; // ~1s half-life
 /// Hard cap on a single recording.
 ///
 /// The capture buffer is otherwise unbounded (~3.8MB/min), and boo_transcribe
-/// runs whisper synchronously over the whole of it — so a recording left running
+/// runs whisper synchronously over the whole of it, so a recording left running
 /// by accident would balloon memory and then freeze the app for minutes. On
 /// reaching the cap the backend simply stops capturing; the frontends poll
 /// boo_is_recording(), notice, and transcribe what was captured. Nothing is
@@ -29,7 +29,7 @@ pub fn samplesUntilCap(captured: usize, incoming: usize) usize {
 }
 
 // pthread-backed mutex. `std.Thread.Mutex` was removed in Zig 0.16 in favor of
-// `std.Io.Mutex`, which threads an Io context through every call site — too
+// `std.Io.Mutex`, which threads an Io context through every call site, too
 // invasive for our audio callback path. pthread works on macOS and Linux alike.
 pub const Mutex = struct {
     handle: std.c.pthread_mutex_t = .{},
@@ -86,8 +86,8 @@ pub fn updatePeakRms(peak: *f32, waveform: *const [WAVEFORM_BARS]f32) void {
 /// them, and the rules for what happens to an incoming block of samples.
 ///
 /// CoreAudio and PipeWire differ only in how they open a device and hand us
-/// audio. Everything after that — preroll, the recording cap, the waveform, the
-/// mutex discipline — is identical, and when it was written out twice the two
+/// audio. Everything after that, preroll, the recording cap, the waveform, the
+/// mutex discipline, is identical, and when it was written out twice the two
 /// copies drifted: one backend gained an errdefer the other never got, and
 /// leaked. So it lives here once.
 ///
@@ -140,7 +140,7 @@ pub const Capture = struct {
 
     /// Take a block of samples from the audio thread.
     ///
-    /// While recording they land in the take, up to MAX_RECORDING_SAMPLES —
+    /// While recording they land in the take, up to MAX_RECORDING_SAMPLES ,
     /// after which capture simply stops and the frontend, which polls
     /// isRecording(), transcribes what it has. Otherwise they roll through the
     /// preroll ring, so warm-up audio is there when recording starts.
@@ -164,9 +164,9 @@ pub const Capture = struct {
             updatePeakRms(&self.peak_rms, &self.waveform);
         }
 
-        // Stopping the device from inside its own callback is unsafe — on
+        // Stopping the device from inside its own callback is unsafe, on
         // PipeWire it would deadlock on the thread-loop lock we are already
-        // under — so just drop the flag and let the frontend finish up.
+        // under, so just drop the flag and let the frontend finish up.
         if (self.audio_buf.items.len >= MAX_RECORDING_SAMPLES) {
             self.recording = false;
         }
@@ -236,7 +236,7 @@ test "computeWaveform: clamps, so a loud burst cannot overdraw the UI" {
 
 test "computeWaveform: shows only the most recent 500ms" {
     // Three seconds of loud audio followed by half a second of silence must
-    // display as silence — otherwise the meter lags behind what's being said.
+    // display as silence, otherwise the meter lags behind what's being said.
     const window = WHISPER_SAMPLE_RATE / 2;
     var samples: [WHISPER_SAMPLE_RATE * 3]f32 = .{0.8} ** (WHISPER_SAMPLE_RATE * 3);
     @memset(samples[samples.len - window ..], 0.0);
@@ -284,7 +284,7 @@ test "samplesUntilCap: refuses everything once full" {
 
 test "the recording cap is a sane duration" {
     try testing.expectEqual(@as(usize, 600), MAX_RECORDING_SECONDS);
-    // ~38MB of f32 — bounded, and small enough that whisper still finishes.
+    // ~38MB of f32, bounded, and small enough that whisper still finishes.
     try testing.expectEqual(@as(usize, 9_600_000), MAX_RECORDING_SAMPLES);
 }
 
@@ -300,7 +300,7 @@ test "Capture: warm-up audio is kept, so the first word isn't clipped" {
     cap.push(&warm);
     try testing.expectEqual(@as(usize, 0), cap.sampleCount());
 
-    // Hitting record must carry that preroll into the take — it holds the
+    // Hitting record must carry that preroll into the take, it holds the
     // beginning of the first word.
     cap.begin();
     try testing.expectEqual(@as(usize, 1000), cap.sampleCount());
@@ -310,7 +310,7 @@ test "Capture: the preroll is a ring, not an unbounded buffer" {
     var cap: Capture = .{ .allocator = testing.allocator };
     defer cap.deinit();
 
-    // Idle for a long time — far more than the preroll window.
+    // Idle for a long time, far more than the preroll window.
     const block = [_]f32{0.1} ** 4000;
     for (0..10) |_| cap.push(&block);
 

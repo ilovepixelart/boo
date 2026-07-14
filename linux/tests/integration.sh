@@ -1,7 +1,7 @@
 #!/bin/bash
 # Drives Boo's XDG portal clients against a live session bus.
 #
-# Linux only — it needs a real D-Bus. Run it in CI, in a container, or on a
+# Linux only, it needs a real D-Bus. Run it in CI, in a container, or on a
 # Linux desktop:
 #
 #   ./linux/tests/integration.sh
@@ -14,14 +14,14 @@
 #
 # The mock derives the Request object path independently, exactly as a real
 # portal does. Boo predicts the same path and subscribes to it *before* calling.
-# If that prediction were wrong Boo would never see a Response and would hang —
+# If that prediction were wrong Boo would never see a Response and would hang ,
 # so a pass here is what proves the prediction correct.
 #
 # Needs: xvfb, dbus-x11, python3-gi, gtk4, libadwaita.
 #
 # No `set -e`: the assertions below report which check failed and why, which is
 # far more useful than the script vanishing on the first non-zero exit. But
-# `pipefail` matters — without it a failing command inside a pipeline is masked
+# `pipefail` matters, without it a failing command inside a pipeline is masked
 # by a succeeding one, and a test that cannot fail is worse than no test.
 set -uo pipefail
 
@@ -49,7 +49,7 @@ echo "[integration] session bus up"
 python3 "$TESTS/mock_portal.py" >"$WORK/events.jsonl" 2>"$WORK/portal.err" &
 PORTAL=$!
 
-# Wait for a condition rather than sleeping a guessed interval — a fixed sleep is
+# Wait for a condition rather than sleeping a guessed interval, a fixed sleep is
 # how a suite starts failing intermittently on a loaded CI runner.
 wait_for() {
     local pattern="$1" what="$2" deadline=$((SECONDS + 30))
@@ -126,7 +126,7 @@ EXPECT="65507:1 65505:1 118:1 118:0 65505:0 65507:0"
 [ "$CHORD" = "$EXPECT" ] || fail "paste chord was [$CHORD], expected [$EXPECT]"
 echo "[integration] paste chord correct: Ctrl+Shift+V, press/release ordered"
 
-echo "[integration] PASS — both portal handshakes completed against a live bus"
+echo "[integration] PASS, both portal handshakes completed against a live bus"
 
 # ── Second launch: the shortcut is already bound, so Boo must NOT call
 # BindShortcuts again. That call is what raises the approval dialog, so
@@ -163,7 +163,7 @@ grep -q '"event": "gs.ListShortcuts"' <<<"$EVENTS2" ||
     fail "second launch did not call ListShortcuts"
 
 if grep -q '"event": "gs.BindShortcuts"' <<<"$EVENTS2"; then
-    fail "second launch called BindShortcuts again — the user would be re-prompted"
+    fail "second launch called BindShortcuts again, the user would be re-prompted"
 fi
 
-echo "[integration] PASS — already-bound shortcut is reused, so no approval dialog"
+echo "[integration] PASS, already-bound shortcut is reused, so no approval dialog"

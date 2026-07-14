@@ -1,11 +1,11 @@
-// XDG GlobalShortcuts portal client — the Ctrl+Shift+Space hotkey.
+// XDG GlobalShortcuts portal client, the Ctrl+Shift+Space hotkey.
 //
 // The chain is:
 //
 //   CreateSession -> ListShortcuts -> BindShortcuts (only if not already bound)
 //
-// then Activated signals arrive on the session. The Request/Response plumbing —
-// including the subscribe-before-call dance the protocol requires — lives in
+// then Activated signals arrive on the session. The Request/Response plumbing ,
+// including the subscribe-before-call dance the protocol requires, lives in
 // portal.c, shared with the RemoteDesktop client.
 //
 // ListShortcuts is not an optimisation. BindShortcuts is the call that raises the
@@ -56,7 +56,7 @@ static void report_unavailable(BooGlobalShortcut *gs, const char *reason) {
     if (!gs || gs->reported_unavailable) return;
     gs->reported_unavailable = TRUE;
 
-    g_message("Boo: global shortcut unavailable — %s", reason);
+    g_message("Boo: global shortcut unavailable: %s", reason);
     if (gs->on_unavailable) gs->on_unavailable(reason, gs->user_data);
 }
 
@@ -71,13 +71,13 @@ static void on_activated(GDBusConnection *dbus, const char *sender,
     (void)signal;
     BooGlobalShortcut *gs = user_data;
 
-    // (osa{sv}) — child 1 is the ID of the shortcut that fired.
+    // (osa{sv}), child 1 is the ID of the shortcut that fired.
     const char *shortcut_id = NULL;
     g_variant_get_child(params, 1, "&s", &shortcut_id);
     if (!shortcut_id || !g_str_equal(shortcut_id, BOO_SHORTCUT_ID)) return;
 
-    // Signals dispatch on the main context we subscribed from — the GTK main
-    // loop — so touching the UI from here is safe.
+    // Signals dispatch on the main context we subscribed from, the GTK main
+    // loop, so touching the UI from here is safe.
     if (gs->on_activated) gs->on_activated(gs->user_data);
 }
 
@@ -172,7 +172,7 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
         if (already_bound(results)) {
             // Skipping BindShortcuts is the whole point: it is the call that
             // raises the approval dialog.
-            g_debug("Boo: shortcut already bound — no dialog needed");
+            g_debug("Boo: shortcut already bound, no dialog needed");
         } else {
             request(gs, BOO_GS_BIND_SHORTCUTS);
         }

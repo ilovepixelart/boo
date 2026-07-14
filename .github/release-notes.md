@@ -4,7 +4,7 @@
 |---|---|
 | `Boo-<ver>-arm64.dmg` | macOS, Apple Silicon |
 | `Boo-<ver>-x86_64.dmg` | macOS, Intel |
-| `boo-<ver>-x86_64.flatpak` | Linux, x86_64 — **preview, see below** |
+| `boo-<ver>-x86_64.flatpak` | Linux, x86_64, **preview, see below** |
 | `SHA256SUMS` | checksums for the above |
 
 **Verify your download** (these builds aren't notarized, so this is your integrity check):
@@ -23,9 +23,9 @@ xattr -dr com.apple.quarantine /Applications/Boo.app
 
 …or double-click Boo, dismiss the dialog, then **System Settings → Privacy & Security → Open Anyway** (that button only shows for about an hour after the blocked launch).
 
-Control-click → Open does **not** work — [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa).
+Control-click → Open does **not** work, [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa).
 
-### Linux — preview, and please read this
+### Linux, preview, and please read this
 
 ```sh
 flatpak install --user boo-<ver>-x86_64.flatpak
@@ -60,6 +60,6 @@ Then press **Ctrl+Shift+Space**, speak, and press it again.
 
 A single recording is capped at **10 minutes**: Boo stops on its own and transcribes what it captured, rather than growing without limit and then freezing inside whisper.
 
-On macOS, Boo needs **Microphone** and **Accessibility** permissions, plus **Automation** the first time it dictates into Ghostty. Without them it records fine and the text silently never arrives — see the [README](https://github.com/ilovepixelart/boo#permissions).
+On macOS, Boo needs **Microphone** and **Accessibility** permissions, plus **Automation** the first time it dictates into Ghostty. Without them it records fine and the text silently never arrives. See the [README](https://github.com/ilovepixelart/boo#permissions).
 
 ---

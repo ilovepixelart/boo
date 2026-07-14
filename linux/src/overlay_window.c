@@ -1,4 +1,4 @@
-// Boo overlay window — record button, waveform display, transcript.
+// Boo overlay window, record button, waveform display, transcript.
 // Transcription runs on a worker thread (boo_transcribe is synchronous) and
 // updates the UI back on the main loop via g_idle_add. The result is auto-
 // copied to the system clipboard and announced via an AdwToast.
@@ -76,7 +76,7 @@ static gboolean transcribe_done(gpointer user_data) {
         copy_to_clipboard(state, res->text);
         show_toast(state, "Copied to clipboard");
         // When dictation was triggered by the global hotkey, focus stayed in
-        // the target app — auto-paste there. When our own window is focused
+        // the target app, auto-paste there. When our own window is focused
         // (Record button click), pasting would land back in Boo; skip it.
         if (!gtk_window_is_active(state->window)) {
             boo_text_inject_paste(state->inject);
@@ -117,7 +117,7 @@ static void begin_transcription(WindowState *state) {
 }
 
 // The core stops capturing by itself once a recording hits MAX_RECORDING_SECONDS
-// (see src/audio/common.zig) — it can't finish the job from inside the audio
+// (see src/audio/common.zig), it can't finish the job from inside the audio
 // callback. Poll for that and wrap up as though the user had pressed stop.
 static gboolean check_auto_stop(gpointer data) {
     WindowState *state = data;
@@ -156,7 +156,7 @@ static void on_shortcut_activated(gpointer user_data) {
     toggle_recording(user_data);
 }
 
-// The hotkey couldn't be registered — most often because the desktop has no
+// The hotkey couldn't be registered, most often because the desktop has no
 // GlobalShortcuts portal at all (GNOME only gained one in 48, so Ubuntu 24.04's
 // GNOME 46 has none). Say so, rather than leaving the user pressing a key that
 // does nothing.

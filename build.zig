@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     // _GNU_SOURCE is required on Linux: ggml.c pins threads with CPU_ZERO,
     // CPU_ALLOC, pthread_setaffinity_np and getcpu, and glibc only declares
     // those behind it. Without it every ggml build fails with "call to
-    // undeclared function". macOS never sees this — the affinity code is
+    // undeclared function". macOS never sees this, the affinity code is
     // Linux-only.
     const c_flags_other = &[_][]const u8{ "-DNDEBUG", "-O2", "-pthread", "-D_GNU_SOURCE" };
     const c_flags: []const []const u8 = if (target_os == .macos) c_flags_macos else c_flags_other;
@@ -97,7 +97,7 @@ pub fn build(b: *std.Build) void {
         });
         linux_app.root_module.linkLibrary(boo_lib);
         linux_app.root_module.linkLibrary(whisper_lib);
-        // Link flags only — the C glue is already inside boo_lib's archive.
+        // Link flags only, the C glue is already inside boo_lib's archive.
         linkAudioSystemDepsOnly(linux_app.root_module, target_os);
         // libadwaita-1 pulls gtk4, glib, gobject, gio, cairo transitively via pkg-config.
         linux_app.root_module.linkSystemLibrary("libadwaita-1", .{});
@@ -128,7 +128,7 @@ pub fn build(b: *std.Build) void {
             },
         });
         // The flatpak manifest runs `zig build app --prefix $FLATPAK_DEST` and
-        // expects bin/boo-app to be installed — so the app step must depend on
+        // expects bin/boo-app to be installed, so the app step must depend on
         // the install, not just the compile.
         const install_linux_app = b.addInstallArtifact(linux_app, .{});
         b.getInstallStep().dependOn(&install_linux_app.step);
@@ -143,7 +143,7 @@ pub fn build(b: *std.Build) void {
 
         // Zig's archiver emits Mach-O members without the 8-byte alignment
         // Apple's ld requires, and linkLibrary does not merge whisper's
-        // objects into libboo-core.a — so repack libwhisper.a the same way
+        // objects into libboo-core.a, so repack libwhisper.a the same way
         // scripts/build-zig-libs.sh does for the Xcode path: extract, merge
         // via `ld -r` into one aligned object, re-archive.
         const macos_arch = switch (target.result.cpu.arch) {

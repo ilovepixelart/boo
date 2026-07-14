@@ -26,7 +26,7 @@ class WaveformView: NSView {
         elapsed += Float(now - lastUpdate)
         lastUpdate = now
 
-        // Smooth waveform — Apple uses very smooth transitions
+        // Smooth waveform, Apple uses very smooth transitions
         let lerp: Float = isRecording ? 0.25 : 0.1
         for i in 0..<min(smoothed.count, waveform.count) {
             smoothed[i] += (waveform[i] - smoothed[i]) * lerp
@@ -65,26 +65,26 @@ class WaveformView: NSView {
             var alpha: CGFloat
 
             if isRecording {
-                // Normalize by peak — always fills the space when speaking
+                // Normalize by peak, always fills the space when speaking
                 let norm = peakRms > 0.001 ? min(amplitude / CGFloat(peakRms), 1.0) : 0
                 height = max(norm * maxHeight, minHeight)
-                // Smooth alpha gradient — center bars slightly brighter (Apple Siri style)
+                // Smooth alpha gradient, center bars slightly brighter (Apple Siri style)
                 let centerFactor = 1.0 - abs(CGFloat(i) / CGFloat(barCount) - 0.5) * 0.4
                 alpha = (0.3 + norm * 0.7) * centerFactor
             } else if isTranscribing {
-                // Gentle breathing wave — Apple-style smooth sine
+                // Gentle breathing wave, Apple-style smooth sine
                 let phase = elapsed * 2.0 + Float(i) * 0.12
                 let wave = (sin(phase) + 1) / 2  // 0..1
                 height = CGFloat(wave) * maxHeight * 0.25 + minHeight
                 let centerFactor = 1.0 - abs(CGFloat(i) / CGFloat(barCount) - 0.5) * 0.6
                 alpha = (0.2 + CGFloat(wave) * 0.4) * centerFactor
             } else {
-                // Idle — subtle equal bars, very minimal
+                // Idle, subtle equal bars, very minimal
                 height = minHeight
                 alpha = 0.2
             }
 
-            // Draw rounded bar from center — Apple's symmetric waveform style
+            // Draw rounded bar from center, Apple's symmetric waveform style
             let halfH = height / 2
             let rect = CGRect(
                 x: x,

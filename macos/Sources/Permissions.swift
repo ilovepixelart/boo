@@ -4,14 +4,14 @@ import Cocoa
 
 enum PermissionsManager {
 
-    /// Ask only for what Boo cannot work without — the microphone.
+    /// Ask only for what Boo cannot work without, the microphone.
     ///
     /// Accessibility is deliberately NOT requested here. It is needed solely to
     /// synthesize the ⌘V fallback paste, and plenty of sessions never reach that
     /// path: dictating into Ghostty goes through its AppleScript API instead, and
     /// auto-type can be switched off entirely. Prompting up front showed everyone
     /// a "Boo would like to control this computer" dialog for a capability they
-    /// might never use — the most alarming prompt we have, asked first, for no
+    /// might never use, the most alarming prompt we have, asked first, for no
     /// reason. It is now requested at the moment it is first actually needed.
     static func ensurePermissions() {
         requestMicrophone()
@@ -19,7 +19,7 @@ enum PermissionsManager {
 
     // MARK: - Accessibility (only for the ⌘V fallback paste)
 
-    /// Is Accessibility already granted? Never prompts — safe to call on a timer.
+    /// Is Accessibility already granted? Never prompts, safe to call on a timer.
     static var hasAccessibility: Bool {
         AXIsProcessTrusted()
     }
@@ -30,7 +30,7 @@ enum PermissionsManager {
     /// Ensure Accessibility, prompting **at most once per launch**.
     ///
     /// The subtlety that bit us: `AXIsProcessTrustedWithOptions` with the prompt
-    /// option shows the system dialog *every* time it's called while untrusted —
+    /// option shows the system dialog *every* time it's called while untrusted ,
     /// not just the first. Since this is called on every fallback paste, calling
     /// the prompting variant each time meant a permission dialog on every single
     /// recording. So prompt once; after that, only the non-prompting check runs,
@@ -47,7 +47,7 @@ enum PermissionsManager {
         return false
     }
 
-    // MARK: - Microphone (required — Boo does nothing without it)
+    // MARK: - Microphone (required, Boo does nothing without it)
 
     private static func requestMicrophone() {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {

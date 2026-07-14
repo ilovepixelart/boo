@@ -23,7 +23,7 @@ cp "$PROJ/assets/boo.icns" "$RESOURCES/boo.icns"
 # Metal shader + headers for GPU-accelerated whisper inference
 cp "$PROJ/assets/ggml-metal.metal" "$RESOURCES/ggml-metal.metal" 2>/dev/null || true
 cp "$PROJ/assets/ggml-common.h" "$RESOURCES/ggml-common.h" 2>/dev/null || true
-# Themes — ThemeManager looks for Resources/themes in bundles
+# Themes, ThemeManager looks for Resources/themes in bundles
 cp -R "$PROJ/themes" "$RESOURCES/themes"
 
 cat >"$CONTENTS/Info.plist" <<'EOF'

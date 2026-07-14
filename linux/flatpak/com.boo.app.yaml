@@ -12,7 +12,7 @@
 # to ~/.var/app/com.boo.app/data).
 #
 # Zig tarball sha256s below are the published ones from
-# https://ziglang.org/download/index.json — re-check them when bumping Zig.
+# https://ziglang.org/download/index.json, re-check them when bumping Zig.
 
 app-id: com.boo.app
 runtime: org.gnome.Platform
@@ -27,19 +27,19 @@ finish-args:
   - --share=ipc
   - --device=dri
   # Audio capture. Boo speaks PipeWire natively rather than through the
-  # PulseAudio shim, and flatpak has no `--socket=pipewire` — the PipeWire
+  # PulseAudio shim, and flatpak has no `--socket=pipewire`, the PipeWire
   # socket is exposed as a filesystem path instead.
   - --filesystem=xdg-run/pipewire-0
   # Persistent storage for the user's model file
   - --filesystem=xdg-data/boo:rw
-  # XDG portals we depend on. Only these — Boo's toasts are in-app (AdwToast),
+  # XDG portals we depend on. Only these, Boo's toasts are in-app (AdwToast),
   # so it needs no Notification portal, and it talks to nothing else.
   - --talk-name=org.freedesktop.portal.GlobalShortcuts
   # Auto-paste keystroke synthesis (one-time user grant, persisted)
   - --talk-name=org.freedesktop.portal.RemoteDesktop
 
 modules:
-  # Zig 0.16 toolchain — not in the GNOME SDK, so we vendor it.
+  # Zig 0.16 toolchain, not in the GNOME SDK, so we vendor it.
   - name: zig-x86_64
     buildsystem: simple
     only-arches: [x86_64]
@@ -74,7 +74,7 @@ modules:
     #
     # Flathub forbids this: a submission there must vendor whisper.cpp as a
     # declared `sources:` archive and build fully offline. That work is still to
-    # do — and note Zig 0.16 changed its offline-package mechanism from the
+    # do, and note Zig 0.16 changed its offline-package mechanism from the
     # `--system <p-dir>` layout older guides (and Ghostty) use, so it needs
     # working out against 0.16 rather than copying an older recipe.
     #

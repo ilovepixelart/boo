@@ -3,7 +3,7 @@
 [![CI](https://github.com/ilovepixelart/boo/actions/workflows/ci.yml/badge.svg)](https://github.com/ilovepixelart/boo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Local-first speech-to-text overlay for **macOS** and **Linux**. Press a hotkey, speak, get text — your audio never leaves the machine.
+Local-first speech-to-text overlay for **macOS** and **Linux**. Press a hotkey, speak, get text, your audio never leaves the machine.
 
 ```
               C API (include/boo.h)
@@ -19,9 +19,9 @@ Local-first speech-to-text overlay for **macOS** and **Linux**. Press a hotkey, 
 
 ## Why
 
-Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) on-device and ships a native frontend per platform — no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
+Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) on-device and ships a native frontend per platform, no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
 
-The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org/ghostty): a portable Zig core (`libboo-core`) exposed through a stable C API, plus a separate "apprt" (application runtime) per OS. Same philosophy — *cross-platform shouldn't mean foreign*.
+The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org/ghostty): a portable Zig core (`libboo-core`) exposed through a stable C API, plus a separate "apprt" (application runtime) per OS. Same philosophy, *cross-platform shouldn't mean foreign*.
 
 ## Status
 
@@ -40,8 +40,8 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - The restore token persists, so the permission prompt appears **once**, not every launch.
 
 **Verified against real desktop portal backends, not just the mock:**
-- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent** — the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface". Boo detects this and says so (see [Permissions](#permissions)).
-- **KDE Plasma**: its `xdg-desktop-portal-kde` manifest **does** declare GlobalShortcuts, and its backend serviced a real `CreateSession` (returning a proper Request path) — so the hotkey is a live capability there, unlike GNOME 46.
+- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent**, the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface". Boo detects this and says so (see [Permissions](#permissions)).
+- **KDE Plasma**: its `xdg-desktop-portal-kde` manifest **does** declare GlobalShortcuts, and its backend serviced a real `CreateSession` (returning a proper Request path), so the hotkey is a live capability there, unlike GNOME 46.
 
 **Not verified:**
 - A full end-to-end hotkey *bind* on a live KDE/Hyprland session (KDE's Qt backend needs a real display, which a headless VM only partly provides). The interface is confirmed present and responsive; a human on real KDE hardware is the remaining check.
@@ -53,7 +53,7 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 
 ### macOS
 
-**1. Install.** Grab the `.dmg` for your Mac from [Releases](https://github.com/ilovepixelart/boo/releases) — `arm64` for Apple Silicon, `x86_64` for Intel — and drag Boo to Applications.
+**1. Install.** Grab the `.dmg` for your Mac from [Releases](https://github.com/ilovepixelart/boo/releases), `arm64` for Apple Silicon, `x86_64` for Intel, and drag Boo to Applications.
 
 Boo is **ad-hoc signed, not notarized** (notarization needs a paid Apple Developer ID). So on first launch macOS blocks it with:
 
@@ -65,11 +65,11 @@ That is expected. Clear the quarantine flag once, and it opens normally from the
 xattr -dr com.apple.quarantine /Applications/Boo.app
 ```
 
-Prefer not to run a shell command? Double-click Boo, dismiss the dialog, then go to **System Settings → Privacy & Security**, scroll to Security, and click **Open Anyway**. Note that button only appears for about an hour after the blocked launch — if you don't see it, double-click Boo again first.
+Prefer not to run a shell command? Double-click Boo, dismiss the dialog, then go to **System Settings → Privacy & Security**, scroll to Security, and click **Open Anyway**. Note that button only appears for about an hour after the blocked launch, if you don't see it, double-click Boo again first.
 
 > Control-clicking the app and choosing **Open** does **not** work: [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa). Most guides on the internet still tell you to do it.
 
-**2. Get a model.** Boo needs a `whisper.cpp` GGML model — none is bundled (they're 140 MB+). `base.en` is a good default:
+**2. Get a model.** Boo needs a `whisper.cpp` GGML model, none is bundled (they're 140 MB+). `base.en` is a good default:
 
 ```sh
 mkdir -p ~/.boo/models
@@ -79,13 +79,13 @@ curl -L -o ~/.boo/models/ggml-base.en.bin \
 
 Boo also checks `./models/` and, when run from a source checkout, the repo's own `models/`. See [Choosing a model](#choosing-a-model) for the alternatives.
 
-**3. Launch it and grant permissions.** Boo asks for the microphone on first launch, and for Accessibility (used to paste into apps). See [Permissions](#permissions) — if you skip these, Boo records but nothing lands anywhere.
+**3. Launch it and grant permissions.** Boo asks for the microphone on first launch, and for Accessibility (used to paste into apps). See [Permissions](#permissions). If you skip these, Boo records but nothing lands anywhere.
 
 **4. Dictate.** Focus any app, press **Ctrl+Shift+Space**, speak, press it again. The text appears where your cursor is.
 
 ### Linux (preview)
 
-> **Preview.** Recording, transcription and both portal grants are verified — but nobody has yet run Boo on a real GNOME/KDE desktop, so the grant dialogs you'll see are untested. See [Status](#status). Bug reports welcome.
+> **Preview.** Recording, transcription and both portal grants are verified, but nobody has yet run Boo on a real GNOME/KDE desktop, so the grant dialogs you'll see are untested. See [Status](#status). Bug reports welcome.
 
 ```sh
 flatpak install --user boo-<version>-x86_64.flatpak
@@ -105,26 +105,26 @@ Your desktop will ask once to allow the global shortcut, and once to allow remot
 
 ## Using Boo
 
-On macOS, Boo lives in the menu bar (a waveform icon) plus a small overlay window. On Linux it's a single window — the menu-bar item, settings dialog and theme picker are macOS-only for now.
+On macOS, Boo lives in the menu bar (a waveform icon) plus a small overlay window. On Linux it's a single window; the menu-bar item, settings dialog and theme picker are macOS-only for now.
 
 | Action | macOS | Linux |
 |---|---|---|
 | Start / stop dictation | **Ctrl+Shift+Space** | **Ctrl+Shift+Space** |
 | …from the app | Menu-bar icon, Record button, or waveform | Record button |
-| Recording elapsed time | Live timer in the menu bar | — |
+| Recording elapsed time | Live timer in the menu bar |, |
 | Past transcripts | Stack up in the window; click a bubble to copy | Last transcript shown |
-| Settings | **⌘,** | — |
+| Settings | **⌘,** |, |
 
-Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from — never itself — so triggering it from its own window still delivers the text to the right place.
+Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from, never itself, so triggering it from its own window still delivers the text to the right place.
 
-**Settings (⌘, — macOS)** has two things worth knowing:
+**Settings (⌘,, macOS)** has two things worth knowing:
 
-- **Auto-type** (on by default). Turn it off to make Boo clipboard-only — it will transcribe and copy, but never type into other apps.
-- **Theme** — 486 [Ghostty-format](https://ghostty.org) color themes, searchable. Defaults to Ghostty's own.
+- **Auto-type** (on by default). Turn it off to make Boo clipboard-only: it will transcribe and copy, but never type into other apps.
+- **Theme**, 486 [Ghostty-format](https://ghostty.org) color themes, searchable. Defaults to Ghostty's own.
 
 ## Choosing a model
 
-Any GGML model from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) works — 33 of them. Point Boo at one by dropping it in `~/.boo/models/`, or set `BOO_MODEL=/path/to/model.bin` (Linux).
+Any GGML model from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) works, 33 of them. Point Boo at one by dropping it in `~/.boo/models/`, or set `BOO_MODEL=/path/to/model.bin` (Linux).
 
 The ones worth knowing about:
 
@@ -136,7 +136,7 @@ The ones worth knowing about:
 | `ggml-small.en.bin` | 488 MB | Clearly better than base; still quick on Apple Silicon. |
 | `ggml-large-v3-turbo-q5_0.bin` | 574 MB | **Best accuracy per byte.** Multilingual, and far faster than large-v3. |
 
-The `.en` models are English-only. Everything else is multilingual — but see below, or they'll silently produce English.
+The `.en` models are English-only. Everything else is multilingual, but see below, or they'll silently produce English.
 
 ### Non-English dictation
 
@@ -147,22 +147,22 @@ BOO_LANG=de   boo-app      # German
 BOO_LANG=auto boo-app      # let whisper detect the language
 ```
 
-`BOO_LANG` has no effect on `.en` models — they can only ever produce English.
+`BOO_LANG` has no effect on `.en` models: they can only ever produce English.
 
 ## Ghostty integration
 
-Boo is a companion for [Ghostty](https://ghostty.org), and gets text into it differently on each platform — because Ghostty's capabilities differ sharply between the two.
+Boo is a companion for [Ghostty](https://ghostty.org), and gets text into it differently on each platform, because Ghostty's capabilities differ sharply between the two.
 
-**macOS — through Ghostty's own API.** Ghostty 1.3+ ships an AppleScript interface, and Boo uses it: `input text` writes straight into the focused terminal's pty. This is strictly better than synthesizing keystrokes:
+**macOS, through Ghostty's own API.** Ghostty 1.3+ ships an AppleScript interface, and Boo uses it: `input text` writes straight into the focused terminal's pty. This is strictly better than synthesizing keystrokes:
 
 - it never touches your clipboard;
-- it keeps working under **Secure Input** — the mode macOS enters at password prompts, which silently swallows synthesized keystrokes and breaks most dictation tools;
+- it keeps working under **Secure Input**, the mode macOS enters at password prompts, which silently swallows synthesized keystrokes and breaks most dictation tools;
 - it applies bracketed paste correctly and skips Ghostty's unsafe-paste confirmation;
 - it needs only the one-time **Automation** permission, not Accessibility.
 
 Everything else (older Ghostty, other apps) falls back to clipboard + ⌘V, which needs Accessibility.
 
-**Linux — through the clipboard, because Ghostty has no injection API there.** Its D-Bus surface only opens windows; there's no way to hand it text. So Boo copies the transcript and synthesizes a single `Ctrl+Shift+V` — Ghostty's default paste binding — via the XDG RemoteDesktop portal. This works in any app that pastes on `Ctrl+Shift+V`, on GNOME and KDE alike, inside or outside Flatpak.
+**Linux, through the clipboard, because Ghostty has no injection API there.** Its D-Bus surface only opens windows; there's no way to hand it text. So Boo copies the transcript and synthesizes a single `Ctrl+Shift+V`, Ghostty's default paste binding, via the XDG RemoteDesktop portal. This works in any app that pastes on `Ctrl+Shift+V`, on GNOME and KDE alike, inside or outside Flatpak.
 
 Boo pastes rather than types out each character on purpose: synthesized keystrokes are resolved against your active keyboard layout, so any character the layout can't produce (accents, smart quotes, em dashes) is silently dropped. One paste chord sidesteps that entirely.
 
@@ -170,7 +170,7 @@ One rough edge: on Linux, a transcript containing a newline can trip Ghostty's p
 
 ## Permissions
 
-Boo can't do its job without these, and the failure mode is silent — it records fine and the text simply never arrives.
+Boo can't do its job without these, and the failure mode is silent: it records fine and the text simply never arrives.
 
 **macOS**
 
@@ -180,13 +180,13 @@ Boo can't do its job without these, and the failure mode is silent — it record
 | **Automation** → Ghostty | The Ghostty fast path; falls back to ⌘V | First dictation into Ghostty |
 | **Accessibility** | Auto-paste into apps other than Ghostty | First time it's actually needed |
 
-Boo asks for **Accessibility only when it first has to synthesize a ⌘V** — never at launch. Dictating into Ghostty uses its AppleScript API instead, so if that's all you do, you'll never see the "Boo would like to control this computer" prompt at all. Decline it and Boo still transcribes and copies to the clipboard; it just won't paste for you.
+Boo asks for **Accessibility only when it first has to synthesize a ⌘V**, never at launch. Dictating into Ghostty uses its AppleScript API instead, so if that's all you do, you'll never see the "Boo would like to control this computer" prompt at all. Decline it and Boo still transcribes and copies to the clipboard; it just won't paste for you.
 
 Grant them under **System Settings → Privacy & Security**. If you dismissed a prompt, add Boo manually there.
 
 > **If you build from source:** ad-hoc signed builds get a *new code identity every rebuild*, so macOS treats each build as a different app and quietly drops the permissions you granted the last one. Symptom: dictation that worked yesterday silently stops typing. Re-grant, or sign with a stable identity (`BOO_CODESIGN_IDENTITY=... ./bundle.sh`).
 
-**Linux** — all mediated by portals, so you'll see desktop dialogs rather than a settings pane:
+**Linux**, all mediated by portals, so you'll see desktop dialogs rather than a settings pane:
 
 | Permission | What breaks without it | When you're asked |
 |---|---|---|
@@ -194,13 +194,13 @@ Grant them under **System Settings → Privacy & Security**. If you dismissed a 
 | **GlobalShortcuts** portal | The Ctrl+Shift+Space hotkey | First launch |
 | **RemoteDesktop** portal | Auto-paste into other apps | First launch |
 
-**You approve each of these exactly once, ever.** For auto-paste, Boo stores the portal's restore token and replays it. For the hotkey, it asks the portal what it already has (`ListShortcuts`) before asking to bind anything — so a shortcut approved on a previous run is reused silently rather than re-prompting you at every launch. Decline either and Boo stays usable: it falls back to the Record button and the clipboard.
+**You approve each of these exactly once, ever.** For auto-paste, Boo stores the portal's restore token and replays it. For the hotkey, it asks the portal what it already has (`ListShortcuts`) before asking to bind anything, so a shortcut approved on a previous run is reused silently rather than re-prompting you at every launch. Decline either and Boo stays usable: it falls back to the Record button and the clipboard.
 
 > ### ⚠️ The global hotkey needs GNOME 48+, KDE Plasma, or Hyprland
 >
-> GNOME only shipped a GlobalShortcuts portal backend in **version 48** (Feb 2025). On **GNOME 46 — which is what Ubuntu 24.04 LTS ships — and GNOME 47, the interface does not exist at all**, so no application can register a global hotkey, Boo included. Verified against a real GNOME 46 desktop: the D-Bus call comes back `No such interface "org.freedesktop.portal.GlobalShortcuts"`.
+> GNOME only shipped a GlobalShortcuts portal backend in **version 48** (Feb 2025). On **GNOME 46 (what Ubuntu 24.04 LTS ships) and GNOME 47, the interface does not exist at all**, so no application can register a global hotkey, Boo included. Verified against a real GNOME 46 desktop: the D-Bus call comes back `No such interface "org.freedesktop.portal.GlobalShortcuts"`.
 >
-> Boo detects this and tells you, rather than leaving you pressing a key that does nothing. **Auto-paste still works** — GNOME 46 does implement RemoteDesktop — so Boo remains fully usable from the Record button, and the transcript still lands in your focused app.
+> Boo detects this and tells you, rather than leaving you pressing a key that does nothing. **Auto-paste still works**, GNOME 46 does implement RemoteDesktop, so Boo remains fully usable from the Record button, and the transcript still lands in your focused app.
 >
 > Check yours with `gnome-shell --version`, or use KDE Plasma / Hyprland, which have had GlobalShortcuts for longer.
 
@@ -208,23 +208,23 @@ Note the hotkey is a *request*: the portal dialog lets you rebind it, and some d
 
 ## Troubleshooting
 
-**"Apple could not verify Boo is free of malware"** — expected; the app is ad-hoc signed rather than notarized. Run `xattr -dr com.apple.quarantine /Applications/Boo.app`, or use **System Settings → Privacy & Security → Open Anyway**. Control-click → Open does *not* work on macOS 15+.
+**"Apple could not verify Boo is free of malware"**, expected; the app is ad-hoc signed rather than notarized. Run `xattr -dr com.apple.quarantine /Applications/Boo.app`, or use **System Settings → Privacy & Security → Open Anyway**. Control-click → Open does *not* work on macOS 15+.
 
-**Recording works, but no text appears anywhere** — Accessibility isn't granted (macOS), or the RemoteDesktop portal was declined (Linux). The transcript is still on your clipboard, so paste it manually to confirm that's the issue.
+**Recording works, but no text appears anywhere**, Accessibility isn't granted (macOS), or the RemoteDesktop portal was declined (Linux). The transcript is still on your clipboard, so paste it manually to confirm that's the issue.
 
-**Text stopped appearing after I rebuilt** — see the ad-hoc signing note under [Permissions](#permissions). Re-grant Accessibility.
+**Text stopped appearing after I rebuilt**, see the ad-hoc signing note under [Permissions](#permissions). Re-grant Accessibility.
 
-**Nothing types at a `sudo` / password prompt** — macOS Secure Input blocks synthesized keystrokes by design. Dictating into **Ghostty** works anyway (it uses Ghostty's API, not keystrokes); other apps can't be worked around.
+**Nothing types at a `sudo` / password prompt**, macOS Secure Input blocks synthesized keystrokes by design. Dictating into **Ghostty** works anyway (it uses Ghostty's API, not keystrokes); other apps can't be worked around.
 
-**"Model not found"** — on macOS Boo looks in `~/.boo/models/`, `./models/`, and the repo checkout. On Linux it looks at `$BOO_MODEL`, `./models/`, `$XDG_DATA_HOME/boo/models/`, then `/usr/share/boo/models/`. Under Flatpak that means `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin`.
+**"Model not found"**, on macOS Boo looks in `~/.boo/models/`, `./models/`, and the repo checkout. On Linux it looks at `$BOO_MODEL`, `./models/`, `$XDG_DATA_HOME/boo/models/`, then `/usr/share/boo/models/`. Under Flatpak that means `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin`.
 
-**The hotkey does nothing (Linux)** — most likely your desktop has no GlobalShortcuts portal at all. GNOME only gained one in **48**, so on Ubuntu 24.04 LTS (GNOME 46) the hotkey cannot work for any app. Boo says so on launch. Everything else still works — use the Record button; the transcript is still pasted into your focused app. See [Permissions](#permissions). Otherwise: the grant was declined (restart Boo to be re-asked), or your desktop rebound the trigger, which it is free to do.
+**The hotkey does nothing (Linux)**, most likely your desktop has no GlobalShortcuts portal at all. GNOME only gained one in **48**, so on Ubuntu 24.04 LTS (GNOME 46) the hotkey cannot work for any app. Boo says so on launch. Everything else still works, use the Record button; the transcript is still pasted into your focused app. See [Permissions](#permissions). Otherwise: the grant was declined (restart Boo to be re-asked), or your desktop rebound the trigger, which it is free to do.
 
-**Boo records but the transcript is empty (Linux)** — most likely the known gap: audio capture is unverified on Linux (see [Status](#status)). Check Boo is picking up your default PipeWire source (`pactl info`, `wpctl status`). A bug report with your desktop, compositor and PipeWire version is genuinely useful.
+**Boo records but the transcript is empty (Linux)**, most likely the known gap: audio capture is unverified on Linux (see [Status](#status)). Check Boo is picking up your default PipeWire source (`pactl info`, `wpctl status`). A bug report with your desktop, compositor and PipeWire version is genuinely useful.
 
-**Transcripts are garbage** — `base.en` is small and English-only. Try a bigger model (`small`, `medium`), and check your input device is the mic you think it is.
+**Transcripts are garbage**, `base.en` is small and English-only. Try a bigger model (`small`, `medium`), and check your input device is the mic you think it is.
 
-## Build — macOS
+## Build, macOS
 
 ```sh
 brew install zig xcodegen
@@ -264,7 +264,7 @@ zig build app -Doptimize=ReleaseFast   # ReleaseFast required: Debug C objects
 open zig-out/Boo.app                   # swiftc's link step doesn't provide
 ```
 
-## Build — Linux
+## Build, Linux
 
 System packages (Debian/Ubuntu):
 
@@ -272,7 +272,7 @@ System packages (Debian/Ubuntu):
 sudo apt install libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev pkg-config
 ```
 
-Zig ≥ 0.16 is required (`build.zig.zon` enforces it) and distro packages lag —
+Zig ≥ 0.16 is required (`build.zig.zon` enforces it) and distro packages lag , 
 grab a tarball from [ziglang.org/download](https://ziglang.org/download/) or use
 `snap install zig --classic --beta`.
 
@@ -314,7 +314,7 @@ flatpak build-bundle repo boo.flatpak com.boo.app
 
 Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-15` → arm64, `macos-15-intel` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile) plus the Linux Flatpak, then publishes a GitHub Release with `SHA256SUMS`.
 
-To cut a release, edit the version in **`build.zig.zon`** (the single source of truth — `bundle.sh` derives from it) and add a `<release>` entry to the metainfo changelog. `macos/project.yml` also carries it for the Xcode dev build; `scripts/check-version.sh` runs in CI and fails if any of these drift. Then:
+To cut a release, edit the version in **`build.zig.zon`** (the single source of truth, `bundle.sh` derives from it) and add a `<release>` entry to the metainfo changelog. `macos/project.yml` also carries it for the Xcode dev build; `scripts/check-version.sh` runs in CI and fails if any of these drift. Then:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
@@ -323,25 +323,25 @@ git tag v0.1.0 && git push origin v0.1.0
 ## Tests
 
 ```sh
-zig build test                  # Zig core — audio maths + the C ABI contract
-./linux/tests/run.sh            # portal payloads — needs gtk4; runs on macOS too
-./linux/tests/integration.sh    # portal handshakes — Linux only, needs a D-Bus
-./linux/tests/audio.sh MODEL WAV  # PipeWire capture -> whisper — needs a real
+zig build test                  # Zig core, audio maths + the C ABI contract
+./linux/tests/run.sh            # portal payloads, needs gtk4; runs on macOS too
+./linux/tests/integration.sh    # portal handshakes, Linux only, needs a D-Bus
+./linux/tests/audio.sh MODEL WAV  # PipeWire capture -> whisper, needs a real
                                   # PipeWire graph, so a VM or desktop, NOT a
                                   # container (WirePlumber needs systemd-logind)
 ```
 
-**`zig build test`** covers the pure audio maths (waveform windowing, RMS, clamping, peak attack/decay) and the C ABI contract every frontend depends on: that a failed `boo_init` frees what it allocated, and that every entry point survives a null context — which a frontend whose init failed will absolutely hand it, since its timers and buttons keep firing regardless.
+**`zig build test`** covers the pure audio maths (waveform windowing, RMS, clamping, peak attack/decay) and the C ABI contract every frontend depends on: that a failed `boo_init` frees what it allocated, and that every entry point survives a null context, which a frontend whose init failed will absolutely hand it, since its timers and buttons keep firing regardless.
 
-The leak test earns its keep. `boo_init` returns an *optional*, and Zig's `errdefer` only fires on an **error** return — so its cleanup silently never ran, and a failure to open the microphone leaked the entire ~150 MB whisper model. Tested with a leak-checking allocator, so the regression fails the build rather than quietly bloating memory.
+The leak test earns its keep. `boo_init` returns an *optional*, and Zig's `errdefer` only fires on an **error** return, so its cleanup silently never ran, and a failure to open the microphone leaked the entire ~150 MB whisper model. Tested with a leak-checking allocator, so the regression fails the build rather than quietly bloating memory.
 
 **`run.sh`** checks the D-Bus payloads are well-formed. That matters more than it looks: GVariant format strings are parsed at *runtime*, so a malformed payload compiles cleanly and then aborts on a user's desktop.
 
 **`integration.sh`** runs both portal clients end to end against a live session bus, driven by a stand-in portal (`mock_portal.py`) that speaks the real Request/Response protocol. It asserts the hotkey is bound as `toggle-record`/`CTRL+SHIFT+space`, that an `Activated` signal reaches Boo's callback, that RemoteDesktop requests the keyboard with a persisted grant, and that a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`.
 
-Its real value is subtler. The portal's Request/Response protocol requires a client to *predict* the reply's object path and subscribe **before** issuing the call — subscribe after and you race the portal and lose the reply permanently. The mock derives that path independently, exactly as a real portal does, so a passing run proves Boo's prediction is correct. That bug is invisible to a compiler and impossible to reproduce on macOS.
+Its real value is subtler. The portal's Request/Response protocol requires a client to *predict* the reply's object path and subscribe **before** issuing the call, subscribe after and you race the portal and lose the reply permanently. The mock derives that path independently, exactly as a real portal does, so a passing run proves Boo's prediction is correct. That bug is invisible to a compiler and impossible to reproduce on macOS.
 
-**`audio.sh`** is the one that can't run in CI. It needs a real PipeWire graph, and WirePlumber — PipeWire's session manager — refuses to start without systemd-logind. In a container it dies, no nodes get linked, and Boo's stream captures nothing. So this wants a VM or a desktop:
+**`audio.sh`** is the one that can't run in CI. It needs a real PipeWire graph, and WirePlumber, PipeWire's session manager, refuses to start without systemd-logind. In a container it dies, no nodes get linked, and Boo's stream captures nothing. So this wants a VM or a desktop:
 
 ```sh
 brew install lima
@@ -350,13 +350,13 @@ limactl start --name=boo template://ubuntu-lts
 ./linux/tests/audio.sh ggml-base.en.bin speech.wav
 ```
 
-Given a WAV it builds a virtual microphone out of a null sink's monitor, plays the file into it, and asserts a transcript comes back — so it runs unattended. Given no WAV it records from your default source and you just speak.
+Given a WAV it builds a virtual microphone out of a null sink's monitor, plays the file into it, and asserts a transcript comes back, so it runs unattended. Given no WAV it records from your default source and you just speak.
 
-Still untested: the platform audio backends themselves (`coreaudio.zig`, `pipewire.zig`) have no unit tests — they're driven by hardware callbacks and are covered only end-to-end, by `audio.sh` and by actually using the app.
+Still untested: the platform audio backends themselves (`coreaudio.zig`, `pipewire.zig`) have no unit tests, they're driven by hardware callbacks and are covered only end-to-end, by `audio.sh` and by actually using the app.
 
-CI runs everything except `audio.sh` on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work — neither can be checked on a macOS dev box.
+CI runs everything except `audio.sh` on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work, neither can be checked on a macOS dev box.
 
-## Build — Zig core only (CLI test binary)
+## Build, Zig core only (CLI test binary)
 
 ```sh
 zig build run -- models/ggml-base.en.bin
@@ -377,7 +377,7 @@ src/                Zig core
   whisper.zig       whisper.cpp Zig wrapper
   c_api.zig         C ABI surface (consumed by frontends)
 
-include/boo.h       The C API contract — single source of truth
+include/boo.h       The C API contract, single source of truth
 
 macos/
   Sources/          Swift / AppKit
@@ -386,8 +386,8 @@ macos/
 
 linux/
   src/              C / GTK4 + libadwaita frontend
-    global_shortcut.c  GlobalShortcuts portal — the Ctrl+Shift+Space hotkey
-    text_inject.c      RemoteDesktop portal — synthesizes the paste chord
+    global_shortcut.c  GlobalShortcuts portal, the Ctrl+Shift+Space hotkey
+    text_inject.c      RemoteDesktop portal, synthesizes the paste chord
   tests/
     portal_payloads.c  D-Bus payload signatures (runs anywhere with gtk4)
     portal_harness.c   Drives both portal clients (Linux)
@@ -415,8 +415,8 @@ bundle.sh           macOS: ad-hoc / re-sign helper
 
 ## Security
 
-Boo has no network code — your audio never leaves the machine, and there's nothing to verify that against because there's nothing there. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
+Boo has no network code, your audio never leaves the machine, and there's nothing to verify that against because there's nothing there. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
 
 ## License
 
-[MIT](LICENSE) — same as whisper.cpp and Ghostty, the projects Boo stands on.
+[MIT](LICENSE), same as whisper.cpp and Ghostty, the projects Boo stands on.

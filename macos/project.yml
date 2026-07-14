@@ -4,7 +4,7 @@
 #
 # The Zig core (libboo-core.a + libwhisper.a) is built by a pre-build phase
 # that calls scripts/build-zig-libs.sh. Apple's `ld` rejects Zig-emitted
-# archives directly — the script handles the repack.
+# archives directly, the script handles the repack.
 
 name: Boo
 
@@ -50,7 +50,7 @@ targets:
           - -lwhisper
           - -lc++
         CODE_SIGN_ENTITLEMENTS: Boo.entitlements
-        # Tell Xcode where to find ggml-metal.metal at runtime — the Swift
+        # Tell Xcode where to find ggml-metal.metal at runtime, the Swift
         # AppDelegate sets GGML_METAL_PATH_RESOURCES to Resources/ at launch.
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
 
@@ -92,6 +92,6 @@ targets:
       - path: ../assets/boo.icns
       - path: ../assets/ggml-metal.metal
       - path: ../assets/ggml-common.h
-      # Folder reference — ThemeManager looks for Resources/themes in bundles.
+      # Folder reference, ThemeManager looks for Resources/themes in bundles.
       - path: ../themes
         type: folder

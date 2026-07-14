@@ -8,7 +8,7 @@ path.
 
 The point: this mock *independently derives* the request path from the caller's
 unique bus name and handle_token. Boo predicts the same path and subscribes to it
-before calling. If Boo's prediction were wrong — the classic portal bug — it would
+before calling. If Boo's prediction were wrong, the classic portal bug, it would
 never see a Response and would hang forever. A passing run therefore proves the
 prediction is right, which is exactly what cannot be checked on macOS.
 
@@ -100,7 +100,7 @@ def emit(event, **kw):
 
 
 def sanitize(sender):
-    """':1.42' -> '1_42' — the spec's object-path component rule."""
+    """':1.42' -> '1_42', the spec's object-path component rule."""
     return sender.lstrip(":").replace(".", "_")
 
 
@@ -111,7 +111,7 @@ class MockPortal:
         self.rd_session = None
         self.keysyms = []
         # Pretend a previous run already bound the shortcut. A real portal
-        # remembers bindings per app, so this is what a second launch sees —
+        # remembers bindings per app, so this is what a second launch sees ,
         # and Boo must then skip BindShortcuts, which is the call that raises
         # the approval dialog.
         self.prebound = prebound

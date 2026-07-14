@@ -130,7 +130,7 @@ class ThemeManager {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
 
-            // Split on first "=" only — "palette = 0=#hex" → key="palette", value="0=#hex"
+            // Split on first "=" only, "palette = 0=#hex" → key="palette", value="0=#hex"
             guard let eqIdx = trimmed.firstIndex(of: "=") else { continue }
             let key = trimmed[trimmed.startIndex..<eqIdx].trimmingCharacters(in: .whitespaces)
             let value = trimmed[trimmed.index(after: eqIdx)...].trimmingCharacters(in: .whitespaces)

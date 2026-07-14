@@ -14,7 +14,7 @@ fn silentLog(
 }
 
 /// Silence whisper.cpp's own logging. It is chatty on load and writes to
-/// stdout, which corrupts the Zig test runner's IPC stream — a passing test
+/// stdout, which corrupts the Zig test runner's IPC stream, a passing test
 /// binary then reports as a failed build step with no useful message.
 pub fn setLogSilent() void {
     c.whisper_log_set(silentLog, null);
@@ -41,14 +41,14 @@ pub const WhisperContext = struct {
     /// Defaults to English, because the model we tell people to fetch
     /// (ggml-base.en) is English-only. But whisper.cpp ships ~16 multilingual
     /// models too, and forcing "en" on those would transcribe German speech as
-    /// garbled English — so $BOO_LANG overrides it. Use a language code
+    /// garbled English, so $BOO_LANG overrides it. Use a language code
     /// ("de", "fr", …) or "auto" to let whisper detect it.
     ///
     /// Only meaningful for multilingual models: the .en models can only ever
     /// produce English, whatever this says.
     fn language() [*:0]const u8 {
         // std.c.getenv hands back a NUL-terminated C string owned by the
-        // environment, which is exactly what whisper wants — no copy needed.
+        // environment, which is exactly what whisper wants, no copy needed.
         const env = std.c.getenv("BOO_LANG") orelse return "en";
         if (env[0] == 0) return "en";
         return env;

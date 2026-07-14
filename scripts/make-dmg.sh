@@ -7,7 +7,7 @@
 #
 # The app is ad-hoc signed (see bundle.sh), so the DMG is NOT notarized and
 # Gatekeeper will refuse to open it on first launch. That is expected and
-# documented in the README — users right-click → Open, or strip the quarantine
+# documented in the README, users right-click → Open, or strip the quarantine
 # attribute. Notarizing would need a paid Apple Developer ID.
 set -euo pipefail
 
@@ -20,7 +20,7 @@ ARCH="$(uname -m)"
 DMG="zig-out/Boo-${VERSION}-${ARCH}.dmg"
 
 if [ ! -d "$APP" ]; then
-    echo "error: $APP not found — run 'zig build app -Doptimize=ReleaseFast && ./bundle.sh' first" >&2
+    echo "error: $APP not found, run 'zig build app -Doptimize=ReleaseFast && ./bundle.sh' first" >&2
     exit 1
 fi
 
@@ -41,7 +41,7 @@ hdiutil create \
 
 echo "Built: $DMG ($(du -h "$DMG" | cut -f1))"
 
-# Sanity-check the image really mounts and carries an intact bundle — a DMG
+# Sanity-check the image really mounts and carries an intact bundle, a DMG
 # that fails here would fail identically on a user's machine.
 MOUNT="$(mktemp -d)"
 hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT"

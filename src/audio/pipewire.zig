@@ -28,7 +28,7 @@ pub const AudioCapture = struct {
     stream_listener: c.spa_hook = undefined,
     stream_events: c.pw_stream_events = std.mem.zeroes(c.pw_stream_events),
 
-    /// Buffers, locking, preroll and the recording cap — shared with the
+    /// Buffers, locking, preroll and the recording cap, shared with the
     /// CoreAudio backend so the two cannot drift apart. See common.Capture.
     capture: common.Capture,
     allocator: std.mem.Allocator,
@@ -41,7 +41,7 @@ pub const AudioCapture = struct {
             .allocator = allocator,
         };
 
-        // Initialize PipeWire library (refcounted internally — safe to call repeatedly)
+        // Initialize PipeWire library (refcounted internally, safe to call repeatedly)
         c.pw_init(null, null);
         self.pw_initialized = true;
         errdefer if (self.pw_initialized) c.pw_deinit();
@@ -55,7 +55,7 @@ pub const AudioCapture = struct {
         self.stream_events.process = onProcess;
         self.stream_events.state_changed = onStateChanged;
 
-        // Stream metadata properties — tells PipeWire how to route us.
+        // Stream metadata properties, tells PipeWire how to route us.
         const props = c.pw_properties_new(
             c.PW_KEY_MEDIA_TYPE,
             "Audio",
@@ -91,7 +91,7 @@ pub const AudioCapture = struct {
         };
         if (params[0] == null) return error.FormatBuildFailed;
 
-        // Connect inactive — mic stays off until warmUp() / startRecording().
+        // Connect inactive, mic stays off until warmUp() / startRecording().
         const flags = c.PW_STREAM_FLAG_AUTOCONNECT |
             c.PW_STREAM_FLAG_MAP_BUFFERS |
             c.PW_STREAM_FLAG_RT_PROCESS |
@@ -135,7 +135,7 @@ pub const AudioCapture = struct {
         if (self.stream) |s| _ = c.pw_stream_set_active(s, active);
     }
 
-    /// Warm up the mic — activate the stream but stay in preroll mode.
+    /// Warm up the mic, activate the stream but stay in preroll mode.
     /// Call ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
         self.capture.reserve(WHISPER_SAMPLE_RATE * 60);
@@ -193,8 +193,8 @@ pub const AudioCapture = struct {
         const n_samples: usize = data.chunk.*.size / @sizeOf(f32);
         const samples: [*]const f32 = @ptrCast(@alignCast(data.data));
 
-        // Everything that happens to these samples — preroll, the recording cap,
-        // the waveform — is shared with the CoreAudio backend.
+        // Everything that happens to these samples, preroll, the recording cap,
+        // the waveform, is shared with the CoreAudio backend.
         self.capture.push(samples[0..n_samples]);
 
         _ = c.pw_stream_queue_buffer(stream, pw_buffer);

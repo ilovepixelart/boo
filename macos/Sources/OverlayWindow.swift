@@ -39,7 +39,7 @@ class OverlayWindow: NSWindow {
         self.minSize = NSSize(width: 400, height: 300)
         self.maxSize = NSSize(width: 400, height: 800)
 
-        // Normal window level — can go behind other windows like a regular app
+        // Normal window level, can go behind other windows like a regular app
         self.level = .normal
         self.titlebarAppearsTransparent = true
         self.titleVisibility = .hidden
@@ -87,7 +87,7 @@ class OverlayWindow: NSWindow {
         let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(waveformClicked))
         waveformView.addGestureRecognizer(clickGesture)
 
-        // ── Transcript scroll (middle — fills available space) ──
+        // ── Transcript scroll (middle, fills available space) ──
         transcriptScroll = NSScrollView()
         transcriptScroll.hasVerticalScroller = true
         transcriptScroll.autohidesScrollers = true
@@ -106,7 +106,7 @@ class OverlayWindow: NSWindow {
 
         transcriptScroll.documentView = docView
 
-        // Pin transcript stack to document view edges — full width
+        // Pin transcript stack to document view edges, full width
         NSLayoutConstraint.activate([
             transcriptStack.topAnchor.constraint(equalTo: docView.topAnchor, constant: 4),
             transcriptStack.leadingAnchor.constraint(equalTo: docView.leadingAnchor),
@@ -131,7 +131,7 @@ class OverlayWindow: NSWindow {
         statusLabel.alignment = .center
         bottomBar.addArrangedSubview(statusLabel)
 
-        // Record button — Apple Voice Memos style: simple flat red circle, no ring
+        // Record button, Apple Voice Memos style: simple flat red circle, no ring
         recordButton = NSButton(frame: .zero)
         recordButton.isBordered = false
         recordButton.title = ""
@@ -241,7 +241,7 @@ class OverlayWindow: NSWindow {
         startedViaHotkey = viaHotkey
 
         // Pin the destination now. `previousApp` tracks the last non-Boo app to
-        // activate, so it's the right answer whenever Boo itself holds focus —
+        // activate, so it's the right answer whenever Boo itself holds focus ,
         // which is always true for the Record button, and true for the hotkey
         // too once Boo's window has been clicked.
         let frontmost = NSWorkspace.shared.frontmostApplication
@@ -281,7 +281,7 @@ class OverlayWindow: NSWindow {
             recordButton.layer?.cornerRadius = 20
         })
 
-        // Move EVERYTHING off the main thread — stop audio + transcribe
+        // Move EVERYTHING off the main thread, stop audio + transcribe
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
@@ -307,7 +307,7 @@ class OverlayWindow: NSWindow {
                 } else {
                     self.statusLabel.stringValue = "no speech detected"
                 }
-                // Stop display link — no animation needed when idle
+                // Stop display link, no animation needed when idle
                 self.stopDisplayLink()
             }
         }
@@ -411,7 +411,7 @@ class OverlayWindow: NSWindow {
         var view: NSView? = sender
         while let v = view {
             if v.superview == transcriptStack {
-                // Found the bubble — find the NSTextField with transcript text
+                // Found the bubble, find the NSTextField with transcript text
                 for subview in v.subviews {
                     if let label = subview as? NSTextField, label.font?.pointSize == 13 {
                         NSPasteboard.general.clearContents()
@@ -461,7 +461,7 @@ class OverlayWindow: NSWindow {
 
     func typeTextIntoFocusedApp(_ text: String) {
         // Ghostty fast-path: its AppleScript API (1.3+) writes into the pty
-        // directly — no clipboard clobber, no re-activation, immune to Secure
+        // directly, no clipboard clobber, no re-activation, immune to Secure
         // Input. It addresses Ghostty's own front window, so Ghostty doesn't
         // even need to be frontmost. On any failure, fall through to the
         // generic paste below.
@@ -471,13 +471,13 @@ class OverlayWindow: NSWindow {
         }
 
         // Everything below synthesizes a ⌘V keystroke, which needs Accessibility.
-        // Ask for it here — the first time it's actually required — rather than at
+        // Ask for it here, the first time it's actually required, rather than at
         // launch: the Ghostty path above never needs it, so a Ghostty user should
         // never see the "control this computer" prompt at all.
         guard PermissionsManager.requestAccessibilityIfNeeded() else {
             // Not granted (yet). The transcript is already on screen and about to
             // be copied, so say what happened instead of silently doing nothing.
-            statusLabel.stringValue = "copied — grant Accessibility to auto-paste"
+            statusLabel.stringValue = "copied, grant Accessibility to auto-paste"
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             return
@@ -490,17 +490,17 @@ class OverlayWindow: NSWindow {
         pasteboard.setString(text, forType: .string)
 
         // Step 2: If started via button click, re-activate the target app.
-        // If started via hotkey, it is ALREADY focused — don't switch.
+        // If started via hotkey, it is ALREADY focused, don't switch.
         if !startedViaHotkey, let app = target {
             app.activate()
         }
 
-        // Step 3: Paste via clipboard — most universally reliable method
+        // Step 3: Paste via clipboard, most universally reliable method
         let delay = startedViaHotkey ? 0.15 : 0.5
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.performPaste()
 
-            // Restore clipboard quickly — 200ms is enough for paste to complete
+            // Restore clipboard quickly, 200ms is enough for paste to complete
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if let old = oldContents {
                     pasteboard.clearContents()
@@ -511,7 +511,7 @@ class OverlayWindow: NSWindow {
     }
 
     private func performPaste() {
-        // CGEvent only — no AppleScript, no extra permission dialogs
+        // CGEvent only, no AppleScript, no extra permission dialogs
         let source = CGEventSource(stateID: .combinedSessionState)
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
             let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)

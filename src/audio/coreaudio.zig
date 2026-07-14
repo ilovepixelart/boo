@@ -127,7 +127,7 @@ pub const AudioCapture = struct {
     buffers: [NUM_BUFFERS]AudioQueueBufferRef = undefined,
     format: AudioStreamBasicDescription = undefined,
 
-    /// Buffers, locking, preroll and the recording cap — shared with the
+    /// Buffers, locking, preroll and the recording cap, shared with the
     /// PipeWire backend so the two cannot drift apart. See common.Capture.
     capture: common.Capture,
     allocator: std.mem.Allocator,
@@ -151,7 +151,7 @@ pub const AudioCapture = struct {
         self.format.mChannelsPerFrame = 1;
         self.format.mBitsPerChannel = 32;
 
-        // The errdefer above owns `self` — don't destroy it by hand here, or the
+        // The errdefer above owns `self`, don't destroy it by hand here, or the
         // later failure paths would double-free.
         if (AudioQueueNewInput(&self.format, audioCallback, self, null, null, 0, &self.queue) != 0) {
             return error.AudioQueueCreateFailed;
@@ -164,7 +164,7 @@ pub const AudioCapture = struct {
             if (AudioQueueEnqueueBuffer(self.queue, buf.*, 0, null) != 0) return error.BufferEnqueueFailed;
         }
 
-        // Queue is built but NOT started — mic stays off until recording begins
+        // Queue is built but NOT started, mic stays off until recording begins
         return self;
     }
 
@@ -177,7 +177,7 @@ pub const AudioCapture = struct {
         self.allocator.destroy(self);
     }
 
-    /// Warm up the mic — start the queue but don't record yet.
+    /// Warm up the mic, start the queue but don't record yet.
     /// Call this ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
         self.capture.reserve(WHISPER_SAMPLE_RATE * 60);
@@ -227,8 +227,8 @@ pub const AudioCapture = struct {
         const samples: [*]const f32 = @ptrCast(@alignCast(buffer.mAudioData));
         const count: usize = @intCast(num_packets);
 
-        // Everything that happens to these samples — preroll, the recording cap,
-        // the waveform — is shared with the PipeWire backend.
+        // Everything that happens to these samples, preroll, the recording cap,
+        // the waveform, is shared with the PipeWire backend.
         self.capture.push(samples[0..count]);
 
         _ = AudioQueueEnqueueBuffer(queue, buffer, 0, null);

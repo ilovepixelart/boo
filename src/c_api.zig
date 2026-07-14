@@ -39,7 +39,7 @@ fn initContext(allocator: std.mem.Allocator, model_path: [:0]const u8) !*BooCont
     var whisper = try Whisper.init(model_path);
     errdefer whisper.deinit();
 
-    // If this fails, the errdefer above frees the model — otherwise a missing
+    // If this fails, the errdefer above frees the model, otherwise a missing
     // microphone would strand the whole ~150MB whisper context.
     const audio = try AudioCapture.init(allocator);
 
@@ -153,7 +153,7 @@ test "a failed init frees everything it had already allocated" {
     // This is the regression that motivated splitting initContext out.
     //
     // boo_init returns an optional, and `errdefer` only fires on an *error*
-    // return — so its cleanup never ran on the `return null` paths. A bad model
+    // return, so its cleanup never ran on the `return null` paths. A bad model
     // path leaked the context, and a failure to open the microphone leaked the
     // whole ~150MB whisper model along with it. Both are silent: the caller just
     // sees null.
@@ -197,7 +197,7 @@ test "every C entry point tolerates a null context" {
 test "the transcribing flag is atomic, not a plain bool" {
     // boo_transcribe blocks for seconds on a worker thread while the UI polls
     // boo_is_transcribing from the main thread. If this ever regresses to a
-    // plain bool, that is a data race — so pin the type.
+    // plain bool, that is a data race, so pin the type.
     const Field = @FieldType(BooContext, "transcribing");
     try testing.expectEqual(std.atomic.Value(bool), Field);
 }

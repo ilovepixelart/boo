@@ -28,7 +28,7 @@
       clipboard and pasted into the focused app.
     </p>
     <p>
-      Everything runs locally — no audio leaves your machine.
+      Everything runs locally, no audio leaves your machine.
     </p>
     <p>
       Preview on Linux: recording, transcription and both portal permissions
@@ -60,7 +60,7 @@
       <description>
         <p>Correctness, security, and a project-wide quality pass.</p>
         <ul>
-          <li>Boo now finds any whisper model, not only the one it recommends — previously dropping a different model where the docs said to put it was reported as "no model installed".</li>
+          <li>Boo now finds any whisper model, not only the one it recommends. Previously, dropping a different model where the docs said to put it was reported as "no model installed".</li>
           <li>The RemoteDesktop restore token is written owner-only (0600); it was world-readable.</li>
           <li>Fewer permission prompts: macOS asks for Accessibility only when it first needs it, and Linux no longer re-runs the shortcut approval dialog on every launch.</li>
         </ul>
@@ -71,7 +71,7 @@
       <description>
         <p>Fixes found by running Boo on a real GNOME desktop, and by testing it the way a new user would.</p>
         <ul>
-          <li>Boo now tells you when your desktop has no global-shortcuts portal. GNOME only gained one in version 48, so on GNOME 46 (Ubuntu 24.04 LTS) the hotkey cannot work for any app — previously Boo failed silently. Auto-paste is unaffected, so Boo stays usable from the Record button.</li>
+          <li>Boo now tells you when your desktop has no global-shortcuts portal. GNOME only gained one in version 48, so on GNOME 46 (Ubuntu 24.04 LTS) the hotkey cannot work for any app; previously Boo failed silently. Auto-paste is unaffected, so Boo stays usable from the Record button.</li>
           <li>Non-English dictation works. The language was hardcoded to English, which silently translated other languages instead of transcribing them; set BOO_LANG (a language code, or "auto") when using a multilingual model.</li>
           <li>A single recording is now capped at 10 minutes and stops automatically, transcribing what it captured. Previously the buffer grew without limit and could freeze the app for minutes inside whisper.</li>
           <li>The menu bar now shows when Boo is transcribing, rather than snapping straight back to idle while whisper is still working.</li>
@@ -94,7 +94,7 @@
       <description>
         <p>First release. macOS (Apple Silicon) only.</p>
         <ul>
-          <li>On-device speech-to-text with whisper.cpp — audio never leaves the machine.</li>
+          <li>On-device speech-to-text with whisper.cpp, audio never leaves the machine.</li>
           <li>Global hotkey (Ctrl+Shift+Space) via the GlobalShortcuts portal.</li>
           <li>Transcripts are copied to the clipboard and pasted into the focused app via the RemoteDesktop portal.</li>
         </ul>

@@ -1,4 +1,4 @@
-// Audio capture module — public surface for the rest of the Zig core.
+// Audio capture module, public surface for the rest of the Zig core.
 // Selects a platform-specific backend at compile time.
 
 const builtin = @import("builtin");

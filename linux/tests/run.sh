@@ -1,7 +1,7 @@
 #!/bin/bash
 # Compile and run the portal payload tests.
 #
-# Builds twice — once per portal client — because the two .c files define
+# Builds twice, once per portal client, because the two .c files define
 # same-named static helpers and can't share a translation unit.
 #
 # Runs on any host with GTK4 + GLib, macOS included: the payloads are pure

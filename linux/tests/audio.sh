@@ -4,13 +4,13 @@
 #   ./linux/tests/audio.sh path/to/ggml-base.en.bin [speech.wav]
 #
 # Needs a real PipeWire graph with a working session manager, which in practice
-# means a real Linux system — NOT a container. WirePlumber refuses to start
+# means a real Linux system, NOT a container. WirePlumber refuses to start
 # without systemd-logind, so in a container PipeWire never links any nodes and
 # Boo's stream sits there capturing nothing. A VM (or a desktop) works fine.
 #
 # With no WAV supplied it records from your default source, so you can just
 # speak. With a WAV, it builds a virtual microphone from a null sink's monitor,
-# plays the file into it, and asserts a transcript comes back — which is what
+# plays the file into it, and asserts a transcript comes back, which is what
 # makes this runnable unattended.
 set -euo pipefail
 
@@ -23,7 +23,7 @@ command -v pactl >/dev/null || {
     exit 1
 }
 pactl info >/dev/null 2>&1 || {
-    echo "no PipeWire/Pulse server — is wireplumber running?"
+    echo "no PipeWire/Pulse server, is wireplumber running?"
     exit 1
 }
 
@@ -41,7 +41,7 @@ WHISPER="$(find .zig-cache -name libwhisper.a -size +1M | head -1)"
 }
 
 # Zig's archiver omits the index, and its C++ objects want Zig's libc++ rather
-# than the system libstdc++ — so link with `zig cc`.
+# than the system libstdc++, so link with `zig cc`.
 cp zig-out/lib/libboo-core.a "$WORK/"
 cp "$WHISPER" "$WORK/"
 ranlib "$WORK/libboo-core.a" "$WORK/libwhisper.a"
@@ -70,7 +70,7 @@ if [ -n "$WAV" ]; then
     ) &
     SECONDS_TO_RECORD=6
 else
-    echo "[audio] recording from your default source — speak now"
+    echo "[audio] recording from your default source, speak now"
     SECONDS_TO_RECORD=5
 fi
 
@@ -91,4 +91,4 @@ TRANSCRIPT="$(sed -n 's/^\[smoke\] TRANSCRIPT: //p' <<<"$OUT" | tr -d ' ')"
     exit 1
 }
 
-echo "[audio] PASS — PipeWire captured real audio and whisper transcribed it"
+echo "[audio] PASS, PipeWire captured real audio and whisper transcribed it"

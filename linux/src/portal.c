@@ -1,7 +1,7 @@
 #include "portal.h"
 
 // One in-flight request. Freed when the Response arrives, or when the call
-// itself fails — exactly one of those happens.
+// itself fails, exactly one of those happens.
 typedef struct {
     GDBusConnection *dbus; // borrowed; outlives the request
     guint *subscription;   // caller's slot, so it can tear down on free
@@ -64,8 +64,8 @@ static void on_response(GDBusConnection *dbus, const char *sender,
     if (results) g_variant_unref(results);
 }
 
-// The method call's own reply carries nothing we use — the payload arrives via
-// the Response signal — but it is how transport errors surface.
+// The method call's own reply carries nothing we use, the payload arrives via
+// the Response signal, but it is how transport errors surface.
 static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     PortalRequest *req = user_data;
 
@@ -79,12 +79,12 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     }
 
     // The call failed, so no Response is coming. Tear down the subscription we
-    // installed for it — leaving it dangling would leak it and block the next
+    // installed for it, leaving it dangling would leak it and block the next
     // request, which is precisely the bug the duplicated copies of this code
     // drifted into.
     //
     // UnknownMethod/UnknownInterface/ServiceUnknown mean the desktop has no such
-    // portal at all — GNOME, for instance, only gained GlobalShortcuts in 48 —
+    // portal at all, GNOME, for instance, only gained GlobalShortcuts in 48 ,
     // which is worth reporting differently from a call the user declined.
     const gboolean unsupported =
         error && (g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD) ||
@@ -131,7 +131,7 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
     req->on_error = on_error_cb;
     req->user_data = user_data;
 
-    // Subscribe BEFORE calling — see the header. Skipping this is the classic
+    // Subscribe BEFORE calling, see the header. Skipping this is the classic
     // portal bug: it passes against a slow portal and hangs against a fast one.
     *subscription = g_dbus_connection_signal_subscribe(
         dbus, NULL, PORTAL_IFACE_REQUEST, "Response", request_path, NULL,

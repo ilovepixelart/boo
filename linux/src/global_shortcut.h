@@ -22,8 +22,8 @@ typedef void (*BooShortcutCallback)(gpointer user_data);
 // short, human-readable explanation fit for a toast.
 //
 // This is not a rare path. GNOME only gained a GlobalShortcuts backend in
-// version 48 (Feb 2025), so on GNOME 46 — Ubuntu 24.04 LTS, i.e. a large slice
-// of desktop Linux — the interface does not exist at all and the hotkey simply
+// version 48 (Feb 2025), so on GNOME 46, Ubuntu 24.04 LTS, i.e. a large slice
+// of desktop Linux, the interface does not exist at all and the hotkey simply
 // cannot work. Without this callback the failure is invisible: the user presses
 // the hotkey and nothing happens.
 typedef void (*BooShortcutUnavailableCallback)(const char *reason, gpointer user_data);
