@@ -19,7 +19,7 @@ jobs:
     name: macOS (build + bundle)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -61,7 +61,7 @@ jobs:
     name: Lint (shell, C, Python)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install formatters
         run: |
@@ -89,7 +89,7 @@ jobs:
     name: Linux (build + portal tests)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -133,7 +133,7 @@ jobs:
     name: Linux (flatpak metadata)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate manifest and AppStream metadata
         run: |
@@ -153,7 +153,7 @@ jobs:
       image: bilelmoussaoui/flatpak-github-actions:gnome-47
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Actually build the bundle. Metadata validation is not enough: it does
       # not check finish-args, so an invalid permission (e.g. a socket type
