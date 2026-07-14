@@ -32,9 +32,9 @@ finish-args:
   - --filesystem=xdg-run/pipewire-0
   # Persistent storage for the user's model file
   - --filesystem=xdg-data/boo:rw
-  # XDG portals we depend on
+  # XDG portals we depend on. Only these — Boo's toasts are in-app (AdwToast),
+  # so it needs no Notification portal, and it talks to nothing else.
   - --talk-name=org.freedesktop.portal.GlobalShortcuts
-  - --talk-name=org.freedesktop.portal.Notification
   # Auto-paste keystroke synthesis (one-time user grant, persisted)
   - --talk-name=org.freedesktop.portal.RemoteDesktop
 

@@ -88,8 +88,14 @@ static void save_restore_token(const char *token) {
     g_autofree char *dir = g_path_get_dirname(path);
     g_mkdir_with_parents(dir, 0700);
 
+    // 0600, not g_file_set_contents' default 0644. This token is a capability:
+    // it restores a RemoteDesktop session that can synthesize keyboard input
+    // into the user's desktop. It has no business being world-readable, and it
+    // outlives the process — it is the whole point that it persists.
     g_autoptr(GError) error = NULL;
-    if (!g_file_set_contents(path, token, -1, &error)) {
+    if (!g_file_set_contents_full(path, token, -1,
+                                  G_FILE_SET_CONTENTS_CONSISTENT,
+                                  0600, &error)) {
         g_warning("Boo: could not save portal restore token: %s", error->message);
     }
 }

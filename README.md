@@ -409,6 +409,10 @@ bundle.sh           macOS: ad-hoc / re-sign helper
 
 [Ghostty](https://github.com/ghostty-org/ghostty) is the most coherent example of "Zig core + native apprt per OS" in the wild. Boo borrows the pattern wholesale: stable C API as the contract, comptime-dispatched OS backends, no shared GUI toolkit. The trade-off is more code per platform; the payoff is each frontend feeling truly native instead of a webview pretending to be one.
 
+## Security
+
+Boo has no network code — your audio never leaves the machine, and there's nothing to verify that against because there's nothing there. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
+
 ## License
 
 [MIT](LICENSE) — same as whisper.cpp and Ghostty, the projects Boo stands on.

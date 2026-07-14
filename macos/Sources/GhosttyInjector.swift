@@ -46,10 +46,22 @@ enum GhosttyInjector {
         return true
     }
 
-    // AppleScript string literals support exactly these escapes (AppleScript 2.0+).
+    /// Escape a transcript for embedding in an AppleScript string literal.
+    ///
+    /// The transcript is interpolated into AppleScript source, so a stray quote
+    /// could in principle break out of the literal and run arbitrary script. It
+    /// can't: a literal is delimited solely by `"`, and its only escapes are the
+    /// five below, so escaping backslash and quote closes the breakout. The
+    /// order matters — backslash MUST be first, or the backslashes this adds to
+    /// the quotes would themselves be doubled.
+    ///
+    /// Verified adversarially (see the repo's security notes): payloads such as
+    /// `" & (do shell script "…") & "` round-trip through AppleScript exactly
+    /// equal to the input, and no injected command runs. If you change this,
+    /// re-run that check — it is a security boundary, not cosmetics.
     private static func escapeForAppleScript(_ text: String) -> String {
         text
-            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\\", with: "\\\\")   // must be first
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\n", with: "\\n")
