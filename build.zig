@@ -110,6 +110,7 @@ pub fn build(b: *std.Build) void {
                 "main.c",
                 "overlay_window.c",
                 "waveform_widget.c",
+                "portal.c",
                 "global_shortcut.c",
                 "text_inject.c",
             },

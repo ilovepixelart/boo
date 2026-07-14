@@ -22,8 +22,10 @@ for suite in global_shortcut text_inject; do
     define=""
     [ "$suite" = "text_inject" ] && define="-DTEST_TEXT_INJECT"
 
+    # portal.c holds the Request/Response plumbing both clients call into.
     # shellcheck disable=SC2086
     cc -o "$OUT/$suite" "$PROJ/linux/tests/portal_payloads.c" \
+        "$PROJ/linux/src/portal.c" \
         -I"$PROJ/linux/src" -I"$PROJ/include" \
         $define $CFLAGS $LIBS -std=c11 -Wall -Wextra
 

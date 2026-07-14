@@ -68,7 +68,7 @@ echo "[integration] mock portal owns org.freedesktop.portal.Desktop"
 
 # shellcheck disable=SC2046  # pkg-config emits several flags; splitting is the point.
 cc -o "$WORK/harness" "$TESTS/portal_harness.c" \
-    "$PROJ/linux/src/global_shortcut.c" "$PROJ/linux/src/text_inject.c" \
+    "$PROJ/linux/src/portal.c" "$PROJ/linux/src/global_shortcut.c" "$PROJ/linux/src/text_inject.c" \
     -I"$PROJ/linux/src" -I"$PROJ/include" \
     $(pkg-config --cflags --libs gtk4 libadwaita-1) \
     -std=c11 -Wall -Wextra || { echo "[integration] FAIL: harness build"; exit 1; }
