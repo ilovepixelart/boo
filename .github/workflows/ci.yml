@@ -81,9 +81,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            appstream flatpak-builder
+            appstream flatpak-builder desktop-file-utils
           # Catches a malformed manifest without a full (very slow) flatpak build.
           flatpak-builder --show-manifest linux/flatpak/com.boo.app.yaml > /dev/null
+          # Strict: Flathub rejects submissions over these same warnings.
           appstreamcli validate --no-net linux/flatpak/com.boo.app.metainfo.xml
           desktop-file-validate linux/flatpak/com.boo.app.desktop
           echo "flatpak metadata ok"

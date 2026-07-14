@@ -7,6 +7,18 @@
   <name>Boo</name>
   <summary>Local speech-to-text overlay</summary>
 
+  <developer id="io.github.ilovepixelart">
+    <name>ilovepixelart</name>
+  </developer>
+
+  <url type="homepage">https://github.com/ilovepixelart/boo</url>
+  <url type="bugtracker">https://github.com/ilovepixelart/boo/issues</url>
+  <url type="vcs-browser">https://github.com/ilovepixelart/boo</url>
+
+  <!-- Transcribes the user's own speech locally; no content of any kind is
+       generated, exchanged, or transmitted. -->
+  <content_rating type="oars-1.1"/>
+
   <description>
     <p>
       Boo is a local speech-to-text overlay that captures audio from your

@@ -10,7 +10,12 @@ pub fn build(b: *std.Build) void {
     // Apple's Accelerate framework is the preferred BLAS backend on macOS.
     // On Linux, ggml falls back to its own CPU code path unless CUDA/Vulkan is wired in (later).
     const c_flags_macos = &[_][]const u8{ "-DGGML_USE_ACCELERATE", "-DNDEBUG", "-O2", "-pthread" };
-    const c_flags_other = &[_][]const u8{ "-DNDEBUG", "-O2", "-pthread" };
+    // _GNU_SOURCE is required on Linux: ggml.c pins threads with CPU_ZERO,
+    // CPU_ALLOC, pthread_setaffinity_np and getcpu, and glibc only declares
+    // those behind it. Without it every ggml build fails with "call to
+    // undeclared function". macOS never sees this — the affinity code is
+    // Linux-only.
+    const c_flags_other = &[_][]const u8{ "-DNDEBUG", "-O2", "-pthread", "-D_GNU_SOURCE" };
     const c_flags: []const []const u8 = if (target_os == .macos) c_flags_macos else c_flags_other;
     const cpp_flags: []const []const u8 = if (target_os == .macos)
         c_flags_macos ++ &[_][]const u8{"-std=c++11"}
