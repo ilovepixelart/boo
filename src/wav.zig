@@ -43,7 +43,9 @@ pub fn parse(bytes: []const u8) ParseError!Wav {
         const id = bytes[i .. i + 4];
         const size = std.mem.readInt(u32, bytes[i + 4 ..][0..4], .little);
         const payload_start = i + 8;
-        if (payload_start + size > bytes.len) return error.Truncated;
+        // Phrased so an attacker-controlled size can't overflow the addition
+        // (payload_start <= bytes.len is guaranteed by the loop condition).
+        if (size > bytes.len - payload_start) return error.Truncated;
         const payload = bytes[payload_start .. payload_start + size];
 
         if (std.mem.eql(u8, id, "fmt ")) {
@@ -143,4 +145,37 @@ test "parse: duration math" {
     const buf = makeWav(&([_]i16{0} ** 1600)); // 0.1s at 16kHz
     const wav = try parse(&buf);
     try testing.expectApproxEqAbs(@as(f64, 0.1), wav.durationSeconds(), 0.0001);
+}
+
+test "parse: survives hostile bytes without crashing" {
+    // RIFF chunk walkers are a recurring real-world bug class: unchecked
+    // chunk sizes and truncated fields caused heap overflows in dr_wav
+    // (miniaudio #1101) and the 2024 GGUF CVE cluster followed the same
+    // untrusted-length pattern. parse() must return an error for any garbage,
+    // never read out of bounds (the test runner's checked builds would trap).
+    var prng = std.Random.DefaultPrng.init(0xb00);
+    const random = prng.random();
+
+    // Pure noise, various sizes including the header-boundary edges.
+    var noise: [512]u8 = undefined;
+    for (0..2000) |_| {
+        const len = random.intRangeAtMost(usize, 0, noise.len);
+        random.bytes(noise[0..len]);
+        _ = parse(noise[0..len]) catch continue;
+    }
+
+    // Structured attack: a valid WAV with random bytes stomped over it, so
+    // the walker gets plausible magic values with corrupt sizes and offsets.
+    const valid = makeWav(&([_]i16{ 100, -200, 300, -400 } ** 8));
+    var corrupt: [valid.len]u8 = undefined;
+    for (0..2000) |_| {
+        corrupt = valid;
+        for (0..random.intRangeAtMost(usize, 1, 8)) |_| {
+            corrupt[random.intRangeAtMost(usize, 0, corrupt.len - 1)] = random.int(u8);
+        }
+        const wav = parse(&corrupt) catch continue;
+        // Whatever parsed must still be self-consistent enough to convert.
+        const samples = toF32(testing.allocator, wav) catch continue;
+        testing.allocator.free(samples);
+    }
 }
