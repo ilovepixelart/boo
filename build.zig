@@ -299,6 +299,9 @@ pub fn build(b: *std.Build) void {
     bench_options.addOptionPath("jfk_wav", whisper_dep.path("samples/jfk.wav"));
     bench.root_module.addOptions("build_options", bench_options);
 
+    // Installed so CI can run it under valgrind directly (zig-out/bin/boo-bench).
+    b.installArtifact(bench);
+
     const bench_run = b.addRunArtifact(bench);
     if (b.args) |args| bench_run.addArgs(args);
     b.step("bench", "Run transcription performance benchmark").dependOn(&bench_run.step);

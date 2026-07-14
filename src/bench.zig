@@ -107,6 +107,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var expect_arg: ?[]const u8 = null;
     var assert_wer: ?f64 = null;
     var suite_arg: ?[:0]const u8 = null;
+    // Streaming-simulation take length; CI's valgrind pass shrinks it because
+    // memcheck runs ~25x slower than native.
+    var utterances: usize = 3;
 
     var args = std.process.Args.Iterator.init(init.args);
     _ = args.skip();
@@ -124,6 +127,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
             assert_rtf = std.fmt.parseFloat(f64, v) catch fatal("bad --assert-rtf value: {s}", .{v});
         } else if (std.mem.eql(u8, arg, "--suite")) {
             suite_arg = args.next() orelse fatal("--suite needs a directory", .{});
+        } else if (std.mem.eql(u8, arg, "--utterances")) {
+            const v = args.next() orelse fatal("--utterances needs a number", .{});
+            utterances = std.fmt.parseInt(usize, v, 10) catch fatal("bad --utterances value: {s}", .{v});
+            if (utterances == 0) fatal("--utterances must be at least 1", .{});
         } else if (std.mem.eql(u8, arg, "--expect")) {
             expect_arg = args.next() orelse fatal("--expect needs the reference text", .{});
         } else if (std.mem.eql(u8, arg, "--assert-wer")) {
@@ -140,16 +147,23 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    const model_path = model_arg orelse blk: {
+    // Always duped (even when argv already provides the string) so both
+    // paths are owned and freed uniformly; the valgrind CI gate sees any
+    // sloppiness here as a definite leak.
+    const model_path: [:0]u8 = blk: {
+        if (model_arg) |m| break :blk try allocator.dupeZ(u8, m);
         const home = std.c.getenv("HOME") orelse fatal("no HOME and no model path given", .{});
         const joined = try std.mem.concat(allocator, u8, &.{ std.mem.span(home), "/.boo/models/ggml-base.en.bin" });
         defer allocator.free(joined);
         break :blk try allocator.dupeZ(u8, joined);
     };
-    const wav_path = wav_arg orelse try allocator.dupeZ(u8, build_options.jfk_wav);
+    defer allocator.free(model_path);
+    const wav_path: [:0]u8 = try allocator.dupeZ(u8, wav_arg orelse build_options.jfk_wav);
+    defer allocator.free(wav_path);
     // The bundled sample has a known transcript; custom audio needs --expect.
+    // A suite brings its own references per clip.
     const reference: ?[]const u8 = expect_arg orelse (if (wav_arg == null) JFK_REFERENCE else null);
-    if (assert_wer != null and reference == null)
+    if (assert_wer != null and reference == null and suite_arg == null)
         fatal("--assert-wer needs --expect (only the default jfk.wav has a built-in reference)", .{});
 
     // Audio first: it's the cheap step, and a bad path shouldn't cost a model load.
@@ -189,7 +203,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (stream_mode) {
-        try runStreamBench(allocator, &ctx, samples, reference, assert_wer);
+        try runStreamBench(allocator, &ctx, samples, utterances, reference, assert_wer);
         return;
     }
 
@@ -372,6 +386,7 @@ fn runStreamBench(
     allocator: std.mem.Allocator,
     ctx: *engine_mod.Engine,
     utterance: []const f32,
+    utterances: usize,
     reference: ?[]const u8,
     assert_wer: ?f64,
 ) !void {
@@ -385,11 +400,11 @@ fn runStreamBench(
         fatal("cannot load VAD model {s}\nDownload it first:\n  curl -L -o ~/.boo/models/ggml-silero-v6.2.0.bin \\\n    https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin", .{vad_path});
     defer vad.deinit();
 
-    // The take: three utterances with 1.5s pauses, stop right at speech end.
+    // The take: utterances with 1.5s pauses, stop right at speech end.
     const gap = WHISPER_SAMPLE_RATE * 3 / 2;
     var take: std.ArrayList(f32) = .empty;
     defer take.deinit(allocator);
-    for (0..3) |i| {
+    for (0..utterances) |i| {
         if (i != 0) try take.appendNTimes(allocator, 0.0, gap);
         try take.appendSlice(allocator, utterance);
     }
@@ -429,12 +444,12 @@ fn runStreamBench(
     defer allocator.free(batch);
 
     std.debug.print(
-        \\  streaming simulation ({d:.1}s take, 3 utterances):
+        \\  streaming simulation ({d:.1}s take, {d} utterances):
         \\  ticks:        {d} (250ms cadence), {d} commits
         \\  worst tick:   {d:.0} ms (must stay well under the cadence)
         \\  stop-to-text: {d:.0} ms streaming vs {d:.0} ms batch ({d:.1}x faster)
         \\
-    , .{ take_seconds, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms });
+    , .{ take_seconds, utterances, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms });
 
     // Agreement with the batch output needs no ground truth and directly
     // measures what VAD chunking costs (the NeMo compare-vs-offline pattern):
@@ -443,12 +458,16 @@ fn runStreamBench(
     const divergence = try wer.wordErrorRate(allocator, final, batch);
     std.debug.print("  streaming vs batch divergence: {d:.1}%\n", .{divergence * 100.0});
 
-    // The take is the utterance three times over, so so is the reference.
+    // The take repeats the utterance, so the reference repeats with it.
     var wer_pct: ?f64 = null;
     if (reference) |ref| {
-        const ref3 = try std.mem.join(allocator, " ", &.{ ref, ref, ref });
-        defer allocator.free(ref3);
-        wer_pct = try scoreWer(allocator, final, ref3);
+        var ref_repeated: std.ArrayList(u8) = .empty;
+        defer ref_repeated.deinit(allocator);
+        for (0..utterances) |i| {
+            if (i != 0) try ref_repeated.append(allocator, ' ');
+            try ref_repeated.appendSlice(allocator, ref);
+        }
+        wer_pct = try scoreWer(allocator, final, ref_repeated.items);
     }
     std.debug.print("\ntranscript:{s}\n", .{final});
 
