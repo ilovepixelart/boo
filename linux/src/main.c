@@ -23,25 +23,43 @@ typedef struct {
 // than only the ggml-base.en.bin we happen to recommend, pinning the filename
 // meant a user who followed our own advice and fetched, say, large-v3-turbo
 // would be told no model was installed.
+// Models the README recommends, most capable first. Downloading
+// large-v3-turbo is a deliberate act, so it wins over the default base.en
+// when both exist. Matches the macOS frontend.
+static const char *const preferred_models[] = {
+    "ggml-large-v3-turbo-q5_0.bin",
+    "ggml-large-v3-turbo.bin",
+    "ggml-small.en.bin",
+    "ggml-base.en.bin",
+};
+
+// Position in preferred_models, or one past the end for everything else.
+static unsigned model_rank(const char *name) {
+    for (unsigned i = 0; i < G_N_ELEMENTS(preferred_models); i++) {
+        if (g_str_equal(name, preferred_models[i])) return i;
+    }
+    return G_N_ELEMENTS(preferred_models);
+}
+
 static char *find_model_in(const char *dir) {
     GDir *d = g_dir_open(dir, 0, NULL);
     if (!d) return NULL;
 
     char *best = NULL;
+    unsigned best_rank = 0;
     const char *name;
     while ((name = g_dir_read_name(d))) {
         if (!g_str_has_prefix(name, "ggml-") || !g_str_has_suffix(name, ".bin")) continue;
+        // ggml-silero-* is the VAD model, not a speech model.
+        if (g_str_has_prefix(name, "ggml-silero")) continue;
 
-        // Prefer the recommended model when present; otherwise the first
-        // alphabetically, so the choice is at least deterministic.
-        if (g_str_equal(name, "ggml-base.en.bin")) {
+        // Best rank wins; alphabetical order breaks ties among the
+        // unrecognized, so the choice is at least deterministic.
+        unsigned rank = model_rank(name);
+        if (!best || rank < best_rank || (rank == best_rank && g_strcmp0(name, best) < 0)) {
             g_free(best);
             best = g_strdup(name);
-            break;
-        }
-        if (!best || g_strcmp0(name, best) < 0) {
-            g_free(best);
-            best = g_strdup(name);
+            best_rank = rank;
         }
     }
     g_dir_close(d);

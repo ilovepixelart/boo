@@ -136,6 +136,8 @@ The ones worth knowing about:
 | `ggml-small.en.bin` | 488 MB | Clearly better than base; still quick on Apple Silicon. |
 | `ggml-large-v3-turbo-q5_0.bin` | 574 MB | **Best accuracy per byte.** Multilingual, and far faster than large-v3. |
 
+With several models installed, Boo picks the most capable one it recognizes: `large-v3-turbo` (either flavor), then `small.en`, then `base.en`, before falling back alphabetically. On Apple Silicon the GPU build runs turbo at ~20x realtime, and with streaming transcription the stop-to-text wait stays near half a second.
+
 The `.en` models are English-only. Everything else is multilingual, but see below, or they'll silently produce English.
 
 ### Streaming transcription (optional)

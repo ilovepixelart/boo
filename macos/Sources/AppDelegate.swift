@@ -242,6 +242,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ].filter { !$0.isEmpty }
     }
 
+    /// Models the README recommends, most capable first. Downloading
+    /// large-v3-turbo is a deliberate act; with Metal it stays fast enough
+    /// for dictation, so it wins over the default base.en when both exist.
+    private static let preferredModels = [
+        "ggml-large-v3-turbo-q5_0.bin",
+        "ggml-large-v3-turbo.bin",
+        "ggml-small.en.bin",
+        "ggml-base.en.bin",
+    ]
+
     /// Find a whisper model.
     ///
     /// Any of whisper.cpp's GGML models works, so this accepts any `ggml-*.bin`
@@ -271,9 +281,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .sorted()
             guard !models.isEmpty else { continue }
 
-            // Prefer the recommended model when it's there; otherwise take the
-            // first alphabetically, so the choice is at least deterministic.
-            let chosen = models.contains("ggml-base.en.bin") ? "ggml-base.en.bin" : models[0]
+            // Take the most capable model the user has bothered to download;
+            // anything unrecognized falls back to first-alphabetical, so the
+            // choice is at least deterministic.
+            let chosen = Self.preferredModels.first(where: models.contains) ?? models[0]
             return (dir as NSString).appendingPathComponent(chosen)
         }
         return nil
