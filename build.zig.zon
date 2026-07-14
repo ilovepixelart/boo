@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .whisper_cpp = .{
-            .url = "https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.2.tar.gz",
-            .hash = "N-V-__8AAO47_ADweqz0iga6VKh3lY1QoFk3sDxjoHJrRJHI",
+            .url = "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.1.tar.gz",
+            .hash = "N-V-__8AAAEmKwLLpQyHLBm_25WrTtfKVani5EWs5ZQTeY7_",
         },
     },
     .paths = .{

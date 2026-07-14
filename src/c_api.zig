@@ -36,7 +36,7 @@ fn initContext(allocator: std.mem.Allocator, model_path: [:0]const u8) !*BooCont
     const ctx = try allocator.create(BooContext);
     errdefer allocator.destroy(ctx);
 
-    var whisper = try Whisper.init(model_path);
+    var whisper = try Whisper.init(model_path, .{});
     errdefer whisper.deinit();
 
     // If this fails, the errdefer above frees the model, otherwise a missing
@@ -142,8 +142,10 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
 // ── tests ────────────────────────────────────────────────────────────────────
 
 test {
-    // Pull the audio maths tests in, so `zig build test` covers them too.
+    // Pull the audio maths and WAV parser tests in, so `zig build test`
+    // covers them too.
     _ = @import("audio/common.zig");
+    _ = @import("wav.zig");
 }
 
 const testing = std.testing;

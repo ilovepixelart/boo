@@ -7,20 +7,55 @@ pub fn build(b: *std.Build) void {
 
     const whisper_dep = b.dependency("whisper_cpp", .{});
 
-    // Apple's Accelerate framework is the preferred BLAS backend on macOS.
-    // On Linux, ggml falls back to its own CPU code path unless CUDA/Vulkan is wired in (later).
-    const c_flags_macos = &[_][]const u8{ "-DGGML_USE_ACCELERATE", "-DNDEBUG", "-O2", "-pthread" };
-    // _GNU_SOURCE is required on Linux: ggml.c pins threads with CPU_ZERO,
+    // whisper.cpp v1.9.x splits ggml into a core plus pluggable backends. We
+    // mirror upstream's CMake targets: ggml-base, the backend registry, the CPU
+    // backend (always), and on macOS the Metal + Accelerate-BLAS backends.
+    //
+    // GGML_VERSION/GGML_COMMIT are what upstream stamps from git; ggml.c
+    // returns them from ggml_version()/ggml_commit() and fails to compile
+    // without them. 0.15.1 is the ggml version pinned by whisper.cpp v1.9.1.
+    const ggml_version_defines = [_][]const u8{
+        "-DGGML_VERSION=\"0.15.1\"",
+        "-DGGML_COMMIT=\"whisper.cpp-v1.9.1\"",
+    };
+    // -fno-sanitize=undefined: Zig compiles C with UBSan in debug builds, and
+    // ggml deliberately computes buffer layouts by offsetting a NULL pointer
+    // (ggml_graph_nbytes), which UBSan traps at runtime. Upstream never builds
+    // with UBSan; without this flag every debug-mode model load aborts.
+    const base_flags_macos = [_][]const u8{ "-DNDEBUG", "-O2", "-pthread", "-fno-sanitize=undefined", "-D_DARWIN_C_SOURCE" } ++ ggml_version_defines;
+    // _GNU_SOURCE is required on Linux: ggml pins threads with CPU_ZERO,
     // CPU_ALLOC, pthread_setaffinity_np and getcpu, and glibc only declares
     // those behind it. Without it every ggml build fails with "call to
     // undeclared function". macOS never sees this, the affinity code is
     // Linux-only.
-    const c_flags_other = &[_][]const u8{ "-DNDEBUG", "-O2", "-pthread", "-D_GNU_SOURCE" };
-    const c_flags: []const []const u8 = if (target_os == .macos) c_flags_macos else c_flags_other;
-    const cpp_flags: []const []const u8 = if (target_os == .macos)
-        c_flags_macos ++ &[_][]const u8{"-std=c++11"}
+    const base_flags_linux = [_][]const u8{ "-DNDEBUG", "-O2", "-pthread", "-fno-sanitize=undefined", "-D_GNU_SOURCE" } ++ ggml_version_defines;
+    const cpp_std = [_][]const u8{"-std=c++17"};
+
+    // The CPU backend gets runtime weight repacking and llamafile's sgemm, both
+    // on by default upstream; on macOS it additionally routes matmuls through
+    // Accelerate.
+    const cpu_defines = [_][]const u8{ "-DGGML_USE_CPU_REPACK", "-DGGML_USE_LLAMAFILE" };
+    const accelerate_defines = [_][]const u8{ "-DGGML_USE_ACCELERATE", "-DACCELERATE_NEW_LAPACK", "-DACCELERATE_LAPACK_ILP64" };
+    // GGML_USE_* tells the backend registry which statically-linked backends to
+    // register; only ggml-backend-reg.cpp looks at these.
+    const registry_defines_macos = [_][]const u8{ "-DGGML_USE_CPU", "-DGGML_USE_METAL", "-DGGML_USE_BLAS" };
+    const registry_defines_linux = [_][]const u8{"-DGGML_USE_CPU"};
+
+    const is_macos = target_os == .macos;
+    const c_flags: []const []const u8 = if (is_macos) &base_flags_macos else &base_flags_linux;
+    const cpp_flags: []const []const u8 = if (is_macos) &(base_flags_macos ++ cpp_std) else &(base_flags_linux ++ cpp_std);
+    const cpu_c_flags: []const []const u8 = if (is_macos)
+        &(base_flags_macos ++ cpu_defines ++ accelerate_defines)
     else
-        c_flags_other ++ &[_][]const u8{"-std=c++11"};
+        &(base_flags_linux ++ cpu_defines);
+    const cpu_cpp_flags: []const []const u8 = if (is_macos)
+        &(base_flags_macos ++ cpp_std ++ cpu_defines ++ accelerate_defines)
+    else
+        &(base_flags_linux ++ cpp_std ++ cpu_defines);
+    const registry_flags: []const []const u8 = if (is_macos)
+        &(base_flags_macos ++ cpp_std ++ registry_defines_macos)
+    else
+        &(base_flags_linux ++ cpp_std ++ registry_defines_linux);
 
     // ── whisper C library ──
     const whisper_lib = b.addLibrary(.{
@@ -32,20 +67,164 @@ pub fn build(b: *std.Build) void {
             .link_libcpp = true,
         }),
     });
-    whisper_lib.root_module.addIncludePath(whisper_dep.path("."));
+    whisper_lib.root_module.addIncludePath(whisper_dep.path("include"));
+    whisper_lib.root_module.addIncludePath(whisper_dep.path("ggml/include"));
+    whisper_lib.root_module.addIncludePath(whisper_dep.path("ggml/src"));
+    whisper_lib.root_module.addIncludePath(whisper_dep.path("ggml/src/ggml-cpu"));
+    whisper_lib.root_module.addIncludePath(whisper_dep.path("src"));
+
+    // ggml core (upstream target: ggml-base)
     whisper_lib.root_module.addCSourceFiles(.{
         .root = whisper_dep.path("."),
-        .files = &.{ "ggml.c", "ggml-alloc.c", "ggml-backend.c", "ggml-quants.c" },
+        .files = &.{ "ggml/src/ggml.c", "ggml/src/ggml-alloc.c", "ggml/src/ggml-quants.c" },
         .flags = c_flags,
     });
     whisper_lib.root_module.addCSourceFiles(.{
         .root = whisper_dep.path("."),
-        .files = &.{"whisper.cpp"},
+        .files = &.{
+            "ggml/src/ggml.cpp",
+            "ggml/src/ggml-backend.cpp",
+            "ggml/src/ggml-backend-meta.cpp",
+            "ggml/src/ggml-opt.cpp",
+            "ggml/src/ggml-threading.cpp",
+            "ggml/src/gguf.cpp",
+        },
         .flags = cpp_flags,
     });
-    if (target_os == .macos) {
-        whisper_lib.root_module.linkFramework("Accelerate", .{});
+
+    // backend registry (upstream target: ggml)
+    whisper_lib.root_module.addCSourceFiles(.{
+        .root = whisper_dep.path("."),
+        .files = &.{ "ggml/src/ggml-backend-dl.cpp", "ggml/src/ggml-backend-reg.cpp" },
+        .flags = registry_flags,
+    });
+
+    // CPU backend (upstream target: ggml-cpu)
+    whisper_lib.root_module.addCSourceFiles(.{
+        .root = whisper_dep.path("."),
+        .files = &.{ "ggml/src/ggml-cpu/ggml-cpu.c", "ggml/src/ggml-cpu/quants.c" },
+        .flags = cpu_c_flags,
+    });
+    whisper_lib.root_module.addCSourceFiles(.{
+        .root = whisper_dep.path("."),
+        .files = &.{
+            "ggml/src/ggml-cpu/ggml-cpu.cpp",
+            "ggml/src/ggml-cpu/repack.cpp",
+            "ggml/src/ggml-cpu/hbm.cpp",
+            "ggml/src/ggml-cpu/traits.cpp",
+            "ggml/src/ggml-cpu/binary-ops.cpp",
+            "ggml/src/ggml-cpu/unary-ops.cpp",
+            "ggml/src/ggml-cpu/vec.cpp",
+            "ggml/src/ggml-cpu/ops.cpp",
+            "ggml/src/ggml-cpu/llamafile/sgemm.cpp",
+        },
+        .flags = cpu_cpp_flags,
+    });
+    switch (target.result.cpu.arch) {
+        .aarch64 => {
+            whisper_lib.root_module.addCSourceFiles(.{
+                .root = whisper_dep.path("."),
+                .files = &.{"ggml/src/ggml-cpu/arch/arm/quants.c"},
+                .flags = cpu_c_flags,
+            });
+            whisper_lib.root_module.addCSourceFiles(.{
+                .root = whisper_dep.path("."),
+                .files = &.{"ggml/src/ggml-cpu/arch/arm/repack.cpp"},
+                .flags = cpu_cpp_flags,
+            });
+        },
+        .x86_64 => {
+            whisper_lib.root_module.addCSourceFiles(.{
+                .root = whisper_dep.path("."),
+                .files = &.{"ggml/src/ggml-cpu/arch/x86/quants.c"},
+                .flags = cpu_c_flags,
+            });
+            whisper_lib.root_module.addCSourceFiles(.{
+                .root = whisper_dep.path("."),
+                .files = &.{
+                    "ggml/src/ggml-cpu/arch/x86/repack.cpp",
+                    "ggml/src/ggml-cpu/amx/amx.cpp",
+                    "ggml/src/ggml-cpu/amx/mmq.cpp",
+                },
+                .flags = cpu_cpp_flags,
+            });
+        },
+        else => {},
     }
+
+    if (is_macos) {
+        // Accelerate-backed BLAS backend (upstream target: ggml-blas)
+        whisper_lib.root_module.addCSourceFiles(.{
+            .root = whisper_dep.path("."),
+            .files = &.{"ggml/src/ggml-blas/ggml-blas.cpp"},
+            .flags = &(base_flags_macos ++ cpp_std ++ [_][]const u8{"-DGGML_BLAS_USE_ACCELERATE"} ++ accelerate_defines),
+        });
+
+        // Metal backend (upstream target: ggml-metal). This is what actually
+        // puts whisper inference on the GPU; without it use_gpu is a no-op and
+        // everything runs on CPU.
+        const metal_embed_define = [_][]const u8{"-DGGML_METAL_EMBED_LIBRARY"};
+        whisper_lib.root_module.addCSourceFiles(.{
+            .root = whisper_dep.path("."),
+            .files = &.{
+                "ggml/src/ggml-metal/ggml-metal.cpp",
+                "ggml/src/ggml-metal/ggml-metal-device.cpp",
+                "ggml/src/ggml-metal/ggml-metal-common.cpp",
+                "ggml/src/ggml-metal/ggml-metal-ops.cpp",
+            },
+            .flags = &(base_flags_macos ++ cpp_std ++ metal_embed_define),
+        });
+        whisper_lib.root_module.addCSourceFiles(.{
+            .root = whisper_dep.path("."),
+            .files = &.{
+                "ggml/src/ggml-metal/ggml-metal-device.m",
+                "ggml/src/ggml-metal/ggml-metal-context.m",
+            },
+            .flags = &(base_flags_macos ++ metal_embed_define),
+        });
+
+        // Embed the Metal shader source into the binary between the
+        // _ggml_metallib_start/_ggml_metallib_end symbols, exactly as
+        // upstream's CMake does: inline ggml-common.h and ggml-metal-impl.h
+        // into the .metal source, then .incbin it from a generated .s file.
+        // The runtime compiles the shaders on first load, so the .app needs no
+        // loose ggml-metal.metal resource.
+        const metal_embed = b.addSystemCommand(&.{
+            "/bin/sh", "-c",
+            \\set -e
+            \\COMMON="$0"; IMPL="$1"; METAL="$2"; OUT="$3"
+            \\sed -e "/__embed_ggml-common.h__/r $COMMON" -e "/__embed_ggml-common.h__/d" < "$METAL" > "$OUT.tmp.metal"
+            \\sed -e "/#include \"ggml-metal-impl.h\"/r $IMPL" -e "/#include \"ggml-metal-impl.h\"/d" < "$OUT.tmp.metal" > "$OUT.metal"
+            \\{
+            \\  echo '.section __DATA,__ggml_metallib'
+            \\  echo '.globl _ggml_metallib_start'
+            \\  echo '_ggml_metallib_start:'
+            \\  echo ".incbin \"$OUT.metal\""
+            \\  echo '.globl _ggml_metallib_end'
+            \\  echo '_ggml_metallib_end:'
+            \\} > "$OUT"
+        });
+        metal_embed.addFileArg(whisper_dep.path("ggml/src/ggml-common.h"));
+        metal_embed.addFileArg(whisper_dep.path("ggml/src/ggml-metal/ggml-metal-impl.h"));
+        metal_embed.addFileArg(whisper_dep.path("ggml/src/ggml-metal/ggml-metal.metal"));
+        const metal_embed_s = metal_embed.addOutputFileArg("ggml-metal-embed.s");
+        whisper_lib.root_module.addAssemblyFile(metal_embed_s);
+
+        whisper_lib.root_module.linkFramework("Accelerate", .{});
+        whisper_lib.root_module.linkFramework("Foundation", .{});
+        whisper_lib.root_module.linkFramework("Metal", .{});
+        whisper_lib.root_module.linkFramework("MetalKit", .{});
+    }
+
+    // whisper itself (upstream target: whisper)
+    whisper_lib.root_module.addCSourceFiles(.{
+        .root = whisper_dep.path("."),
+        .files = &.{"src/whisper.cpp"},
+        .flags = if (is_macos)
+            &(base_flags_macos ++ cpp_std ++ [_][]const u8{"-DWHISPER_VERSION=\"1.9.1\""})
+        else
+            &(base_flags_linux ++ cpp_std ++ [_][]const u8{"-DWHISPER_VERSION=\"1.9.1\""}),
+    });
 
     // ── Boo core static library (Zig → C API for the platform frontend) ──
     const boo_lib = b.addLibrary(.{
@@ -59,7 +238,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     boo_lib.root_module.linkLibrary(whisper_lib);
-    boo_lib.root_module.addIncludePath(whisper_dep.path("."));
+    boo_lib.root_module.addIncludePath(whisper_dep.path("include"));
+    boo_lib.root_module.addIncludePath(whisper_dep.path("ggml/include"));
     boo_lib.root_module.addIncludePath(b.path("include"));
     linkPlatformAudio(b, boo_lib.root_module, target_os);
     b.installArtifact(boo_lib);
@@ -76,7 +256,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.linkLibrary(whisper_lib);
-    exe.root_module.addIncludePath(whisper_dep.path("."));
+    exe.root_module.addIncludePath(whisper_dep.path("include"));
+    exe.root_module.addIncludePath(whisper_dep.path("ggml/include"));
     linkPlatformAudio(b, exe.root_module, target_os);
     b.installArtifact(exe);
 
@@ -84,6 +265,32 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run Boo CLI").dependOn(&run_cmd.step);
+
+    // ── Benchmark (zig build bench) ──
+    const bench = b.addExecutable(.{
+        .name = "boo-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .link_libcpp = true,
+        }),
+    });
+    bench.root_module.linkLibrary(whisper_lib);
+    bench.root_module.addIncludePath(whisper_dep.path("include"));
+    bench.root_module.addIncludePath(whisper_dep.path("ggml/include"));
+    linkAudioSystemDepsOnly(bench.root_module, target_os);
+
+    // Default benchmark audio: the jfk.wav sample that ships inside the
+    // whisper.cpp package, so the bench needs no committed fixtures.
+    const bench_options = b.addOptions();
+    bench_options.addOptionPath("jfk_wav", whisper_dep.path("samples/jfk.wav"));
+    bench.root_module.addOptions("build_options", bench_options);
+
+    const bench_run = b.addRunArtifact(bench);
+    if (b.args) |args| bench_run.addArgs(args);
+    b.step("bench", "Run transcription performance benchmark").dependOn(&bench_run.step);
 
     // ── Linux GTK4 + libadwaita app ──
     if (target_os == .linux) {
@@ -151,6 +358,10 @@ pub fn build(b: *std.Build) void {
             .x86_64 => "x86_64",
             else => @panic("unsupported macOS architecture"),
         };
+        // -all_load merges the archive without extracting members first:
+        // whisper v1.9 has colliding member basenames (ggml-cpu.c and
+        // ggml-cpu.cpp both emit ggml-cpu.o), so an `ar -x` extraction
+        // overwrites objects and silently drops symbols.
         const repack = b.addSystemCommand(&.{
             "/bin/sh", "-c",
             \\set -e
@@ -158,9 +369,9 @@ pub fn build(b: *std.Build) void {
             \\case "$ARCHIVE" in /*) ;; *) ARCHIVE="$PWD/$ARCHIVE" ;; esac
             \\case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
             \\WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
-            \\cd "$WORK"; ar -x "$ARCHIVE"; chmod u+r ./*.o
-            \\ld -r -arch "$ARCH" ./*.o -o whisper-merged.o
-            \\ar -rcs "$OUT/libwhisper.a" whisper-merged.o
+            \\SDK=$(xcrun --sdk macosx --show-sdk-version)
+            \\ld -r -arch "$ARCH" -platform_version macos 14.0 "$SDK" -all_load "$ARCHIVE" -o "$WORK/whisper-merged.o"
+            \\ar -rcs "$OUT/libwhisper.a" "$WORK/whisper-merged.o"
         });
         repack.addFileArg(whisper_lib.getEmittedBin());
         const repack_dir = repack.addOutputDirectoryArg("whisper-repacked");
@@ -192,6 +403,10 @@ pub fn build(b: *std.Build) void {
             "AudioToolbox",
             "-framework",
             "Carbon",
+            "-framework",
+            "Metal",
+            "-framework",
+            "MetalKit",
             "-o",
         });
         const swift_out = swift_compile.addOutputFileArg("Boo");
@@ -226,7 +441,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     unit_tests.root_module.linkLibrary(whisper_lib);
-    unit_tests.root_module.addIncludePath(whisper_dep.path("."));
+    unit_tests.root_module.addIncludePath(whisper_dep.path("include"));
+    unit_tests.root_module.addIncludePath(whisper_dep.path("ggml/include"));
     unit_tests.root_module.addIncludePath(b.path("include"));
     linkPlatformAudio(b, unit_tests.root_module, target_os);
 
@@ -260,6 +476,10 @@ fn linkAudioSystemDepsOnly(mod: *std.Build.Module, os_tag: std.Target.Os.Tag) vo
             mod.linkFramework("Foundation", .{});
             mod.linkFramework("CoreAudio", .{});
             mod.linkFramework("AudioToolbox", .{});
+            // The Metal-backed whisper library needs these in every binary
+            // that links it, including the CLI and the test runner.
+            mod.linkFramework("Metal", .{});
+            mod.linkFramework("MetalKit", .{});
         },
         .linux => mod.linkSystemLibrary("pipewire-0.3", .{}),
         else => {},

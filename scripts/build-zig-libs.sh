@@ -7,8 +7,11 @@
 #
 # The repack step exists because Zig 0.16's archiver writes Mach-O object
 # files into static archives without 8-byte alignment that Apple's linker
-# requires. We extract the .o files, merge them via `ld -r` (which produces a
+# requires. We merge the archive via `ld -r -all_load` (which produces a
 # single properly-aligned object), and re-archive that single object.
+# -all_load keeps this robust against colliding member basenames (whisper
+# v1.9 emits ggml-cpu.o twice, from ggml-cpu.c and ggml-cpu.cpp), which an
+# `ar -x` extraction would silently overwrite.
 set -euo pipefail
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +30,9 @@ esac
 echo "→ zig build -Doptimize=ReleaseFast"
 zig build -Doptimize=ReleaseFast
 
-WHISPER_A=$(find .zig-cache/o -name "libwhisper.a" -size +1M | head -1)
+# Newest first: stale archives from previous whisper.cpp versions may still
+# sit in the cache alongside the one this build just produced.
+WHISPER_A=$(find .zig-cache/o -name "libwhisper.a" -size +1M -print0 | xargs -0 ls -t | head -1)
 if [[ -z "$WHISPER_A" ]]; then
     echo "Could not locate Zig-built libwhisper.a in .zig-cache" >&2
     exit 1
@@ -38,14 +43,8 @@ WORK=$(mktemp -d)
 # Single quotes: expand $WORK when the trap fires, not when it's installed.
 trap 'rm -rf "$WORK"' EXIT
 
-(
-    cd "$WORK"
-    ar -x "$PROJ/$WHISPER_A"
-    chmod u+r ./*.o
-    ld -r -arch "$ZIG_ARCH" \
-        ggml.o ggml-alloc.o ggml-backend.o ggml-quants.o whisper.o \
-        -o whisper-merged.o
-)
+SDK=$(xcrun --sdk macosx --show-sdk-version)
+ld -r -arch "$ZIG_ARCH" -platform_version macos 14.0 "$SDK" -all_load "$PROJ/$WHISPER_A" -o "$WORK/whisper-merged.o"
 
 mkdir -p zig-out/lib
 rm -f zig-out/lib/libwhisper.a
