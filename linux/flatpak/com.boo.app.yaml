@@ -26,8 +26,10 @@ finish-args:
   - --socket=fallback-x11
   - --share=ipc
   - --device=dri
-  # Audio capture
-  - --socket=pipewire
+  # Audio capture. Boo speaks PipeWire natively rather than through the
+  # PulseAudio shim, and flatpak has no `--socket=pipewire` — the PipeWire
+  # socket is exposed as a filesystem path instead.
+  - --filesystem=xdg-run/pipewire-0
   # Persistent storage for the user's model file
   - --filesystem=xdg-data/boo:rw
   # XDG portals we depend on

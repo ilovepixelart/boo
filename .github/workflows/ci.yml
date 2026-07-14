@@ -82,8 +82,8 @@ jobs:
         # portal replies on — get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
 
-  flatpak:
-    name: Linux (flatpak manifest)
+  flatpak-metadata:
+    name: Linux (flatpak metadata)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -93,9 +93,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             appstream flatpak-builder desktop-file-utils
-          # Catches a malformed manifest without a full (very slow) flatpak build.
           flatpak-builder --show-manifest linux/flatpak/com.boo.app.yaml > /dev/null
           # Strict: Flathub rejects submissions over these same warnings.
           appstreamcli validate --no-net linux/flatpak/com.boo.app.metainfo.xml
           desktop-file-validate linux/flatpak/com.boo.app.desktop
           echo "flatpak metadata ok"
+
+  flatpak-build:
+    name: Linux (flatpak build)
+    runs-on: ubuntu-24.04
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      # Actually build the bundle. Metadata validation is not enough: it does
+      # not check finish-args, so an invalid permission (e.g. a socket type
+      # that does not exist) sails through --show-manifest and only blows up
+      # in a real build — after which the app would have shipped with no
+      # access to what it asked for.
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: boo.flatpak
+          manifest-path: linux/flatpak/com.boo.app.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
