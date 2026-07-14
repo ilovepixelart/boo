@@ -7,6 +7,14 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
+# Single source of truth: the version comes from build.zig.zon, so a release is
+# one edit there (plus a metainfo changelog entry), not four files in sync.
+VERSION="$(sed -n 's/.*\.version = "\([0-9][^"]*\)".*/\1/p' "$PROJ/build.zig.zon")"
+if [ -z "$VERSION" ]; then
+    echo "bundle.sh: could not read .version from build.zig.zon" >&2
+    exit 1
+fi
+
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 
@@ -30,9 +38,9 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.boo.app</string>
     <key>CFBundleVersion</key>
-    <string>0.1.4</string>
+    <string>@@VERSION@@</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.4</string>
+    <string>@@VERSION@@</string>
     <key>CFBundleExecutable</key>
     <string>Boo</string>
     <key>CFBundleIconFile</key>
@@ -52,6 +60,11 @@ cat >"$CONTENTS/Info.plist" <<'EOF'
 </dict>
 </plist>
 EOF
+
+# Fill the version placeholder from build.zig.zon (see VERSION above). Done by
+# substitution rather than an unquoted heredoc so nothing else in the plist can
+# be accidentally expanded.
+sed -i '' "s/@@VERSION@@/$VERSION/g" "$CONTENTS/Info.plist"
 
 # Code sign with stable identity so macOS remembers permissions across rebuilds.
 # Defaults to ad-hoc; override with BOO_CODESIGN_IDENTITY env var, e.g.

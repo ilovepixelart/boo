@@ -312,7 +312,9 @@ flatpak-builder --user --force-clean --repo=repo build-dir \
 flatpak build-bundle repo boo.flatpak com.boo.app
 ```
 
-Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-14` → arm64, `macos-13` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile) plus the Linux Flatpak, then publishes a GitHub Release. Bump the version in `build.zig.zon`, `macos/project.yml`, `bundle.sh`, and the metainfo `<release>` entry first — then:
+Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-15` → arm64, `macos-15-intel` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile) plus the Linux Flatpak, then publishes a GitHub Release with `SHA256SUMS`.
+
+To cut a release, edit the version in **`build.zig.zon`** (the single source of truth — `bundle.sh` derives from it) and add a `<release>` entry to the metainfo changelog. `macos/project.yml` also carries it for the Xcode dev build; `scripts/check-version.sh` runs in CI and fails if any of these drift. Then:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

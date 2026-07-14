@@ -80,6 +80,10 @@ jobs:
       - name: C (clang-format)
         run: clang-format --dry-run --Werror linux/src/*.c linux/src/*.h include/*.h
 
+      - name: Version consistency
+        # build.zig.zon is the source of truth; catch any file that drifted.
+        run: ./scripts/check-version.sh
+
       - name: Python (ruff — Astral)
         run: |
           ruff check linux/tests
