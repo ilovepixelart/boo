@@ -54,7 +54,7 @@ jobs:
           file "$BIN" | grep -q "${{ matrix.arch }}" || {
             echo "::error::binary is not ${{ matrix.arch }}"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dmg-${{ matrix.arch }}
           path: zig-out/*.dmg
@@ -83,7 +83,7 @@ jobs:
       - name: Name the bundle by version
         run: mv boo.flatpak "boo-${{ github.event.inputs.tag || github.ref_name }}-x86_64.flatpak"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flatpak
           path: '*.flatpak'
