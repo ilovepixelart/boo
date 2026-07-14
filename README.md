@@ -19,7 +19,7 @@ Local-first speech-to-text overlay for **macOS** and **Linux**. Press a hotkey, 
 
 ## Why
 
-Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs `whisper.cpp` on-device and ships a native frontend per platform — no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
+Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) on-device and ships a native frontend per platform — no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
 
 The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org/ghostty): a portable Zig core (`libboo-core`) exposed through a stable C API, plus a separate "apprt" (application runtime) per OS. Same philosophy — *cross-platform shouldn't mean foreign*.
 
