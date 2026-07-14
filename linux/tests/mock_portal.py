@@ -18,6 +18,7 @@ one silently shadows the other. GDBus dispatches on (interface, method).
 
 Emits one JSON line per observed event, for the test to assert on.
 """
+
 import json
 import sys
 
@@ -125,7 +126,10 @@ class MockPortal:
         def fire():
             emit("response", path=path)
             self.conn.emit_signal(
-                sender, path, "org.freedesktop.portal.Request", "Response",
+                sender,
+                path,
+                "org.freedesktop.portal.Request",
+                "Response",
                 GLib.Variant("(ua{sv})", (0, results)),
             )
             return False
@@ -148,33 +152,44 @@ class MockPortal:
             self.gs_session = self.session_path(sender, options)
             emit("gs.CreateSession", session=self.gs_session)
             handle = self.respond(
-                sender, options,
-                {"session_handle": GLib.Variant("s", self.gs_session)})
+                sender, options, {"session_handle": GLib.Variant("s", self.gs_session)}
+            )
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
         elif iface == IFACE_GS and method == "ListShortcuts":
             session, options = args
             shortcuts = []
             if self.prebound:
-                shortcuts = [(
-                    "toggle-record",
-                    {"description": GLib.Variant("s", "Toggle Boo recording"),
-                     "trigger_description": GLib.Variant("s", "Ctrl+Shift+Space")},
-                )]
+                shortcuts = [
+                    (
+                        "toggle-record",
+                        {
+                            "description": GLib.Variant("s", "Toggle Boo recording"),
+                            "trigger_description": GLib.Variant("s", "Ctrl+Shift+Space"),
+                        },
+                    )
+                ]
             emit("gs.ListShortcuts", prebound=self.prebound)
-            handle = self.respond(sender, options, {
-                "shortcuts": GLib.Variant("a(sa{sv})", shortcuts),
-            })
+            handle = self.respond(
+                sender,
+                options,
+                {
+                    "shortcuts": GLib.Variant("a(sa{sv})", shortcuts),
+                },
+            )
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
         elif iface == IFACE_GS and method == "BindShortcuts":
             session, shortcuts, parent, options = args
-            binds = [{"id": sid,
-                      "trigger": props.get("preferred_trigger", ""),
-                      "description": props.get("description", "")}
-                     for sid, props in shortcuts]
-            emit("gs.BindShortcuts", session=session, parent_window=parent,
-                 shortcuts=binds)
+            binds = [
+                {
+                    "id": sid,
+                    "trigger": props.get("preferred_trigger", ""),
+                    "description": props.get("description", ""),
+                }
+                for sid, props in shortcuts
+            ]
+            emit("gs.BindShortcuts", session=session, parent_window=parent, shortcuts=binds)
             handle = self.respond(sender, options, {})
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
@@ -183,16 +198,18 @@ class MockPortal:
             self.rd_session = self.session_path(sender, options)
             emit("rd.CreateSession", session=self.rd_session)
             handle = self.respond(
-                sender, options,
-                {"session_handle": GLib.Variant("s", self.rd_session)})
+                sender, options, {"session_handle": GLib.Variant("s", self.rd_session)}
+            )
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
         elif iface == IFACE_RD and method == "SelectDevices":
             session, options = args
-            emit("rd.SelectDevices",
-                 types=int(options.get("types", 0)),
-                 persist_mode=int(options.get("persist_mode", 0)),
-                 restore_token=options.get("restore_token", ""))
+            emit(
+                "rd.SelectDevices",
+                types=int(options.get("types", 0)),
+                persist_mode=int(options.get("persist_mode", 0)),
+                restore_token=options.get("restore_token", ""),
+            )
             handle = self.respond(sender, options, {})
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
@@ -201,10 +218,14 @@ class MockPortal:
             emit("rd.Start", session=session)
             # What a real portal returns once the user approves: a keyboard
             # grant plus a fresh restore token.
-            handle = self.respond(sender, options, {
-                "devices": GLib.Variant("u", 1),  # KEYBOARD
-                "restore_token": GLib.Variant("s", "mock-restore-token"),
-            })
+            handle = self.respond(
+                sender,
+                options,
+                {
+                    "devices": GLib.Variant("u", 1),  # KEYBOARD
+                    "restore_token": GLib.Variant("s", "mock-restore-token"),
+                },
+            )
             invocation.return_value(GLib.Variant("(o)", (handle,)))
 
         elif iface == IFACE_RD and method == "NotifyKeyboardKeysym":
@@ -225,15 +246,18 @@ class MockPortal:
                 return
             emit("control.FireShortcut", ok=True, shortcut_id=shortcut_id)
             self.conn.emit_signal(
-                None, OBJ_PATH, IFACE_GS, "Activated",
+                None,
+                OBJ_PATH,
+                IFACE_GS,
+                "Activated",
                 GLib.Variant("(osa{sv})", (self.gs_session, shortcut_id, {})),
             )
             invocation.return_value(GLib.Variant("(b)", (True,)))
 
         else:
             invocation.return_dbus_error(
-                "org.freedesktop.DBus.Error.UnknownMethod",
-                f"{iface}.{method}")
+                "org.freedesktop.DBus.Error.UnknownMethod", f"{iface}.{method}"
+            )
 
     def on_bus_acquired(self, conn, name):
         self.conn = conn
@@ -252,8 +276,12 @@ def main():
     # our shortcut from a previous session.
     portal = MockPortal(prebound="--prebound" in sys.argv)
     Gio.bus_own_name(
-        Gio.BusType.SESSION, BUS_NAME, Gio.BusNameOwnerFlags.NONE,
-        portal.on_bus_acquired, None, portal.on_name_lost,
+        Gio.BusType.SESSION,
+        BUS_NAME,
+        Gio.BusNameOwnerFlags.NONE,
+        portal.on_bus_acquired,
+        None,
+        portal.on_name_lost,
     )
     GLib.MainLoop().run()
 

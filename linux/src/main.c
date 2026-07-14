@@ -67,10 +67,11 @@ static char *find_model_path(void) {
     if (xdg_env && *xdg_env) {
         xdg = g_build_filename(xdg_env, "boo", "models", NULL);
     } else {
-        xdg = g_build_filename(g_get_home_dir(), ".local", "share", "boo", "models", NULL);
+        xdg =
+            g_build_filename(g_get_home_dir(), ".local", "share", "boo", "models", NULL);
     }
 
-    const char *dirs[] = { "models", xdg, "/usr/share/boo/models", NULL };
+    const char *dirs[] = {"models", xdg, "/usr/share/boo/models", NULL};
     for (int i = 0; dirs[i]; i++) {
         char *found = find_model_in(dirs[i]);
         if (found) return found;
@@ -89,16 +90,17 @@ static void show_error(GtkApplication *app, const char *heading, const char *bod
 // than making them guess. Inside Flatpak, XDG_DATA_HOME points at the sandbox.
 static char *model_install_hint(void) {
     const char *xdg = g_getenv("XDG_DATA_HOME");
-    g_autofree char *dir = xdg && *xdg
-        ? g_build_filename(xdg, "boo", "models", NULL)
-        : g_build_filename(g_get_home_dir(), ".local", "share", "boo", "models", NULL);
+    g_autofree char *dir = xdg && *xdg ? g_build_filename(xdg, "boo", "models", NULL)
+                                       : g_build_filename(g_get_home_dir(), ".local",
+                                                          "share", "boo", "models", NULL);
 
     return g_strdup_printf(
         "Boo needs a whisper model, which isn't bundled — they're 140 MB+.\n\n"
         "Download one and relaunch:\n\n"
         "  mkdir -p %s\n"
         "  curl -L -o %s/ggml-base.en.bin \\\n"
-        "    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n\n"
+        "    "
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n\n"
         "Or point BOO_MODEL at a model you already have.",
         dir, dir);
 }

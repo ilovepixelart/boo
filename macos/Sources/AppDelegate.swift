@@ -1,5 +1,5 @@
-import Cocoa
 import Carbon
+import Cocoa
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var overlayWindow: OverlayWindow?
@@ -57,9 +57,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenu()
 
         // Listen for theme/settings changes
-        NotificationCenter.default.addObserver(self, selector: #selector(themeDidChange), name: .themeChanged, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(opacityDidChange(_:)), name: .opacityChanged, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(autoTypeDidChange(_:)), name: .autoTypeChanged, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(themeDidChange), name: .themeChanged, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(opacityDidChange(_:)), name: .opacityChanged, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(autoTypeDidChange(_:)), name: .autoTypeChanged, object: nil)
 
         // Setup status bar item
         setupStatusBar()
@@ -80,7 +83,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Boo 👻", action: nil, keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
 
-        let recordItem = NSMenuItem(title: "Record (Ctrl+Shift+Space)", action: #selector(statusBarToggleRecord), keyEquivalent: "")
+        let recordItem = NSMenuItem(
+            title: "Record (Ctrl+Shift+Space)", action: #selector(statusBarToggleRecord), keyEquivalent: "")
         menu.addItem(recordItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -92,8 +96,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
 
         // Status bar updates — only poll when recording/transcribing
-        NotificationCenter.default.addObserver(self, selector: #selector(recordingStateChanged), name: .booRecordingStarted, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(recordingStateChanged), name: .booRecordingStopped, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(recordingStateChanged), name: .booRecordingStarted, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(recordingStateChanged), name: .booRecordingStopped, object: nil)
     }
 
     func updateStatusBar() {
@@ -104,26 +110,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if recording {
             // Red waveform plus a live timer.
-            button.image = NSImage(systemSymbolName: "waveform",
-                                   accessibilityDescription: "Boo — recording")
+            button.image = NSImage(
+                systemSymbolName: "waveform",
+                accessibilityDescription: "Boo — recording")
             button.contentTintColor = .systemRed
 
             let totalSecs = Int(Float(boo_get_audio_samples(ctx)) / 16000.0)
-            button.title = totalSecs < 60
+            button.title =
+                totalSecs < 60
                 ? String(format: " %ds", totalSecs)
                 : String(format: " %d:%02d", totalSecs / 60, totalSecs % 60)
         } else if transcribing {
             // Transcription blocks for seconds on a big model; without this the
             // menu bar snapped straight back to idle and looked like nothing
             // happened.
-            button.image = NSImage(systemSymbolName: "waveform.badge.magnifyingglass",
-                                   accessibilityDescription: "Boo — transcribing")
+            button.image = NSImage(
+                systemSymbolName: "waveform.badge.magnifyingglass",
+                accessibilityDescription: "Boo — transcribing")
             button.contentTintColor = .secondaryLabelColor
             button.title = ""
         } else {
-            button.image = NSImage(systemSymbolName: "waveform",
-                                   accessibilityDescription: "Boo")
-            button.contentTintColor = nil // system default
+            button.image = NSImage(
+                systemSymbolName: "waveform",
+                accessibilityDescription: "Boo")
+            button.contentTintColor = nil  // system default
             button.title = ""
         }
 
@@ -145,14 +155,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if !boo_is_recording(ctx) && !boo_is_transcribing(ctx) {
                     self.statusBarTimer?.invalidate()
                     self.statusBarTimer = nil
-                    self.updateStatusBar() // reset to idle state
+                    self.updateStatusBar()  // reset to idle state
                 }
             }
         }
     }
 
     @objc func statusBarToggleRecord() {
-        overlayWindow?.toggleRecording(viaHotkey: true) // treat as hotkey since window may be hidden
+        overlayWindow?.toggleRecording(viaHotkey: true)  // treat as hotkey since window may be hidden
     }
 
     @objc func showMainWindow() {
@@ -165,7 +175,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // App menu
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Boo", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(
+            withTitle: "About Boo", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""
+        )
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
@@ -217,10 +229,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let projectDir = (appDir as NSString).deletingLastPathComponent
 
         return [
-            NSHomeDirectory() + "/.boo/models",   // where the README tells you to put it
-            "models",                              // cwd, for `zig build run`
-            projectDir + "/models",                // source checkout: zig-out/Boo.app → ../models
-            Bundle.main.resourcePath ?? "",        // bundled alongside the app
+            NSHomeDirectory() + "/.boo/models",  // where the README tells you to put it
+            "models",  // cwd, for `zig build run`
+            projectDir + "/models",  // source checkout: zig-out/Boo.app → ../models
+            Bundle.main.resourcePath ?? "",  // bundled alongside the app
         ].filter { !$0.isEmpty }
     }
 
@@ -245,7 +257,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for dir in modelSearchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
 
-            let models = entries
+            let models =
+                entries
                 .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") }
                 .sorted()
             guard !models.isEmpty else { continue }
@@ -290,7 +303,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Global Hotkey (Ctrl+Shift+Space)
 
     private func registerHotKey() {
-        let hotKeyID = EventHotKeyID(signature: OSType(0x424F4F21), id: 1) // "BOO!"
+        let hotKeyID = EventHotKeyID(signature: OSType(0x424F4F21), id: 1)  // "BOO!"
         var keyRef: EventHotKeyRef?
 
         // Ctrl+Shift+Space: modifiers = controlKey + shiftKey, keycode = 49 (space)

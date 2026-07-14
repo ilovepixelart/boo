@@ -66,7 +66,9 @@ class OverlayWindow: NSWindow {
     }
 
     @objc func appDidActivate(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
         if app.bundleIdentifier != Bundle.main.bundleIdentifier {
             previousApp = app
         }
@@ -134,8 +136,8 @@ class OverlayWindow: NSWindow {
         recordButton.isBordered = false
         recordButton.title = ""
         recordButton.wantsLayer = true
-        recordButton.layer?.backgroundColor = NSColor(red: 1.0, green: 0.23, blue: 0.19, alpha: 1).cgColor // #FF3B30
-        recordButton.layer?.cornerRadius = 20 // 40px circle
+        recordButton.layer?.backgroundColor = NSColor(red: 1.0, green: 0.23, blue: 0.19, alpha: 1).cgColor  // #FF3B30
+        recordButton.layer?.cornerRadius = 20  // 40px circle
         recordButton.translatesAutoresizingMaskIntoConstraints = false
         recordButton.target = self
         recordButton.action = #selector(toggleRecording)
@@ -243,7 +245,8 @@ class OverlayWindow: NSWindow {
         // which is always true for the Record button, and true for the hotkey
         // too once Boo's window has been clicked.
         let frontmost = NSWorkspace.shared.frontmostApplication
-        targetApp = (frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier)
+        targetApp =
+            (frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier)
             ? previousApp
             : (frontmost ?? previousApp)
 
@@ -354,7 +357,9 @@ class OverlayWindow: NSWindow {
         buttonBar.spacing = 6
         buttonBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let copyBtn = NSButton(image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")!, target: self, action: #selector(copyBubbleText(_:)))
+        let copyBtn = NSButton(
+            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")!, target: self,
+            action: #selector(copyBubbleText(_:)))
         copyBtn.bezelStyle = .accessoryBarAction
         copyBtn.isBordered = false
         copyBtn.tag = index
@@ -365,7 +370,9 @@ class OverlayWindow: NSWindow {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         buttonBar.addArrangedSubview(spacer)
 
-        let dismissBtn = NSButton(image: NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")!, target: self, action: #selector(dismissBubble(_:)))
+        let dismissBtn = NSButton(
+            image: NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")!, target: self,
+            action: #selector(dismissBubble(_:)))
         dismissBtn.bezelStyle = .accessoryBarAction
         dismissBtn.isBordered = false
         dismissBtn.tag = index
@@ -429,19 +436,21 @@ class OverlayWindow: NSWindow {
         var view: NSView? = sender
         while let v = view {
             if v.superview == transcriptStack {
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.2
-                    v.animator().alphaValue = 0
-                }, completionHandler: {
-                    self.transcriptStack.removeArrangedSubview(v)
-                    v.removeFromSuperview()
-                    // Update document view size
-                    self.transcriptStack.layoutSubtreeIfNeeded()
-                    if let docView = self.transcriptScroll.documentView {
-                        let h = self.transcriptStack.fittingSize.height + 8
-                        docView.frame = NSRect(x: 0, y: 0, width: self.transcriptScroll.frame.width, height: h)
-                    }
-                })
+                NSAnimationContext.runAnimationGroup(
+                    { ctx in
+                        ctx.duration = 0.2
+                        v.animator().alphaValue = 0
+                    },
+                    completionHandler: {
+                        self.transcriptStack.removeArrangedSubview(v)
+                        v.removeFromSuperview()
+                        // Update document view size
+                        self.transcriptStack.layoutSubtreeIfNeeded()
+                        if let docView = self.transcriptScroll.documentView {
+                            let h = self.transcriptStack.fittingSize.height + 8
+                            docView.frame = NSRect(x: 0, y: 0, width: self.transcriptScroll.frame.width, height: h)
+                        }
+                    })
                 return
             }
             view = v.superview
@@ -505,7 +514,8 @@ class OverlayWindow: NSWindow {
         // CGEvent only — no AppleScript, no extra permission dialogs
         let source = CGEventSource(stateID: .combinedSessionState)
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
+        else {
             return
         }
         down.flags = .maskCommand
@@ -514,7 +524,6 @@ class OverlayWindow: NSWindow {
         up.flags = .maskCommand
         up.post(tap: .cghidEventTap)
     }
-
 
     // MARK: - Display Link (only active during recording/transcribing)
     //
@@ -526,7 +535,7 @@ class OverlayWindow: NSWindow {
     func createDisplayLink() {
         let link = displayLink(target: self, selector: #selector(displayLinkFired))
         link.add(to: .main, forMode: .common)
-        link.isPaused = true // only runs while recording / transcribing
+        link.isPaused = true  // only runs while recording / transcribing
         waveformLink = link
     }
 

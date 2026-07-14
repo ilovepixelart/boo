@@ -23,9 +23,9 @@
 // The ID is our own opaque key. The trigger is only a *preferred* one: the
 // portal's dialog lets the user rebind it, and some desktops ignore the
 // preference outright. Never assume the bound key is the one we asked for.
-#define BOO_SHORTCUT_ID "toggle-record"
+#define BOO_SHORTCUT_ID          "toggle-record"
 #define BOO_SHORTCUT_DESCRIPTION "Toggle Boo recording"
-#define BOO_SHORTCUT_TRIGGER "CTRL+SHIFT+space"
+#define BOO_SHORTCUT_TRIGGER     "CTRL+SHIFT+space"
 
 typedef enum {
     BOO_GS_CREATE_SESSION,
@@ -62,10 +62,13 @@ static void report_unavailable(BooGlobalShortcut *gs, const char *reason) {
 
 // org.freedesktop.portal.GlobalShortcuts.Activated
 static void on_activated(GDBusConnection *dbus, const char *sender,
-                         const char *object_path, const char *iface,
-                         const char *signal, GVariant *params,
-                         gpointer user_data) {
-    (void)dbus; (void)sender; (void)object_path; (void)iface; (void)signal;
+                         const char *object_path, const char *iface, const char *signal,
+                         GVariant *params, gpointer user_data) {
+    (void)dbus;
+    (void)sender;
+    (void)object_path;
+    (void)iface;
+    (void)signal;
     BooGlobalShortcut *gs = user_data;
 
     // (osa{sv}) — child 1 is the ID of the shortcut that fired.
@@ -105,14 +108,14 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
     case BOO_GS_CREATE_SESSION: {
         g_autofree char *session_token = g_strdup_printf("boo_%08x", g_random_int());
         return g_variant_new_parsed(
-            "({'handle_token': <%s>, 'session_handle_token': <%s>},)",
-            handle_token, session_token);
+            "({'handle_token': <%s>, 'session_handle_token': <%s>},)", handle_token,
+            session_token);
     }
 
     case BOO_GS_LIST_SHORTCUTS:
         if (!gs->session_handle) return NULL;
-        return g_variant_new_parsed("(%o, {'handle_token': <%s>})",
-                                    gs->session_handle, handle_token);
+        return g_variant_new_parsed("(%o, {'handle_token': <%s>})", gs->session_handle,
+                                    handle_token);
 
     case BOO_GS_BIND_SHORTCUTS: {
         if (!gs->session_handle) return NULL;
@@ -125,8 +128,8 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
 
         // Empty parent-window handle: the portal dialog is unparented.
         return g_variant_new_parsed("(%o, %*, '', {'handle_token': <%s>})",
-                                    gs->session_handle,
-                                    g_variant_builder_end(&binds), handle_token);
+                                    gs->session_handle, g_variant_builder_end(&binds),
+                                    handle_token);
     }
     }
     return NULL;
@@ -144,9 +147,8 @@ static void on_session_created(BooGlobalShortcut *gs, GVariant *results) {
 
     // Subscribe to activations before binding, so an early one can't be missed.
     gs->activate_subscription = g_dbus_connection_signal_subscribe(
-        gs->dbus, NULL, PORTAL_IFACE_GLOBAL_SHORTCUTS, "Activated",
-        PORTAL_OBJECT_PATH, gs->session_handle,
-        G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH, on_activated, gs, NULL);
+        gs->dbus, NULL, PORTAL_IFACE_GLOBAL_SHORTCUTS, "Activated", PORTAL_OBJECT_PATH,
+        gs->session_handle, G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH, on_activated, gs, NULL);
 
     // Ask what we already have before asking for anything new.
     request(gs, BOO_GS_LIST_SHORTCUTS);
@@ -186,11 +188,10 @@ static void on_error(const char *reason, gboolean unsupported, gpointer user_dat
     // By far the common case, and worth naming precisely: GNOME only shipped a
     // GlobalShortcuts backend in 48, so on 46 (Ubuntu 24.04 LTS) and 47 the
     // interface is absent outright and D-Bus answers UnknownMethod.
-    report_unavailable(user_data,
-                       unsupported
-                           ? "this desktop has no global-shortcuts portal "
-                             "(needs GNOME 48+, KDE Plasma, or Hyprland)"
-                           : reason);
+    report_unavailable(user_data, unsupported
+                                      ? "this desktop has no global-shortcuts portal "
+                                        "(needs GNOME 48+, KDE Plasma, or Hyprland)"
+                                      : reason);
 }
 
 static void request(BooGlobalShortcut *gs, BooGsStep step) {
@@ -201,17 +202,17 @@ static void request(BooGlobalShortcut *gs, BooGsStep step) {
     };
 
     gs->step = step; // make_payload and on_response both key off this
-    boo_portal_call(gs->dbus, &gs->response_subscription,
-                    PORTAL_IFACE_GLOBAL_SHORTCUTS, methods[step],
-                    make_payload, on_response, on_error, gs);
+    boo_portal_call(gs->dbus, &gs->response_subscription, PORTAL_IFACE_GLOBAL_SHORTCUTS,
+                    methods[step], make_payload, on_response, on_error, gs);
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 
-BooGlobalShortcut *boo_global_shortcut_new(
-    GtkWindow *parent_window, BooShortcutCallback on_activated_cb,
-    BooShortcutUnavailableCallback on_unavailable, gpointer user_data) {
+BooGlobalShortcut *boo_global_shortcut_new(GtkWindow *parent_window,
+                                           BooShortcutCallback on_activated_cb,
+                                           BooShortcutUnavailableCallback on_unavailable,
+                                           gpointer user_data) {
     BooGlobalShortcut *gs = g_new0(BooGlobalShortcut, 1);
     gs->on_activated = on_activated_cb;
     gs->on_unavailable = on_unavailable;

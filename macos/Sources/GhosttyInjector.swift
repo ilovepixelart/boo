@@ -30,10 +30,10 @@ enum GhosttyInjector {
     /// denied, no terminal window) so the caller can fall back.
     static func inputText(_ text: String) -> Bool {
         let source = """
-        tell application id "\(ghosttyBundleID)"
-            input text "\(escapeForAppleScript(text))" to focused terminal of selected tab of front window
-        end tell
-        """
+            tell application id "\(ghosttyBundleID)"
+                input text "\(escapeForAppleScript(text))" to focused terminal of selected tab of front window
+            end tell
+            """
         guard let script = NSAppleScript(source: source) else { return false }
 
         var error: NSDictionary?
@@ -61,7 +61,7 @@ enum GhosttyInjector {
     /// re-run that check — it is a security boundary, not cosmetics.
     private static func escapeForAppleScript(_ text: String) -> String {
         text
-            .replacingOccurrences(of: "\\", with: "\\\\")   // must be first
+            .replacingOccurrences(of: "\\", with: "\\\\")  // must be first
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\n", with: "\\n")

@@ -28,8 +28,8 @@
 // See:
 //   https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Request.html
 
-#define PORTAL_BUS_NAME "org.freedesktop.portal.Desktop"
-#define PORTAL_OBJECT_PATH "/org/freedesktop/portal/desktop"
+#define PORTAL_BUS_NAME      "org.freedesktop.portal.Desktop"
+#define PORTAL_OBJECT_PATH   "/org/freedesktop/portal/desktop"
 #define PORTAL_IFACE_REQUEST "org.freedesktop.portal.Request"
 #define PORTAL_IFACE_SESSION "org.freedesktop.portal.Session"
 
@@ -54,13 +54,9 @@ typedef void (*BooPortalErrorFn)(const char *reason, gboolean unsupported,
 /// `subscription` is where the Response subscription id is kept — the caller
 /// owns it so it can be torn down on free. It must be 0 (no request in flight)
 /// on entry; the callbacks run with it already cleared.
-void boo_portal_call(GDBusConnection *dbus,
-                     guint *subscription,
-                     const char *iface,
-                     const char *method,
-                     BooPortalPayloadFn make_payload,
-                     BooPortalResponseFn on_response,
-                     BooPortalErrorFn on_error,
+void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *iface,
+                     const char *method, BooPortalPayloadFn make_payload,
+                     BooPortalResponseFn on_response, BooPortalErrorFn on_error,
                      gpointer user_data);
 
 /// Close a portal session. Safe with a NULL handle.

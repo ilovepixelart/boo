@@ -1,6 +1,6 @@
-import Cocoa
-import ApplicationServices
 import AVFoundation
+import ApplicationServices
+import Cocoa
 
 enum PermissionsManager {
 
@@ -71,8 +71,9 @@ enum PermissionsManager {
         alert.addButton(withTitle: "Later")
 
         guard alert.runModal() == .alertFirstButtonReturn,
-              let url = URL(string:
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            let url = URL(
+                string:
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         else { return }
         NSWorkspace.shared.open(url)
     }

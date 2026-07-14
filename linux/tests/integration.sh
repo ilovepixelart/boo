@@ -46,7 +46,7 @@ sleep 1
 eval "$(dbus-launch --sh-syntax)"
 echo "[integration] session bus up"
 
-python3 "$TESTS/mock_portal.py" > "$WORK/events.jsonl" 2>"$WORK/portal.err" &
+python3 "$TESTS/mock_portal.py" >"$WORK/events.jsonl" 2>"$WORK/portal.err" &
 PORTAL=$!
 
 # Wait for a condition rather than sleeping a guessed interval — a fixed sleep is
@@ -58,8 +58,10 @@ wait_for() {
         sleep 0.2
     done
     echo "[integration] FAIL: timed out waiting for $what"
-    echo "--- portal stderr ---"; cat "$WORK/portal.err"
-    echo "--- events so far ---"; cat "$WORK/events.jsonl"
+    echo "--- portal stderr ---"
+    cat "$WORK/portal.err"
+    echo "--- events so far ---"
+    cat "$WORK/events.jsonl"
     return 1
 }
 
@@ -71,16 +73,20 @@ cc -o "$WORK/harness" "$TESTS/portal_harness.c" \
     "$PROJ/linux/src/portal.c" "$PROJ/linux/src/global_shortcut.c" "$PROJ/linux/src/text_inject.c" \
     -I"$PROJ/linux/src" -I"$PROJ/include" \
     $(pkg-config --cflags --libs gtk4 libadwaita-1) \
-    -std=c11 -Wall -Wextra || { echo "[integration] FAIL: harness build"; exit 1; }
+    -std=c11 -Wall -Wextra || {
+    echo "[integration] FAIL: harness build"
+    exit 1
+}
 
 # Fire the hotkey only once the shortcut is actually bound. Firing on a timer
 # would race the handshake and flake under load.
-( wait_for '"event": "gs.BindShortcuts"' "the shortcut to be bound" || exit 1
-  dbus-send --session --print-reply --dest=org.freedesktop.portal.Desktop \
-      /org/freedesktop/portal/desktop \
-      com.boo.MockControl.FireShortcut string:'toggle-record' \
-      > "$WORK/fire.log" 2>&1 \
-      || echo "[integration] WARN: FireShortcut failed: $(cat "$WORK/fire.log")"
+(
+    wait_for '"event": "gs.BindShortcuts"' "the shortcut to be bound" || exit 1
+    dbus-send --session --print-reply --dest=org.freedesktop.portal.Desktop \
+        /org/freedesktop/portal/desktop \
+        com.boo.MockControl.FireShortcut string:'toggle-record' \
+        >"$WORK/fire.log" 2>&1 ||
+        echo "[integration] WARN: FireShortcut failed: $(cat "$WORK/fire.log")"
 ) &
 
 "$WORK/harness"
@@ -95,24 +101,27 @@ echo "──── portal traffic observed on the bus ────"
 echo "$EVENTS"
 echo "───────────────────────────────────────────"
 
-fail() { echo "[integration] FAIL: $1"; exit 1; }
+fail() {
+    echo "[integration] FAIL: $1"
+    exit 1
+}
 
 [ "$HARNESS_RC" -eq 0 ] || fail "harness exited $HARNESS_RC (shortcut callback never fired)"
 
 # GlobalShortcuts: the hotkey must actually be bound, with our ID and trigger.
 grep -q '"event": "gs.CreateSession"' <<<"$EVENTS" || fail "no GlobalShortcuts CreateSession"
-grep -q '"id": "toggle-record"' <<<"$EVENTS"       || fail "shortcut not bound as toggle-record"
-grep -q 'CTRL+SHIFT+space' <<<"$EVENTS"            || fail "wrong preferred trigger"
+grep -q '"id": "toggle-record"' <<<"$EVENTS" || fail "shortcut not bound as toggle-record"
+grep -q 'CTRL+SHIFT+space' <<<"$EVENTS" || fail "wrong preferred trigger"
 
 # RemoteDesktop: keyboard access, and a grant that survives a restart.
-grep -q '"event": "rd.Start"' <<<"$EVENTS"         || fail "RemoteDesktop session never started"
-grep -q '"types": 1' <<<"$EVENTS"                  || fail "did not request KEYBOARD"
-grep -q '"persist_mode": 2' <<<"$EVENTS"           || fail "did not ask to persist the grant"
+grep -q '"event": "rd.Start"' <<<"$EVENTS" || fail "RemoteDesktop session never started"
+grep -q '"types": 1' <<<"$EVENTS" || fail "did not request KEYBOARD"
+grep -q '"persist_mode": 2' <<<"$EVENTS" || fail "did not ask to persist the grant"
 
 # The paste must be a well-formed Ctrl+Shift+V: press ctrl, shift, v then
 # release in reverse. Keysyms: 65507=Control_L, 65505=Shift_L, 118=v.
-CHORD="$(grep '"event": "rd.NotifyKeyboardKeysym"' <<<"$EVENTS" \
-    | sed -E 's/.*"keysym": ([0-9]+), "state": ([0-9]+).*/\1:\2/' | paste -sd' ' -)"
+CHORD="$(grep '"event": "rd.NotifyKeyboardKeysym"' <<<"$EVENTS" |
+    sed -E 's/.*"keysym": ([0-9]+), "state": ([0-9]+).*/\1:\2/' | paste -sd' ' -)"
 EXPECT="65507:1 65505:1 118:1 118:0 65505:0 65507:0"
 [ "$CHORD" = "$EXPECT" ] || fail "paste chord was [$CHORD], expected [$EXPECT]"
 echo "[integration] paste chord correct: Ctrl+Shift+V, press/release ordered"
@@ -127,15 +136,20 @@ echo "── second launch (shortcut already bound) ──"
 kill "$PORTAL" 2>/dev/null
 sleep 1
 
-python3 "$TESTS/mock_portal.py" --prebound > "$WORK/events2.jsonl" 2>&1 &
+python3 "$TESTS/mock_portal.py" --prebound >"$WORK/events2.jsonl" 2>&1 &
 PORTAL=$!
 
-( deadline=$((SECONDS + 30))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-      grep -q '"event": "ready"' "$WORK/events2.jsonl" 2>/dev/null && exit 0
-      sleep 0.2
-  done
-  exit 1 ) || { echo "[integration] FAIL: mock portal (prebound) did not start"; exit 1; }
+(
+    deadline=$((SECONDS + 30))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        grep -q '"event": "ready"' "$WORK/events2.jsonl" 2>/dev/null && exit 0
+        sleep 0.2
+    done
+    exit 1
+) || {
+    echo "[integration] FAIL: mock portal (prebound) did not start"
+    exit 1
+}
 
 # No shortcut is fired here; we only care about which portal calls Boo makes.
 timeout 30 "$WORK/harness" >/dev/null 2>&1 || true
@@ -145,8 +159,8 @@ EVENTS2="$(cat "$WORK/events2.jsonl")"
 
 echo "$EVENTS2" | grep -E '"event": "gs\.' || true
 
-grep -q '"event": "gs.ListShortcuts"' <<<"$EVENTS2" \
-    || fail "second launch did not call ListShortcuts"
+grep -q '"event": "gs.ListShortcuts"' <<<"$EVENTS2" ||
+    fail "second launch did not call ListShortcuts"
 
 if grep -q '"event": "gs.BindShortcuts"' <<<"$EVENTS2"; then
     fail "second launch called BindShortcuts again — the user would be re-prompted"

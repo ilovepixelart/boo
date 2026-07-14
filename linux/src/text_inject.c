@@ -24,18 +24,18 @@
 
 #define PORTAL_IFACE_REMOTE_DESKTOP "org.freedesktop.portal.RemoteDesktop"
 
-#define DEVICE_KEYBOARD 1u // SelectDevices `types` bitmask
+#define DEVICE_KEYBOARD       1u // SelectDevices `types` bitmask
 #define PERSIST_UNTIL_REVOKED 2u
 
-#define KEY_PRESSED 1u
+#define KEY_PRESSED  1u
 #define KEY_RELEASED 0u
 
 // X11 keysyms — the portal resolves these against the active layout. Every
 // layout can produce Control, Shift, and the letter V, which is the whole point
 // of pasting instead of typing out each character.
 #define XKS_CONTROL_L 0xffe3
-#define XKS_SHIFT_L 0xffe1
-#define XKS_V 0x0076
+#define XKS_SHIFT_L   0xffe1
+#define XKS_V         0x0076
 
 // Wayland clipboard offers propagate through the compositor asynchronously; if
 // the paste keystroke beats the new offer, the target pastes stale data. A small
@@ -66,8 +66,7 @@ struct BooTextInject {
 // Restore token — what turns the second launch into a silent one
 
 static char *token_path(void) {
-    return g_build_filename(g_get_user_state_dir(), "boo",
-                            "remote-desktop-token", NULL);
+    return g_build_filename(g_get_user_state_dir(), "boo", "remote-desktop-token", NULL);
 }
 
 static char *load_restore_token(void) {
@@ -93,9 +92,8 @@ static void save_restore_token(const char *token) {
     // into the user's desktop. It has no business being world-readable, and it
     // outlives the process — it is the whole point that it persists.
     g_autoptr(GError) error = NULL;
-    if (!g_file_set_contents_full(path, token, -1,
-                                  G_FILE_SET_CONTENTS_CONSISTENT,
-                                  0600, &error)) {
+    if (!g_file_set_contents_full(path, token, -1, G_FILE_SET_CONTENTS_CONSISTENT, 0600,
+                                  &error)) {
         g_warning("Boo: could not save portal restore token: %s", error->message);
     }
 }
@@ -109,12 +107,12 @@ static void clear_restore_token(void) {
 // The paste chord
 
 static void notify_keysym(BooTextInject *ti, guint32 keysym, guint32 state) {
-    g_dbus_connection_call(
-        ti->dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH,
-        PORTAL_IFACE_REMOTE_DESKTOP, "NotifyKeyboardKeysym",
-        g_variant_new_parsed("(%o, @a{sv} {}, %i, %u)", ti->session_handle,
-                             (gint32)keysym, state),
-        NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    g_dbus_connection_call(ti->dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH,
+                           PORTAL_IFACE_REMOTE_DESKTOP, "NotifyKeyboardKeysym",
+                           g_variant_new_parsed("(%o, @a{sv} {}, %i, %u)",
+                                                ti->session_handle, (gint32)keysym,
+                                                state),
+                           NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
 }
 
 static gboolean send_paste_chord(gpointer user_data) {
@@ -143,7 +141,8 @@ static void fail(BooTextInject *ti, const char *why) {
     ti->state = BOO_INJECT_FAILED;
     ti->pending_paste = FALSE;
     g_message("Boo: auto-paste disabled — %s. The transcript is still copied "
-              "to the clipboard.", why);
+              "to the clipboard.",
+              why);
 }
 
 static GVariant *make_payload(gpointer user_data, const char *handle_token) {
@@ -153,8 +152,8 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
     case BOO_INJECT_CREATING_SESSION: {
         g_autofree char *session_token = g_strdup_printf("boo_%08x", g_random_int());
         return g_variant_new_parsed(
-            "({'handle_token': <%s>, 'session_handle_token': <%s>},)",
-            handle_token, session_token);
+            "({'handle_token': <%s>, 'session_handle_token': <%s>},)", handle_token,
+            session_token);
     }
 
     case BOO_INJECT_SELECTING_DEVICES: {
@@ -198,8 +197,7 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
         // A stale restore token can sour the whole chain, so drop it — the next
         // run then gets a fresh permission dialog instead of failing forever.
         clear_restore_token();
-        fail(ti, response == 1 ? "permission was declined"
-                               : "the portal request failed");
+        fail(ti, response == 1 ? "permission was declined" : "the portal request failed");
         return;
     }
 
@@ -250,8 +248,7 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
 }
 
 static void on_error(const char *reason, gboolean unsupported, gpointer user_data) {
-    fail(user_data, unsupported ? "this desktop has no remote-desktop portal"
-                                : reason);
+    fail(user_data, unsupported ? "this desktop has no remote-desktop portal" : reason);
 }
 
 static void request(BooTextInject *ti, BooInjectState step) {
@@ -262,9 +259,8 @@ static void request(BooTextInject *ti, BooInjectState step) {
     };
 
     ti->state = step; // make_payload and on_response both key off this
-    boo_portal_call(ti->dbus, &ti->response_subscription,
-                    PORTAL_IFACE_REMOTE_DESKTOP, methods[step],
-                    make_payload, on_response, on_error, ti);
+    boo_portal_call(ti->dbus, &ti->response_subscription, PORTAL_IFACE_REMOTE_DESKTOP,
+                    methods[step], make_payload, on_response, on_error, ti);
 }
 
 // ---------------------------------------------------------------------------

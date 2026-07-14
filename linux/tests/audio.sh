@@ -18,8 +18,14 @@ PROJ="$(cd "$(dirname "$0")/../.." && pwd)"
 MODEL="${1:?usage: audio.sh <model.bin> [speech.wav]}"
 WAV="${2:-}"
 
-command -v pactl >/dev/null || { echo "need pactl (pulseaudio-utils)"; exit 1; }
-pactl info >/dev/null 2>&1 || { echo "no PipeWire/Pulse server — is wireplumber running?"; exit 1; }
+command -v pactl >/dev/null || {
+    echo "need pactl (pulseaudio-utils)"
+    exit 1
+}
+pactl info >/dev/null 2>&1 || {
+    echo "no PipeWire/Pulse server — is wireplumber running?"
+    exit 1
+}
 
 cd "$PROJ"
 echo "[audio] building core"
@@ -29,7 +35,10 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 WHISPER="$(find .zig-cache -name libwhisper.a -size +1M | head -1)"
-[ -n "$WHISPER" ] || { echo "[audio] libwhisper.a not found"; exit 1; }
+[ -n "$WHISPER" ] || {
+    echo "[audio] libwhisper.a not found"
+    exit 1
+}
 
 # Zig's archiver omits the index, and its C++ objects want Zig's libc++ rather
 # than the system libstdc++ — so link with `zig cc`.
@@ -47,13 +56,18 @@ if [ -n "$WAV" ]; then
     # A null sink's monitor is a perfectly good fake microphone: whatever is
     # played into the sink appears on its monitor, which we make the default
     # source. Boo autoconnects to the default, so it lands on our audio.
-    pactl list short sources | grep -q virtmic || \
+    pactl list short sources | grep -q virtmic ||
         pactl load-module module-null-sink sink_name=virtmic \
             sink_properties=device.description=VirtualMic >/dev/null
     pactl set-default-source virtmic.monitor
     echo "[audio] virtual mic is the default source"
 
-    ( sleep 1.5; paplay -d virtmic "$WAV"; sleep 0.3; paplay -d virtmic "$WAV" ) &
+    (
+        sleep 1.5
+        paplay -d virtmic "$WAV"
+        sleep 0.3
+        paplay -d virtmic "$WAV"
+    ) &
     SECONDS_TO_RECORD=6
 else
     echo "[audio] recording from your default source — speak now"
@@ -63,12 +77,18 @@ fi
 OUT="$("$WORK/audio_smoke" "$MODEL" "$SECONDS_TO_RECORD" 2>&1 | grep -viE '^whisper_|^ggml_')"
 echo "$OUT"
 
-grep -q "\[smoke\] PASS" <<<"$OUT" || { echo "[audio] FAIL"; exit 1; }
+grep -q "\[smoke\] PASS" <<<"$OUT" || {
+    echo "[audio] FAIL"
+    exit 1
+}
 
 # Guard against the failure that matters: a stream that opens, reports samples,
 # and captures pure silence. Whisper would return nothing, so a non-empty
 # transcript is the proof that real audio made it through.
 TRANSCRIPT="$(sed -n 's/^\[smoke\] TRANSCRIPT: //p' <<<"$OUT" | tr -d ' ')"
-[ -n "$TRANSCRIPT" ] || { echo "[audio] FAIL: captured audio but transcript empty"; exit 1; }
+[ -n "$TRANSCRIPT" ] || {
+    echo "[audio] FAIL: captured audio but transcript empty"
+    exit 1
+}
 
 echo "[audio] PASS — PipeWire captured real audio and whisper transcribed it"

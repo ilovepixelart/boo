@@ -7,14 +7,14 @@ struct BooTheme {
     let palette: [NSColor]  // 16 ANSI colors
 
     // Convenience accessors matching Ghostty palette indices
-    var dim: NSColor { palette[8] }          // bright black
-    var red: NSColor { palette[9] }          // bright red
-    var green: NSColor { palette[10] }       // bright green
-    var yellow: NSColor { palette[11] }      // bright yellow
-    var blue: NSColor { palette[12] }        // bright blue
-    var magenta: NSColor { palette[13] }     // bright magenta
-    var cyan: NSColor { palette[14] }        // bright cyan
-    var white: NSColor { palette[15] }       // bright white
+    var dim: NSColor { palette[8] }  // bright black
+    var red: NSColor { palette[9] }  // bright red
+    var green: NSColor { palette[10] }  // bright green
+    var yellow: NSColor { palette[11] }  // bright yellow
+    var blue: NSColor { palette[12] }  // bright blue
+    var magenta: NSColor { palette[13] }  // bright magenta
+    var cyan: NSColor { palette[14] }  // bright cyan
+    var white: NSColor { palette[15] }  // bright white
 
     func bgWithAlpha(_ alpha: CGFloat) -> NSColor {
         return bg.withAlphaComponent(alpha)
@@ -40,25 +40,25 @@ class ThemeManager {
 
     private let defaultTheme = BooTheme(
         name: "Ghostty",
-        bg: NSColor(red: 0x29/255.0, green: 0x2c/255.0, blue: 0x33/255.0, alpha: 1),
+        bg: NSColor(red: 0x29 / 255.0, green: 0x2c / 255.0, blue: 0x33 / 255.0, alpha: 1),
         fg: NSColor.white,
         palette: [
-            NSColor(red: 0x1d/255.0, green: 0x1f/255.0, blue: 0x21/255.0, alpha: 1),
-            NSColor(red: 0xbf/255.0, green: 0x6b/255.0, blue: 0x69/255.0, alpha: 1),
-            NSColor(red: 0xb7/255.0, green: 0xbd/255.0, blue: 0x73/255.0, alpha: 1),
-            NSColor(red: 0xe9/255.0, green: 0xc8/255.0, blue: 0x80/255.0, alpha: 1),
-            NSColor(red: 0x88/255.0, green: 0xa1/255.0, blue: 0xbb/255.0, alpha: 1),
-            NSColor(red: 0xad/255.0, green: 0x95/255.0, blue: 0xb8/255.0, alpha: 1),
-            NSColor(red: 0x95/255.0, green: 0xbd/255.0, blue: 0xb7/255.0, alpha: 1),
-            NSColor(red: 0xc5/255.0, green: 0xc8/255.0, blue: 0xc6/255.0, alpha: 1),
-            NSColor(red: 0x66/255.0, green: 0x66/255.0, blue: 0x66/255.0, alpha: 1),
-            NSColor(red: 0xc5/255.0, green: 0x57/255.0, blue: 0x57/255.0, alpha: 1),
-            NSColor(red: 0xbc/255.0, green: 0xc9/255.0, blue: 0x5f/255.0, alpha: 1),
-            NSColor(red: 0xe1/255.0, green: 0xc6/255.0, blue: 0x5e/255.0, alpha: 1),
-            NSColor(red: 0x83/255.0, green: 0xa5/255.0, blue: 0xd6/255.0, alpha: 1),
-            NSColor(red: 0xbc/255.0, green: 0x99/255.0, blue: 0xd4/255.0, alpha: 1),
-            NSColor(red: 0x83/255.0, green: 0xbe/255.0, blue: 0xb1/255.0, alpha: 1),
-            NSColor(red: 0xea/255.0, green: 0xea/255.0, blue: 0xea/255.0, alpha: 1),
+            NSColor(red: 0x1d / 255.0, green: 0x1f / 255.0, blue: 0x21 / 255.0, alpha: 1),
+            NSColor(red: 0xbf / 255.0, green: 0x6b / 255.0, blue: 0x69 / 255.0, alpha: 1),
+            NSColor(red: 0xb7 / 255.0, green: 0xbd / 255.0, blue: 0x73 / 255.0, alpha: 1),
+            NSColor(red: 0xe9 / 255.0, green: 0xc8 / 255.0, blue: 0x80 / 255.0, alpha: 1),
+            NSColor(red: 0x88 / 255.0, green: 0xa1 / 255.0, blue: 0xbb / 255.0, alpha: 1),
+            NSColor(red: 0xad / 255.0, green: 0x95 / 255.0, blue: 0xb8 / 255.0, alpha: 1),
+            NSColor(red: 0x95 / 255.0, green: 0xbd / 255.0, blue: 0xb7 / 255.0, alpha: 1),
+            NSColor(red: 0xc5 / 255.0, green: 0xc8 / 255.0, blue: 0xc6 / 255.0, alpha: 1),
+            NSColor(red: 0x66 / 255.0, green: 0x66 / 255.0, blue: 0x66 / 255.0, alpha: 1),
+            NSColor(red: 0xc5 / 255.0, green: 0x57 / 255.0, blue: 0x57 / 255.0, alpha: 1),
+            NSColor(red: 0xbc / 255.0, green: 0xc9 / 255.0, blue: 0x5f / 255.0, alpha: 1),
+            NSColor(red: 0xe1 / 255.0, green: 0xc6 / 255.0, blue: 0x5e / 255.0, alpha: 1),
+            NSColor(red: 0x83 / 255.0, green: 0xa5 / 255.0, blue: 0xd6 / 255.0, alpha: 1),
+            NSColor(red: 0xbc / 255.0, green: 0x99 / 255.0, blue: 0xd4 / 255.0, alpha: 1),
+            NSColor(red: 0x83 / 255.0, green: 0xbe / 255.0, blue: 0xb1 / 255.0, alpha: 1),
+            NSColor(red: 0xea / 255.0, green: 0xea / 255.0, blue: 0xea / 255.0, alpha: 1),
         ]
     )
 

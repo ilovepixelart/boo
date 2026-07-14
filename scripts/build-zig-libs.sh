@@ -18,7 +18,10 @@ ARCH="${ARCH:-$(uname -m)}"
 case "$ARCH" in
     arm64) ZIG_ARCH=arm64 ;;
     x86_64) ZIG_ARCH=x86_64 ;;
-    *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+    *)
+        echo "Unsupported arch: $ARCH" >&2
+        exit 1
+        ;;
 esac
 
 echo "→ zig build -Doptimize=ReleaseFast"

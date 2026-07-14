@@ -114,7 +114,18 @@ pub fn build(b: *std.Build) void {
                 "global_shortcut.c",
                 "text_inject.c",
             },
-            .flags = &.{ "-O2", "-std=c11", "-Wall", "-Wextra" },
+            // GTK's own warning set (see its meson.build), minus -Wconversion
+            // which storms on GLib's gint/guint/gsize/gboolean conversions.
+            // Boo's C is clean under all of these.
+            .flags = &.{
+                "-O2",                    "-std=c11",
+                "-Wall",                  "-Wextra",
+                "-Wshadow",               "-Wstrict-prototypes",
+                "-Wmissing-prototypes",   "-Wpointer-arith",
+                "-Wvla",                  "-Wformat=2",
+                "-Wold-style-definition", "-Wcast-align",
+                "-Wundef",
+            },
         });
         // The flatpak manifest runs `zig build app --prefix $FLATPAK_DEST` and
         // expects bin/boo-app to be installed — so the app step must depend on
@@ -140,7 +151,8 @@ pub fn build(b: *std.Build) void {
             .x86_64 => "x86_64",
             else => @panic("unsupported macOS architecture"),
         };
-        const repack = b.addSystemCommand(&.{ "/bin/sh", "-c",
+        const repack = b.addSystemCommand(&.{
+            "/bin/sh", "-c",
             \\set -e
             \\ARCHIVE="$0"; OUT="$1"; ARCH="$2"
             \\case "$ARCHIVE" in /*) ;; *) ARCHIVE="$PWD/$ARCHIVE" ;; esac

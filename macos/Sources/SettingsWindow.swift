@@ -60,7 +60,8 @@ class SettingsViewController: NSViewController {
         opacityTitle.font = .systemFont(ofSize: 13, weight: .medium)
         opacityRow.addArrangedSubview(opacityTitle)
 
-        opacitySlider = NSSlider(value: 0.95, minValue: 0.1, maxValue: 1.0, target: self, action: #selector(opacityChanged(_:)))
+        opacitySlider = NSSlider(
+            value: 0.95, minValue: 0.1, maxValue: 1.0, target: self, action: #selector(opacityChanged(_:)))
         opacitySlider.controlSize = .regular
         opacityRow.addArrangedSubview(opacitySlider)
 
@@ -73,7 +74,9 @@ class SettingsViewController: NSViewController {
         stack.addArrangedSubview(opacityRow)
 
         // ── Auto-type ──
-        autoTypeCheckbox = NSButton(checkboxWithTitle: "Auto-type into focused app after transcription", target: self, action: #selector(autoTypeChanged(_:)))
+        autoTypeCheckbox = NSButton(
+            checkboxWithTitle: "Auto-type into focused app after transcription", target: self,
+            action: #selector(autoTypeChanged(_:)))
         autoTypeCheckbox.state = .on
         autoTypeCheckbox.font = .systemFont(ofSize: 13)
         stack.addArrangedSubview(autoTypeCheckbox)

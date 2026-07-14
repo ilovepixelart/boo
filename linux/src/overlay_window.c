@@ -180,8 +180,7 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
     state->window = GTK_WINDOW(window);
-    g_object_set_data_full(G_OBJECT(window), "boo-state", state,
-                           window_state_free);
+    g_object_set_data_full(G_OBJECT(window), "boo-state", state, window_state_free);
 
     AdwHeaderBar *header = ADW_HEADER_BAR(adw_header_bar_new());
 
@@ -213,8 +212,8 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     gtk_widget_add_css_class(GTK_WIDGET(state->record_button), "suggested-action");
     gtk_widget_add_css_class(GTK_WIDGET(state->record_button), "pill");
     gtk_widget_set_halign(GTK_WIDGET(state->record_button), GTK_ALIGN_CENTER);
-    g_signal_connect(state->record_button, "clicked",
-                     G_CALLBACK(on_record_clicked), state);
+    g_signal_connect(state->record_button, "clicked", G_CALLBACK(on_record_clicked),
+                     state);
     gtk_box_append(GTK_BOX(body), GTK_WIDGET(state->record_button));
 
     // Toast overlay wraps the whole body so toasts float over the content.
@@ -228,8 +227,8 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // Request the Ctrl+Shift+Space global hotkey. Asynchronous and best-effort:
     // the portal may decline or the user may rebind it, so the Record button
     // above stays the primary control.
-    state->shortcut = boo_global_shortcut_new(
-        GTK_WINDOW(window), on_shortcut_activated, on_shortcut_unavailable, state);
+    state->shortcut = boo_global_shortcut_new(GTK_WINDOW(window), on_shortcut_activated,
+                                              on_shortcut_unavailable, state);
 
     // Auto-paste of transcripts into the focused app (RemoteDesktop portal).
     // First run shows a one-time permission dialog; the grant persists.

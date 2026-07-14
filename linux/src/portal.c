@@ -41,10 +41,13 @@ static void portal_request_free(PortalRequest *req) {
 
 // org.freedesktop.portal.Request.Response
 static void on_response(GDBusConnection *dbus, const char *sender,
-                        const char *object_path, const char *iface,
-                        const char *signal, GVariant *params,
-                        gpointer user_data) {
-    (void)dbus; (void)sender; (void)object_path; (void)iface; (void)signal;
+                        const char *object_path, const char *iface, const char *signal,
+                        GVariant *params, gpointer user_data) {
+    (void)dbus;
+    (void)sender;
+    (void)object_path;
+    (void)iface;
+    (void)signal;
     PortalRequest *req = user_data;
 
     guint32 response = 0;
@@ -97,11 +100,10 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     g_clear_error(&error);
 }
 
-void boo_portal_call(GDBusConnection *dbus, guint *subscription,
-                     const char *iface, const char *method,
-                     BooPortalPayloadFn make_payload,
-                     BooPortalResponseFn on_response_cb,
-                     BooPortalErrorFn on_error_cb, gpointer user_data) {
+void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *iface,
+                     const char *method, BooPortalPayloadFn make_payload,
+                     BooPortalResponseFn on_response_cb, BooPortalErrorFn on_error_cb,
+                     gpointer user_data) {
     g_return_if_fail(dbus != NULL);
     g_return_if_fail(subscription != NULL);
 
@@ -135,15 +137,15 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription,
         dbus, NULL, PORTAL_IFACE_REQUEST, "Response", request_path, NULL,
         G_DBUS_SIGNAL_FLAGS_NONE, on_response, req, NULL);
 
-    g_dbus_connection_call(dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, iface,
-                           method, payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1,
-                           NULL, on_call_done, req);
+    g_dbus_connection_call(dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, iface, method,
+                           payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_call_done,
+                           req);
 }
 
 void boo_portal_close_session(GDBusConnection *dbus, const char *session_handle) {
     if (!dbus || !session_handle) return;
 
-    g_dbus_connection_call(dbus, PORTAL_BUS_NAME, session_handle,
-                           PORTAL_IFACE_SESSION, "Close", NULL, NULL,
-                           G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    g_dbus_connection_call(dbus, PORTAL_BUS_NAME, session_handle, PORTAL_IFACE_SESSION,
+                           "Close", NULL, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL,
+                           NULL);
 }

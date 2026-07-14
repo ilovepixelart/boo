@@ -1,0 +1,12 @@
+# Matches the existing linux/src style: 4-space indent, K&R braces, 90 columns.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 90
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+PointerAlignment: Right
+SpaceAfterCStyleCast: false
+AlignConsecutiveMacros: true
+SortIncludes: false

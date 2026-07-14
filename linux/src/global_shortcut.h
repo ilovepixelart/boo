@@ -26,8 +26,7 @@ typedef void (*BooShortcutCallback)(gpointer user_data);
 // of desktop Linux — the interface does not exist at all and the hotkey simply
 // cannot work. Without this callback the failure is invisible: the user presses
 // the hotkey and nothing happens.
-typedef void (*BooShortcutUnavailableCallback)(const char *reason,
-                                               gpointer user_data);
+typedef void (*BooShortcutUnavailableCallback)(const char *reason, gpointer user_data);
 
 // Register the global shortcut. `parent_window` supplies the GApplication whose
 // session bus connection the portal request rides on. `on_unavailable` may be
@@ -39,10 +38,9 @@ typedef void (*BooShortcutUnavailableCallback)(const char *reason,
 // case the handle is inert, on_unavailable fires, and the activation callback
 // never does. Callers must not treat a non-NULL return as proof the hotkey is
 // live.
-BooGlobalShortcut *boo_global_shortcut_new(
-    GtkWindow *parent_window,
-    BooShortcutCallback on_activated,
-    BooShortcutUnavailableCallback on_unavailable,
-    gpointer user_data);
+BooGlobalShortcut *boo_global_shortcut_new(GtkWindow *parent_window,
+                                           BooShortcutCallback on_activated,
+                                           BooShortcutUnavailableCallback on_unavailable,
+                                           gpointer user_data);
 
 void boo_global_shortcut_free(BooGlobalShortcut *gs);
