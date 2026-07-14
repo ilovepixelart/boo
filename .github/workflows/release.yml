@@ -75,6 +75,10 @@ jobs:
           bundle: boo.flatpak
           manifest-path: linux/flatpak/com.boo.app.yaml
           cache-key: flatpak-builder-${{ github.sha }}
+          # The action uploads the bundle as an artifact itself. Left on, that
+          # artifact and the version-named one below both land in the release,
+          # attaching the same 60MB file twice under two names.
+          upload-artifact: false
 
       - name: Name the bundle by version
         run: mv boo.flatpak "boo-${{ github.event.inputs.tag || github.ref_name }}-x86_64.flatpak"
