@@ -6,8 +6,10 @@
 #     linux/flatpak/com.boo.app.yaml
 #   flatpak run com.boo.app
 #
-# Place the whisper model at ~/.var/app/com.boo.app/data/models/ggml-base.en.bin
-# (the app reads from $XDG_DATA_HOME/boo/models inside the sandbox).
+# Place the whisper model at
+#   ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin
+# (the app reads from $XDG_DATA_HOME/boo/models, and Flatpak maps XDG_DATA_HOME
+# to ~/.var/app/com.boo.app/data).
 #
 # Zig tarball sha256s below are the published ones from
 # https://ziglang.org/download/index.json — re-check them when bumping Zig.

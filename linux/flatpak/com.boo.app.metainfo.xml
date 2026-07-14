@@ -11,9 +11,9 @@
     <p>
       Boo is a local speech-to-text overlay that captures audio from your
       microphone and transcribes it on-device using whisper.cpp. Press
-      Ctrl+Shift+Space (when global shortcuts are configured) or click the
-      Record button, speak, and the transcript is auto-copied to the
-      clipboard.
+      Ctrl+Shift+Space (after approving the shortcut on first launch) or
+      click the Record button, speak, and the transcript is copied to the
+      clipboard and pasted into the focused app.
     </p>
     <p>
       Everything runs locally — no audio leaves your machine.

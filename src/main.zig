@@ -35,7 +35,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     const c_stdin = @cImport(@cInclude("stdio.h"));
 
-    // Simple CLI loop for now — will be replaced by Swift GUI later
+    // Bare-bones REPL for exercising the core without the GUI frontends
     while (true) {
         std.debug.print("Press ENTER to start recording (or 'q' to quit): ", .{});
 

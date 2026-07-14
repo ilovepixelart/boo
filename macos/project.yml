@@ -92,3 +92,6 @@ targets:
       - path: ../assets/boo.icns
       - path: ../assets/ggml-metal.metal
       - path: ../assets/ggml-common.h
+      # Folder reference — ThemeManager looks for Resources/themes in bundles.
+      - path: ../themes
+        type: folder

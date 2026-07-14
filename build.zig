@@ -110,10 +110,14 @@ pub fn build(b: *std.Build) void {
             },
             .flags = &.{ "-O2", "-std=c11", "-Wall", "-Wextra" },
         });
-        b.installArtifact(linux_app);
+        // The flatpak manifest runs `zig build app --prefix $FLATPAK_DEST` and
+        // expects bin/boo-app to be installed — so the app step must depend on
+        // the install, not just the compile.
+        const install_linux_app = b.addInstallArtifact(linux_app, .{});
+        b.getInstallStep().dependOn(&install_linux_app.step);
 
         const app_step = b.step("app", "Build Boo Linux app");
-        app_step.dependOn(&linux_app.step);
+        app_step.dependOn(&install_linux_app.step);
     }
 
     // ── macOS app bundle ──

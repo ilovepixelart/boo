@@ -28,7 +28,7 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Implemented, needs on-device verification |
 | Windows | — | — | — | Not planned |
 
-On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented; the code compiles and its portal payloads are test-verified, but it has not yet been exercised against a live compositor. **Still deferred on Linux:** the 487-theme port from macOS, settings dialog, layer-shell always-on-top.
+On Linux the global hotkey (XDG GlobalShortcuts portal) and auto-paste into the focused app (XDG RemoteDesktop portal) are implemented; the code compiles and its portal payloads are test-verified, but it has not yet been exercised against a live compositor. **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
 
 ## Ghostty integration
 
@@ -61,7 +61,8 @@ xcodegen --spec macos/project.yml --project macos/
 open macos/Boo.xcodeproj
 
 # Or: build from CLI
-xcodebuild -project macos/Boo.xcodeproj -scheme Boo -configuration Release
+xcodebuild -project macos/Boo.xcodeproj -scheme Boo -configuration Release \
+  -derivedDataPath build/xcode-derived
 open build/xcode-derived/Build/Products/Release/Boo.app
 ```
 
@@ -95,8 +96,12 @@ open zig-out/Boo.app                   # swiftc's link step doesn't provide
 System packages (Debian/Ubuntu):
 
 ```sh
-sudo apt install zig libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev pkg-config
+sudo apt install libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev pkg-config
 ```
+
+Zig ≥ 0.16 is required (`build.zig.zon` enforces it) and distro packages lag —
+grab a tarball from [ziglang.org/download](https://ziglang.org/download/) or use
+`snap install zig --classic --beta`.
 
 ```sh
 zig build app
@@ -112,7 +117,7 @@ flatpak-builder --user --install --force-clean build-dir \
 flatpak run com.boo.app
 ```
 
-Inside the Flatpak sandbox, place the model at `~/.var/app/com.boo.app/data/models/ggml-base.en.bin`.
+Inside the Flatpak sandbox, place the model at `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin` (the app reads `$XDG_DATA_HOME/boo/models/`, and Flatpak maps `XDG_DATA_HOME` to `~/.var/app/com.boo.app/data/`).
 
 ## Build — Zig core only (CLI test binary)
 
@@ -145,6 +150,10 @@ macos/
 linux/
   src/              C / GTK4 + libadwaita frontend
   flatpak/          Manifest, .desktop entry, AppStream metainfo
+
+themes/             486 Ghostty-format color themes (consumed by the macOS
+                    frontend; Linux port pending)
+assets/             App icons, Metal shader, mel filterbank
 
 scripts/
   build-zig-libs.sh Repacks Zig's whisper archive for macOS ld

@@ -18,7 +18,8 @@ typedef struct {
 } AppState;
 
 static char *find_model_path(void) {
-    // Search order: $BOO_MODEL env, CWD, XDG_DATA_HOME, ~/.local/share/boo
+    // Search order: $BOO_MODEL env, CWD, $XDG_DATA_HOME/boo/models (falling
+    // back to ~/.local/share/boo/models), /usr/share/boo/models
     const char *env = g_getenv("BOO_MODEL");
     if (env && g_file_test(env, G_FILE_TEST_EXISTS)) return g_strdup(env);
 
