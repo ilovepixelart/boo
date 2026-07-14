@@ -112,10 +112,12 @@ On macOS, Boo lives in the menu bar (a waveform icon) plus a small overlay windo
 | Start / stop dictation | **Ctrl+Shift+Space** | **Ctrl+Shift+Space** |
 | …from the app | Menu-bar icon, Record button, or waveform | Record button |
 | Recording elapsed time | Live timer in the menu bar | — |
-| Past transcripts | Stack up in the window; click a bubble to copy | Last transcript shown |
+| Past transcripts | Stack up in the window, each with Copy + Read-aloud | Last transcript shown |
 | Settings | **⌘,** | — |
 
 Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from — never itself — so triggering it from its own window still delivers the text to the right place.
+
+**Read-back (macOS).** Each transcript bubble has a speaker button that reads it back aloud — hearing your own dictation is a fast way to catch errors the eye skips. It uses the system voices on-device (`AVSpeechSynthesizer`), so nothing leaves the machine and there's no extra download; press it again to stop. *(Not in the Linux preview yet.)*
 
 **Settings (⌘, — macOS)** has two things worth knowing:
 
