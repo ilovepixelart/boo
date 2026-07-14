@@ -214,6 +214,15 @@ pub fn build(b: *std.Build) void {
         whisper_lib.root_module.linkFramework("Foundation", .{});
         whisper_lib.root_module.linkFramework("Metal", .{});
         whisper_lib.root_module.linkFramework("MetalKit", .{});
+
+        // swiftc links the app against the SYSTEM libc++, which on macOS 15
+        // lacks a symbol Zig's newer bundled libc++ headers emit calls to.
+        // See src/libcxx_compat.cpp.
+        whisper_lib.root_module.addCSourceFiles(.{
+            .root = b.path("."),
+            .files = &.{"src/libcxx_compat.cpp"},
+            .flags = &(base_flags_macos ++ cpp_std),
+        });
     }
 
     // whisper itself (upstream target: whisper)
