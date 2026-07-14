@@ -40,8 +40,10 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`. *(CI, every push.)*
 - The restore token persists, so the permission prompt appears **once**, not every launch.
 
+**Verified against a real GNOME 46 desktop** (not just the mock): the RemoteDesktop portal is present and reachable, and the GlobalShortcuts portal is **absent** — so Boo now detects that and says so. See the hotkey warning under [Permissions](#permissions).
+
 **Not verified:**
-- Behavior against a real GNOME/KDE compositor. The portal handshakes run against a faithful mock portal, not `xdg-desktop-portal-gnome` — so the *protocol* is proven but the real desktop's grant dialogs are not.
+- KDE Plasma and Hyprland, which do implement GlobalShortcuts — the hotkey path has only been exercised against the mock portal.
 - The GTK4 UI has not been driven by a human on a real desktop.
 
 **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
@@ -158,6 +160,14 @@ Grant them under **System Settings → Privacy & Security**. If you dismissed a 
 
 Both portal grants persist across restarts (Boo stores a restore token), so you approve them once. Decline either and Boo stays usable — it just falls back to the Record button and clipboard-only.
 
+> ### ⚠️ The global hotkey needs GNOME 48+, KDE Plasma, or Hyprland
+>
+> GNOME only shipped a GlobalShortcuts portal backend in **version 48** (Feb 2025). On **GNOME 46 — which is what Ubuntu 24.04 LTS ships — and GNOME 47, the interface does not exist at all**, so no application can register a global hotkey, Boo included. Verified against a real GNOME 46 desktop: the D-Bus call comes back `No such interface "org.freedesktop.portal.GlobalShortcuts"`.
+>
+> Boo detects this and tells you, rather than leaving you pressing a key that does nothing. **Auto-paste still works** — GNOME 46 does implement RemoteDesktop — so Boo remains fully usable from the Record button, and the transcript still lands in your focused app.
+>
+> Check yours with `gnome-shell --version`, or use KDE Plasma / Hyprland, which have had GlobalShortcuts for longer.
+
 Note the hotkey is a *request*: the portal dialog lets you rebind it, and some desktops ignore the preference. Whatever you end up with is what fires.
 
 ## Troubleshooting
@@ -172,7 +182,7 @@ Note the hotkey is a *request*: the portal dialog lets you rebind it, and some d
 
 **"Model not found"** — on macOS Boo looks in `~/.boo/models/`, `./models/`, and the repo checkout. On Linux it looks at `$BOO_MODEL`, `./models/`, `$XDG_DATA_HOME/boo/models/`, then `/usr/share/boo/models/`. Under Flatpak that means `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin`.
 
-**The hotkey does nothing (Linux)** — the GlobalShortcuts portal was declined, or your desktop rebound it. Use the Record button; restart Boo to be re-asked. Note the trigger is only a *preference*: the portal dialog lets you rebind it, and some desktops ignore the preference entirely.
+**The hotkey does nothing (Linux)** — most likely your desktop has no GlobalShortcuts portal at all. GNOME only gained one in **48**, so on Ubuntu 24.04 LTS (GNOME 46) the hotkey cannot work for any app. Boo says so on launch. Everything else still works — use the Record button; the transcript is still pasted into your focused app. See [Permissions](#permissions). Otherwise: the grant was declined (restart Boo to be re-asked), or your desktop rebound the trigger, which it is free to do.
 
 **Boo records but the transcript is empty (Linux)** — most likely the known gap: audio capture is unverified on Linux (see [Status](#status)). Check Boo is picking up your default PipeWire source (`pactl info`, `wpctl status`). A bug report with your desktop, compositor and PipeWire version is genuinely useful.
 

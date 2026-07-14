@@ -47,6 +47,7 @@ typedef enum {
 
 struct BooGlobalShortcut {
     BooShortcutCallback on_activated;
+    BooShortcutUnavailableCallback on_unavailable; // may be NULL
     gpointer user_data;
 
     GDBusConnection *dbus; // owned ref; NULL when the session bus is unavailable
@@ -54,7 +55,18 @@ struct BooGlobalShortcut {
 
     guint response_subscription; // 0 == no request in flight
     guint activate_subscription; // 0 == not subscribed
+    gboolean reported_unavailable; // report at most once
 };
+
+// Tell the frontend the hotkey is dead, so it can say so instead of leaving the
+// user pressing a key that does nothing.
+static void boo_report_unavailable(BooGlobalShortcut *gs, const char *reason) {
+    if (!gs || gs->reported_unavailable) return;
+    gs->reported_unavailable = TRUE;
+
+    g_message("Boo: global shortcut unavailable — %s", reason);
+    if (gs->on_unavailable) gs->on_unavailable(reason, gs->user_data);
+}
 
 static void boo_portal_request(BooGlobalShortcut *gs, BooPortalMethod method);
 
@@ -148,10 +160,10 @@ static void on_portal_response(GDBusConnection *dbus, const char *sender,
         }
         break;
     case 1:
-        g_message("Boo: shortcut binding declined — use the Record button");
+        boo_report_unavailable(gs, "the shortcut was declined");
         break;
     default:
-        g_warning("Boo: global shortcut request failed (response=%u)", response);
+        boo_report_unavailable(gs, "the desktop rejected the shortcut request");
         break;
     }
 
@@ -161,19 +173,41 @@ static void on_portal_response(GDBusConnection *dbus, const char *sender,
 // The method call's own reply carries nothing we use — the payload arrives via
 // the Response signal — but it still surfaces transport errors.
 static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data) {
-    (void)user_data;
+    BooGlobalShortcut *gs = user_data;
 
     GError *error = NULL;
     GVariant *reply =
         g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), res, &error);
 
-    if (!reply) {
-        g_warning("Boo: GlobalShortcuts portal call failed: %s",
-                  error ? error->message : "(unknown)");
-        g_clear_error(&error);
+    if (reply) {
+        g_variant_unref(reply);
         return;
     }
-    g_variant_unref(reply);
+
+    // The call failed, so no Response signal is coming. Drop the subscription we
+    // installed for it — otherwise it lingers and blocks any later request.
+    if (gs && gs->response_subscription != 0) {
+        g_dbus_connection_signal_unsubscribe(gs->dbus, gs->response_subscription);
+        gs->response_subscription = 0;
+    }
+
+    // The common case by far, and worth naming precisely: GNOME only shipped a
+    // GlobalShortcuts backend in 48, so on 46 (Ubuntu 24.04 LTS) and 47 the
+    // interface is absent outright and D-Bus answers UnknownMethod.
+    const gboolean unsupported =
+        error && (g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD) ||
+                  g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_INTERFACE) ||
+                  g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_SERVICE_UNKNOWN));
+
+    if (unsupported) {
+        boo_report_unavailable(
+            gs, "this desktop has no global-shortcuts portal "
+                "(needs GNOME 48+, KDE Plasma, or Hyprland)");
+    } else {
+        boo_report_unavailable(gs, error ? error->message : "portal call failed");
+    }
+
+    g_clear_error(&error);
 }
 
 // Returns a floating GVariant, or NULL if the method cannot be built yet.
@@ -241,17 +275,18 @@ static void boo_portal_request(BooGlobalShortcut *gs, BooPortalMethod method) {
         gs->dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH,
         PORTAL_IFACE_GLOBAL_SHORTCUTS,
         method == BOO_METHOD_CREATE_SESSION ? "CreateSession" : "BindShortcuts",
-        payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_call_done, NULL);
+        payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_call_done, gs);
 
     g_free(request_path);
     g_free(request_token);
 }
 
-BooGlobalShortcut *boo_global_shortcut_new(GtkWindow *parent_window,
-                                           BooShortcutCallback on_activated,
-                                           gpointer user_data) {
+BooGlobalShortcut *boo_global_shortcut_new(
+    GtkWindow *parent_window, BooShortcutCallback on_activated,
+    BooShortcutUnavailableCallback on_unavailable, gpointer user_data) {
     BooGlobalShortcut *gs = g_new0(BooGlobalShortcut, 1);
     gs->on_activated = on_activated;
+    gs->on_unavailable = on_unavailable;
     gs->user_data = user_data;
 
     // Reuse GApplication's session bus connection: the predicted request path is
@@ -261,8 +296,7 @@ BooGlobalShortcut *boo_global_shortcut_new(GtkWindow *parent_window,
     GDBusConnection *dbus = app ? g_application_get_dbus_connection(app) : NULL;
 
     if (!dbus) {
-        g_message("Boo: no session bus — global shortcut disabled. "
-                  "Use the on-screen Record button.");
+        boo_report_unavailable(gs, "no session bus");
         return gs; // Still a valid handle; it just never fires.
     }
 

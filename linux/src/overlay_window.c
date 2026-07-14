@@ -156,6 +156,22 @@ static void on_shortcut_activated(gpointer user_data) {
     toggle_recording(user_data);
 }
 
+// The hotkey couldn't be registered — most often because the desktop has no
+// GlobalShortcuts portal at all (GNOME only gained one in 48, so Ubuntu 24.04's
+// GNOME 46 has none). Say so, rather than leaving the user pressing a key that
+// does nothing.
+static void on_shortcut_unavailable(const char *reason, gpointer user_data) {
+    WindowState *state = user_data;
+
+    g_autofree char *msg =
+        g_strdup_printf("Hotkey unavailable: %s. Use the Record button.", reason);
+    show_toast(state, msg);
+
+    gtk_label_set_text(state->transcript_label,
+                       "Ctrl+Shift+Space is not available on this desktop.\n"
+                       "Press Record instead.");
+}
+
 GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     GtkWidget *window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Boo");
@@ -212,8 +228,8 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // Request the Ctrl+Shift+Space global hotkey. Asynchronous and best-effort:
     // the portal may decline or the user may rebind it, so the Record button
     // above stays the primary control.
-    state->shortcut = boo_global_shortcut_new(GTK_WINDOW(window),
-                                              on_shortcut_activated, state);
+    state->shortcut = boo_global_shortcut_new(
+        GTK_WINDOW(window), on_shortcut_activated, on_shortcut_unavailable, state);
 
     // Auto-paste of transcripts into the focused app (RemoteDesktop portal).
     // First run shows a one-time permission dialog; the grant persists.

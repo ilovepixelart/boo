@@ -16,9 +16,17 @@
 #include <stdio.h>
 
 static gboolean shortcut_fired = FALSE;
+static gboolean shortcut_unavailable = FALSE;
 static BooGlobalShortcut *shortcut = NULL;
 static BooTextInject *inject = NULL;
 static GtkWindow *window = NULL;
+
+static void on_unavailable(const char *reason, gpointer user_data) {
+    (void)user_data;
+    printf("[harness] SHORTCUT UNAVAILABLE: %s\n", reason);
+    fflush(stdout);
+    shortcut_unavailable = TRUE;
+}
 
 static void on_shortcut(gpointer user_data) {
     (void)user_data;
@@ -50,7 +58,7 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
 
     window = GTK_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
 
-    shortcut = boo_global_shortcut_new(window, on_shortcut, NULL);
+    shortcut = boo_global_shortcut_new(window, on_shortcut, on_unavailable, NULL);
     inject = boo_text_inject_new(window);
 
     // Give the portal handshakes time to complete, then let the mock fire the
@@ -66,6 +74,10 @@ int main(int argc, char **argv) {
     int rc = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
 
+    if (shortcut_unavailable) {
+        fprintf(stderr, "[harness] FAIL: shortcut reported unavailable\n");
+        return 1;
+    }
     if (!shortcut_fired) {
         fprintf(stderr, "[harness] FAIL: shortcut callback never fired\n");
         return 1;

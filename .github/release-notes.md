@@ -29,6 +29,8 @@ flatpak run com.boo.app
 
 The hotkey is **Ctrl+Shift+Space**. Your desktop will ask once to allow the shortcut and once to allow remote input; decline either and Boo still works from the Record button, copying to the clipboard.
 
+> **⚠️ The hotkey needs GNOME 48+, KDE Plasma, or Hyprland.** GNOME only shipped a GlobalShortcuts portal in version 48, so on **Ubuntu 24.04 LTS (GNOME 46)** the interface does not exist and no app can register a global hotkey. Boo detects this and tells you. Auto-paste still works, so Boo is fully usable from the Record button.
+
 ### You also need a model
 
 No whisper model is bundled (they're 140 MB+):
