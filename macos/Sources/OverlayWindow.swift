@@ -11,6 +11,10 @@ class OverlayWindow: NSWindow {
     var isTranscribing = false
     var autoType = true
     var previousApp: NSRunningApplication?
+    /// Where the transcript is destined, captured when recording starts.
+    /// Resolving this at transcription time instead would be wrong: by then
+    /// Boo's own window is frontmost, and Boo is never the dictation target.
+    var targetApp: NSRunningApplication?
     var startedViaHotkey = false
     var statusLabel: NSTextField!
     var recordButton: NSButton!
@@ -234,6 +238,15 @@ class OverlayWindow: NSWindow {
     func startRecording(viaHotkey: Bool = false) {
         startedViaHotkey = viaHotkey
 
+        // Pin the destination now. `previousApp` tracks the last non-Boo app to
+        // activate, so it's the right answer whenever Boo itself holds focus —
+        // which is always true for the Record button, and true for the hotkey
+        // too once Boo's window has been clicked.
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        targetApp = (frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier)
+            ? previousApp
+            : (frontmost ?? previousApp)
+
         // Instant UI feedback
         isRecording = true
         statusLabel.stringValue = "recording..."
@@ -440,8 +453,10 @@ class OverlayWindow: NSWindow {
     func typeTextIntoFocusedApp(_ text: String) {
         // Ghostty fast-path: its AppleScript API (1.3+) writes into the pty
         // directly — no clipboard clobber, no re-activation, immune to Secure
-        // Input. On any failure, fall through to the generic paste below.
-        let target = startedViaHotkey ? NSWorkspace.shared.frontmostApplication : previousApp
+        // Input. It addresses Ghostty's own front window, so Ghostty doesn't
+        // even need to be frontmost. On any failure, fall through to the
+        // generic paste below.
+        let target = targetApp ?? previousApp
         if GhosttyInjector.isGhostty(target), GhosttyInjector.inputText(text) {
             return
         }
@@ -452,11 +467,10 @@ class OverlayWindow: NSWindow {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Step 2: If started via button click, re-activate previous app
-        // If started via hotkey, the target app is ALREADY focused — don't switch
-        if startedViaHotkey {
-        } else if let app = previousApp {
-            app.activate(options: [.activateIgnoringOtherApps])
+        // Step 2: If started via button click, re-activate the target app.
+        // If started via hotkey, it is ALREADY focused — don't switch.
+        if !startedViaHotkey, let app = target {
+            app.activate()
         }
 
         // Step 3: Paste via clipboard — most universally reliable method
