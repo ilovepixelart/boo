@@ -32,7 +32,8 @@ fi
 
 echo "→ repacking $WHISPER_A for ld alignment"
 WORK=$(mktemp -d)
-trap "rm -rf $WORK" EXIT
+# Single quotes: expand $WORK when the trap fires, not when it's installed.
+trap 'rm -rf "$WORK"' EXIT
 
 (
     cd "$WORK"

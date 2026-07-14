@@ -37,6 +37,7 @@ cp zig-out/lib/libboo-core.a "$WORK/"
 cp "$WHISPER" "$WORK/"
 ranlib "$WORK/libboo-core.a" "$WORK/libwhisper.a"
 
+# shellcheck disable=SC2046  # pkg-config emits several flags; splitting is the point.
 zig cc -o "$WORK/audio_smoke" linux/tests/audio_smoke.c \
     -Iinclude "$WORK/libboo-core.a" "$WORK/libwhisper.a" \
     $(pkg-config --cflags --libs libpipewire-0.3) \

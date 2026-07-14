@@ -18,7 +18,12 @@
 # so a pass here is what proves the prediction correct.
 #
 # Needs: xvfb, dbus-x11, python3-gi, gtk4, libadwaita.
-set -u
+#
+# No `set -e`: the assertions below report which check failed and why, which is
+# far more useful than the script vanishing on the first non-zero exit. But
+# `pipefail` matters — without it a failing command inside a pipeline is masked
+# by a succeeding one, and a test that cannot fail is worse than no test.
+set -uo pipefail
 
 PROJ="$(cd "$(dirname "$0")/../.." && pwd)"
 TESTS="$PROJ/linux/tests"
@@ -61,6 +66,7 @@ wait_for() {
 wait_for '"event": "ready"' "the mock portal to claim the bus name" || exit 1
 echo "[integration] mock portal owns org.freedesktop.portal.Desktop"
 
+# shellcheck disable=SC2046  # pkg-config emits several flags; splitting is the point.
 cc -o "$WORK/harness" "$TESTS/portal_harness.c" \
     "$PROJ/linux/src/global_shortcut.c" "$PROJ/linux/src/text_inject.c" \
     -I"$PROJ/linux/src" -I"$PROJ/include" \
@@ -123,7 +129,7 @@ sleep 1
 
 python3 "$TESTS/mock_portal.py" --prebound > "$WORK/events2.jsonl" 2>&1 &
 PORTAL=$!
-EVENTS_FILE="$WORK/events2.jsonl"
+
 ( deadline=$((SECONDS + 30))
   while [ "$SECONDS" -lt "$deadline" ]; do
       grep -q '"event": "ready"' "$WORK/events2.jsonl" 2>/dev/null && exit 0

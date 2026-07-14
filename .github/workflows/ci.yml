@@ -46,6 +46,23 @@ jobs:
           strings zig-out/Boo.app/Contents/MacOS/Boo | grep -q com.mitchellh.ghostty
           echo "bundle ok"
 
+  lint:
+    name: Lint (shell)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        # The build and test harnesses are shell, and a broken harness fails
+        # quietly — an unquoted expansion or a trap that expands too early is
+        # exactly the kind of bug that makes a test suite lie.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck -S warning \
+            bundle.sh scripts/*.sh linux/tests/*.sh
+          echo "shell ok"
+
   linux:
     name: Linux (build + portal tests)
     runs-on: ubuntu-24.04
