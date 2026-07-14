@@ -52,21 +52,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        # --notes-file rather than an inline string: notes indented inside a YAML
+        # block would carry their leading whitespace and render as a code block.
+        # --generate-notes appends the auto-generated changelog underneath.
         run: |
           gh release create "$TAG" dist/*.dmg \
             --title "Boo $TAG" \
-            --generate-notes \
-            --notes "
-
-          > **Note on the macOS build**
-          >
-          > The app is ad-hoc signed, not notarized (that needs a paid Apple
-          > Developer ID). macOS will refuse to open it on first launch. To run it:
-          >
-          > \`\`\`sh
-          > xattr -dr com.apple.quarantine /Applications/Boo.app
-          > \`\`\`
-          >
-          > …or right-click the app → **Open** → **Open**.
-
-          Requires a whisper model — see the README for how to fetch one."
+            --notes-file .github/release-notes.md \
+            --generate-notes
