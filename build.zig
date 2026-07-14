@@ -106,6 +106,7 @@ pub fn build(b: *std.Build) void {
                 "overlay_window.c",
                 "waveform_widget.c",
                 "global_shortcut.c",
+                "text_inject.c",
             },
             .flags = &.{ "-O2", "-std=c11", "-Wall", "-Wextra" },
         });

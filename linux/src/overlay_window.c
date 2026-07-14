@@ -5,6 +5,7 @@
 
 #include "overlay_window.h"
 #include "global_shortcut.h"
+#include "text_inject.h"
 #include "waveform_widget.h"
 
 #include <adwaita.h>
@@ -12,11 +13,13 @@
 
 typedef struct {
     BooContext *ctx;
+    GtkWindow *window;
     GtkLabel *transcript_label;
     GtkButton *record_button;
     GtkWidget *waveform;
     AdwToastOverlay *toast_overlay;
     BooGlobalShortcut *shortcut;
+    BooTextInject *inject;
 } WindowState;
 
 typedef struct {
@@ -27,6 +30,7 @@ typedef struct {
 static void window_state_free(gpointer data) {
     WindowState *state = data;
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
+    if (state->inject) boo_text_inject_free(state->inject);
     g_free(state);
 }
 
@@ -63,10 +67,12 @@ static gboolean transcribe_done(gpointer user_data) {
         gtk_label_set_text(state->transcript_label, res->text);
         copy_to_clipboard(state, res->text);
         show_toast(state, "Copied to clipboard");
-        // Auto-typing into the focused window is not implemented — see
-        // README; Wayland text injection requires either a wlroots-only
-        // compositor (wtype) or a uinput daemon (ydotool), neither of
-        // which works inside the Flatpak sandbox without extra plumbing.
+        // When dictation was triggered by the global hotkey, focus stayed in
+        // the target app — auto-paste there. When our own window is focused
+        // (Record button click), pasting would land back in Boo; skip it.
+        if (!gtk_window_is_active(state->window)) {
+            boo_text_inject_paste(state->inject);
+        }
     } else {
         gtk_label_set_text(state->transcript_label, "(no speech detected)");
     }
@@ -119,6 +125,7 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
 
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
+    state->window = GTK_WINDOW(window);
     g_object_set_data_full(G_OBJECT(window), "boo-state", state,
                            window_state_free);
 
@@ -169,6 +176,10 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // above stays the primary control.
     state->shortcut = boo_global_shortcut_new(GTK_WINDOW(window),
                                               on_shortcut_activated, state);
+
+    // Auto-paste of transcripts into the focused app (RemoteDesktop portal).
+    // First run shows a one-time permission dialog; the grant persists.
+    state->inject = boo_text_inject_new(GTK_WINDOW(window));
 
     return GTK_WINDOW(window);
 }
