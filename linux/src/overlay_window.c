@@ -164,8 +164,9 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
 
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(window), content);
 
-    // Register Ctrl+Shift+Space global shortcut. Currently a stub — see
-    // global_shortcut.c.
+    // Request the Ctrl+Shift+Space global hotkey. Asynchronous and best-effort:
+    // the portal may decline or the user may rebind it, so the Record button
+    // above stays the primary control.
     state->shortcut = boo_global_shortcut_new(GTK_WINDOW(window),
                                               on_shortcut_activated, state);
 
