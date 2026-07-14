@@ -58,10 +58,12 @@
   <releases>
     <release version="0.1.3" date="2026-07-14">
       <description>
-        <p>Fixes found by running Boo on a real GNOME desktop.</p>
+        <p>Fixes found by running Boo on a real GNOME desktop, and by testing it the way a new user would.</p>
         <ul>
           <li>Boo now tells you when your desktop has no global-shortcuts portal. GNOME only gained one in version 48, so on GNOME 46 (Ubuntu 24.04 LTS) the hotkey cannot work for any app — previously Boo failed silently. Auto-paste is unaffected, so Boo stays usable from the Record button.</li>
+          <li>Non-English dictation works. The language was hardcoded to English, which silently translated other languages instead of transcribing them; set BOO_LANG (a language code, or "auto") when using a multilingual model.</li>
           <li>A single recording is now capped at 10 minutes and stops automatically, transcribing what it captured. Previously the buffer grew without limit and could freeze the app for minutes inside whisper.</li>
+          <li>The menu bar now shows when Boo is transcribing, rather than snapping straight back to idle while whisper is still working.</li>
           <li>Fixed a memory leak, a data race, and a latent use-after-free in the audio backends.</li>
         </ul>
       </description>
