@@ -438,6 +438,14 @@ class OverlayWindow: NSWindow {
     // MARK: - Auto-Type
 
     func typeTextIntoFocusedApp(_ text: String) {
+        // Ghostty fast-path: its AppleScript API (1.3+) writes into the pty
+        // directly — no clipboard clobber, no re-activation, immune to Secure
+        // Input. On any failure, fall through to the generic paste below.
+        let target = startedViaHotkey ? NSWorkspace.shared.frontmostApplication : previousApp
+        if GhosttyInjector.isGhostty(target), GhosttyInjector.inputText(text) {
+            return
+        }
+
         // Step 1: Put text on clipboard
         let pasteboard = NSPasteboard.general
         let oldContents = pasteboard.string(forType: .string)

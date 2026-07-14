@@ -68,6 +68,7 @@ targets:
         LSMinimumSystemVersion: "14.0"
         NSHighResolutionCapable: true
         NSMicrophoneUsageDescription: "Boo needs microphone access for speech-to-text."
+        NSAppleEventsUsageDescription: "Boo sends dictated text to Ghostty through its scripting interface."
         NSSupportsAutomaticGraphicsSwitching: true
         LSApplicationCategoryType: public.app-category.productivity
 
