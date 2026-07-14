@@ -24,18 +24,27 @@ enum PermissionsManager {
         AXIsProcessTrusted()
     }
 
-    /// Prompt for Accessibility, but only if it isn't already granted.
+    /// Whether we've already shown the Accessibility prompt this launch.
+    private static var didPromptAccessibility = false
+
+    /// Ensure Accessibility, prompting **at most once per launch**.
     ///
-    /// Passing kAXTrustedCheckOptionPrompt shows the system dialog when untrusted
-    /// and does nothing when trusted, so the guard is belt-and-braces — it also
-    /// keeps us from re-prompting a user who has already said no, and makes the
-    /// intent obvious at the call site.
+    /// The subtlety that bit us: `AXIsProcessTrustedWithOptions` with the prompt
+    /// option shows the system dialog *every* time it's called while untrusted —
+    /// not just the first. Since this is called on every fallback paste, calling
+    /// the prompting variant each time meant a permission dialog on every single
+    /// recording. So prompt once; after that, only the non-prompting check runs,
+    /// and if it's still not granted the caller falls back to clipboard-only.
     @discardableResult
     static func requestAccessibilityIfNeeded() -> Bool {
         if AXIsProcessTrusted() { return true }
 
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
-        return AXIsProcessTrustedWithOptions(options as CFDictionary)
+        if !didPromptAccessibility {
+            didPromptAccessibility = true
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
+            return AXIsProcessTrustedWithOptions(options as CFDictionary)
+        }
+        return false
     }
 
     // MARK: - Microphone (required — Boo does nothing without it)
