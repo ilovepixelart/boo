@@ -15,26 +15,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setenv("GGML_METAL_PATH_RESOURCES", resourcePath, 1)
         }
 
-        // Request all permissions upfront
+        // Microphone only. Accessibility is requested later, the first time a
+        // paste actually needs it — see PermissionsManager.
         PermissionsManager.ensurePermissions()
 
-        // Init Boo core
-        let modelPath = findModelPath()
-        print("Boo 👻 — Loading model: \(modelPath)")
+        guard let modelPath = findModelPath() else {
+            showModelNotFoundAlert()
+            NSApp.terminate(nil)
+            return
+        }
+        NSLog("Boo: loading model %@", modelPath)
 
-        booCtx = boo_init(modelPath)
-        if booCtx == nil {
+        guard let ctx = boo_init(modelPath) else {
             let alert = NSAlert()
-            alert.messageText = "Failed to load model"
-            alert.informativeText = "Download ggml-base.en.bin to models/ directory"
+            alert.messageText = "Could not load the model"
+            alert.informativeText = """
+                \(modelPath)
+
+                The file exists but whisper could not read it. It may be corrupt \
+                or truncated — try downloading it again.
+                """
+            alert.alertStyle = .warning
             alert.runModal()
             NSApp.terminate(nil)
             return
         }
-        print("Model loaded.")
+        booCtx = ctx
 
-        // Create overlay window
-        overlayWindow = OverlayWindow(booCtx: booCtx!)
+        overlayWindow = OverlayWindow(booCtx: ctx)
         overlayWindow?.makeKeyAndOrderFront(nil)
 
         // Register global hotkey: Ctrl+Shift+Space
@@ -203,38 +211,80 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    private func findModelPath() -> String {
-        // Check multiple locations
-        let appDir = Bundle.main.bundlePath
-            .components(separatedBy: "/").dropLast().joined(separator: "/")
-        let projectDir = appDir
-            .components(separatedBy: "/").dropLast().joined(separator: "/")
+    /// Directories Boo looks in for a model, most specific first.
+    private var modelSearchDirs: [String] {
+        let appDir = (Bundle.main.bundlePath as NSString).deletingLastPathComponent
+        let projectDir = (appDir as NSString).deletingLastPathComponent
 
-        let candidates = [
-            // Relative to app bundle (zig-out/Boo.app → zig-out/../models)
-            projectDir + "/models/ggml-base.en.bin",
-            // Inside app bundle resources
-            Bundle.main.resourcePath.map { $0 + "/ggml-base.en.bin" } ?? "",
-            // Home directory
-            NSHomeDirectory() + "/.boo/models/ggml-base.en.bin",
-            // Current working directory
-            "models/ggml-base.en.bin",
-            // /Applications install
-            "/Applications/Boo.app/../models/ggml-base.en.bin",
-        ]
+        return [
+            NSHomeDirectory() + "/.boo/models",   // where the README tells you to put it
+            "models",                              // cwd, for `zig build run`
+            projectDir + "/models",                // source checkout: zig-out/Boo.app → ../models
+            Bundle.main.resourcePath ?? "",        // bundled alongside the app
+        ].filter { !$0.isEmpty }
+    }
 
-        for path in candidates {
-            if FileManager.default.fileExists(atPath: path) {
-                print("Found model at: \(path)")
-                return path
+    /// Find a whisper model.
+    ///
+    /// Any of whisper.cpp's GGML models works, so this accepts any `ggml-*.bin`
+    /// rather than only the `ggml-base.en.bin` we happen to recommend — pinning
+    /// the filename meant a user who followed our own advice and downloaded, say,
+    /// large-v3-turbo would be told no model was installed.
+    ///
+    /// $BOO_MODEL wins outright, matching the Linux frontend.
+    private func findModelPath() -> String? {
+        if let env = ProcessInfo.processInfo.environment["BOO_MODEL"], !env.isEmpty {
+            guard FileManager.default.fileExists(atPath: env) else {
+                NSLog("Boo: BOO_MODEL points at %@, which does not exist", env)
+                return nil
             }
+            return env
         }
 
-        print("Model not found. Searched:")
-        for path in candidates {
-            print("  \(path)")
+        let fm = FileManager.default
+        for dir in modelSearchDirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+
+            let models = entries
+                .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") }
+                .sorted()
+            guard !models.isEmpty else { continue }
+
+            // Prefer the recommended model when it's there; otherwise take the
+            // first alphabetically, so the choice is at least deterministic.
+            let chosen = models.contains("ggml-base.en.bin") ? "ggml-base.en.bin" : models[0]
+            return (dir as NSString).appendingPathComponent(chosen)
         }
-        return "models/ggml-base.en.bin"
+        return nil
+    }
+
+    private func showModelNotFoundAlert() {
+        let alert = NSAlert()
+        alert.messageText = "No speech model found"
+        alert.informativeText = """
+            Boo needs a whisper model, which isn't bundled — they're 140 MB+.
+
+            Download one into ~/.boo/models/ and relaunch:
+
+            mkdir -p ~/.boo/models
+            curl -L -o ~/.boo/models/ggml-base.en.bin \\
+              https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+            Searched:
+            \(modelSearchDirs.map { "  • \($0)" }.joined(separator: "\n"))
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Copy Command")
+        alert.addButton(withTitle: "Quit")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            let cmd = """
+                mkdir -p ~/.boo/models && curl -L -o ~/.boo/models/ggml-base.en.bin \
+                https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+                """
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(cmd, forType: .string)
+        }
     }
 
     // MARK: - Global Hotkey (Ctrl+Shift+Space)
