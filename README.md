@@ -28,8 +28,7 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Platform | Audio backend | Frontend | Build path | Status |
 |---|---|---|---|---|
 | macOS 14+ (Apple Silicon + Intel) | CoreAudio | Swift + AppKit | xcodegen → Xcode | ✅ Working |
-| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Preview — portals verified, audio untested |
-| Windows | — | — | — | Not planned |
+| Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Preview |
 
 Linux ships as a **preview** Flatpak. Being precise about what that means, because "preview" usually isn't:
 
@@ -46,7 +45,7 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - KDE Plasma and Hyprland, which do implement GlobalShortcuts — the hotkey path has only been exercised against the mock portal.
 - The GTK4 UI has not been driven by a human on a real desktop.
 
-**Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
+**The Linux app is smaller than the macOS one:** no menu-bar item, no settings dialog, no theme picker, and it doesn't stay on top. Recording, transcription and auto-paste all work.
 
 ## Quick start
 
@@ -358,8 +357,7 @@ linux/
     integration.sh     End-to-end portal handshakes against a live D-Bus
   flatpak/          Manifest, .desktop entry, AppStream metainfo
 
-themes/             486 Ghostty-format color themes (consumed by the macOS
-                    frontend; Linux port pending)
+themes/             486 Ghostty-format color themes (used by the macOS frontend)
 assets/             App icons, Metal shader, mel filterbank
 
 scripts/

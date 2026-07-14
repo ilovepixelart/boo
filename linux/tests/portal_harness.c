@@ -28,6 +28,8 @@ static void on_unavailable(const char *reason, gpointer user_data) {
     shortcut_unavailable = TRUE;
 }
 
+static gboolean finish(gpointer data);
+
 static void on_shortcut(gpointer user_data) {
     (void)user_data;
     printf("[harness] SHORTCUT CALLBACK FIRED\n");
@@ -39,14 +41,28 @@ static void on_shortcut(gpointer user_data) {
     printf("[harness] requesting paste\n");
     fflush(stdout);
     boo_text_inject_paste(inject);
+
+    // The paste is deliberately delayed (see text_inject.c) to let the clipboard
+    // offer propagate, so give the keysyms time to reach the bus, then finish.
+    // Exiting on completion rather than on a fixed timer keeps the test fast and
+    // stops it racing a loaded CI runner.
+    g_timeout_add(1500, finish, g_application_get_default());
 }
 
+// Reachable from both the completion timer and the safety timeout, so it must
+// tolerate running twice — otherwise the second call double-frees.
 static gboolean finish(gpointer data) {
+    static gboolean done = FALSE;
+    if (done) return G_SOURCE_REMOVE;
+    done = TRUE;
+
     GApplication *app = data;
     printf("[harness] done — shortcut_fired=%s\n", shortcut_fired ? "yes" : "no");
     fflush(stdout);
-    if (shortcut) boo_global_shortcut_free(shortcut);
-    if (inject) boo_text_inject_free(inject);
+
+    if (shortcut) { boo_global_shortcut_free(shortcut); shortcut = NULL; }
+    if (inject) { boo_text_inject_free(inject); inject = NULL; }
+
     g_application_quit(app);
     return G_SOURCE_REMOVE;
 }
@@ -61,9 +77,9 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
     shortcut = boo_global_shortcut_new(window, on_shortcut, on_unavailable, NULL);
     inject = boo_text_inject_new(window);
 
-    // Give the portal handshakes time to complete, then let the mock fire the
-    // shortcut; the harness is torn down shortly after.
-    g_timeout_add_seconds(8, finish, app);
+    // Safety net only. The normal path finishes as soon as the shortcut fires
+    // and the paste lands, so this exists purely so a hang can't wedge CI.
+    g_timeout_add_seconds(30, finish, app);
 }
 
 int main(int argc, char **argv) {

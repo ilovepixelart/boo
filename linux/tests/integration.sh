@@ -43,13 +43,22 @@ echo "[integration] session bus up"
 
 python3 "$TESTS/mock_portal.py" > "$WORK/events.jsonl" 2>"$WORK/portal.err" &
 PORTAL=$!
-sleep 2
 
-if ! grep -q '"event": "ready"' "$WORK/events.jsonl" 2>/dev/null; then
-    echo "[integration] FAIL: mock portal did not claim the bus name"
-    cat "$WORK/portal.err"
-    exit 1
-fi
+# Wait for a condition rather than sleeping a guessed interval — a fixed sleep is
+# how a suite starts failing intermittently on a loaded CI runner.
+wait_for() {
+    local pattern="$1" what="$2" deadline=$((SECONDS + 30))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        grep -q "$pattern" "$WORK/events.jsonl" 2>/dev/null && return 0
+        sleep 0.2
+    done
+    echo "[integration] FAIL: timed out waiting for $what"
+    echo "--- portal stderr ---"; cat "$WORK/portal.err"
+    echo "--- events so far ---"; cat "$WORK/events.jsonl"
+    return 1
+}
+
+wait_for '"event": "ready"' "the mock portal to claim the bus name" || exit 1
 echo "[integration] mock portal owns org.freedesktop.portal.Desktop"
 
 cc -o "$WORK/harness" "$TESTS/portal_harness.c" \
@@ -58,8 +67,9 @@ cc -o "$WORK/harness" "$TESTS/portal_harness.c" \
     $(pkg-config --cflags --libs gtk4 libadwaita-1) \
     -std=c11 -Wall -Wextra || { echo "[integration] FAIL: harness build"; exit 1; }
 
-# Fire the hotkey once the handshakes have had time to land.
-( sleep 4
+# Fire the hotkey only once the shortcut is actually bound. Firing on a timer
+# would race the handshake and flake under load.
+( wait_for '"event": "gs.BindShortcuts"' "the shortcut to be bound" || exit 1
   dbus-send --session --print-reply --dest=org.freedesktop.portal.Desktop \
       /org/freedesktop/portal/desktop \
       com.boo.MockControl.FireShortcut string:'toggle-record' \

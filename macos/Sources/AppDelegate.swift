@@ -94,24 +94,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let recording = boo_is_recording(ctx)
         let transcribing = boo_is_transcribing(ctx)
 
-        button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
-        button.image?.size = NSSize(width: 18, height: 18)
-
         if recording {
-            let samples = boo_get_audio_samples(ctx)
-            let totalSecs = Int(Float(samples) / 16000.0)
-            if totalSecs < 60 {
-                button.title = String(format: " %ds", totalSecs)
-            } else {
-                let mins = totalSecs / 60
-                let secs = totalSecs % 60
-                button.title = String(format: " %d:%02d", mins, secs)
-            }
-        } else {
+            // Red waveform plus a live timer.
+            button.image = NSImage(systemSymbolName: "waveform",
+                                   accessibilityDescription: "Boo — recording")
+            button.contentTintColor = .systemRed
+
+            let totalSecs = Int(Float(boo_get_audio_samples(ctx)) / 16000.0)
+            button.title = totalSecs < 60
+                ? String(format: " %ds", totalSecs)
+                : String(format: " %d:%02d", totalSecs / 60, totalSecs % 60)
+        } else if transcribing {
+            // Transcription blocks for seconds on a big model; without this the
+            // menu bar snapped straight back to idle and looked like nothing
+            // happened.
+            button.image = NSImage(systemSymbolName: "waveform.badge.magnifyingglass",
+                                   accessibilityDescription: "Boo — transcribing")
+            button.contentTintColor = .secondaryLabelColor
             button.title = ""
-            button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Boo")
+        } else {
+            button.image = NSImage(systemSymbolName: "waveform",
+                                   accessibilityDescription: "Boo")
             button.contentTintColor = nil // system default
+            button.title = ""
         }
+
         button.image?.size = NSSize(width: 18, height: 18)
     }
 

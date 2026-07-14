@@ -18,7 +18,7 @@ class OverlayWindow: NSWindow {
     var startedViaHotkey = false
     var statusLabel: NSTextField!
     var recordButton: NSButton!
-    var displayLink: CVDisplayLink?
+    var waveformLink: CADisplayLink?
 
     // Transcript history
     var transcripts: [String] = []
@@ -504,34 +504,29 @@ class OverlayWindow: NSWindow {
 
 
     // MARK: - Display Link (only active during recording/transcribing)
+    //
+    // NSWindow.displayLink (macOS 14+) rather than CVDisplayLink, which Apple
+    // deprecated in macOS 15. It fires on the main thread and tracks the display
+    // the window is actually on, so it needs neither the hop through
+    // DispatchQueue.main nor an unmanaged self pointer that the C callback did.
 
     func createDisplayLink() {
-        var dl: CVDisplayLink?
-        CVDisplayLinkCreateWithActiveCGDisplays(&dl)
-        guard let link = dl else { return }
+        let link = displayLink(target: self, selector: #selector(displayLinkFired))
+        link.add(to: .main, forMode: .common)
+        link.isPaused = true // only runs while recording / transcribing
+        waveformLink = link
+    }
 
-        let callback: CVDisplayLinkOutputCallback = { _, _, _, _, _, userInfo -> CVReturn in
-            guard let userInfo = userInfo else { return kCVReturnSuccess }
-            let window = Unmanaged<OverlayWindow>.fromOpaque(userInfo).takeUnretainedValue()
-            DispatchQueue.main.async { window.updateWaveform() }
-            return kCVReturnSuccess
-        }
-
-        CVDisplayLinkSetOutputCallback(link, callback, Unmanaged.passUnretained(self).toOpaque())
-        displayLink = link
-        // NOT started — only starts when recording begins
+    @objc private func displayLinkFired() {
+        updateWaveform()
     }
 
     func startDisplayLink() {
-        if let link = displayLink, !CVDisplayLinkIsRunning(link) {
-            CVDisplayLinkStart(link)
-        }
+        waveformLink?.isPaused = false
     }
 
     func stopDisplayLink() {
-        if let link = displayLink, CVDisplayLinkIsRunning(link) {
-            CVDisplayLinkStop(link)
-        }
+        waveformLink?.isPaused = true
     }
 
     func updateWaveform() {
@@ -564,6 +559,8 @@ class OverlayWindow: NSWindow {
     }
 
     deinit {
-        if let link = displayLink { CVDisplayLinkStop(link) }
+        // The run loop retains the display link, so leaving it attached would
+        // keep firing at a deallocated target.
+        waveformLink?.invalidate()
     }
 }
