@@ -309,7 +309,7 @@ fn runStreamBench(
     _ = timer.lap();
     const batch = ctx.transcribe(allocator, take.items) catch fatal("batch transcription failed", .{});
     const batch_ms = msFromNs(timer.lap());
-    allocator.free(batch);
+    defer allocator.free(batch);
 
     std.debug.print(
         \\  streaming simulation ({d:.1}s take, 3 utterances):
@@ -318,6 +318,13 @@ fn runStreamBench(
         \\  stop-to-text: {d:.0} ms streaming vs {d:.0} ms batch ({d:.1}x faster)
         \\
     , .{ take_seconds, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms });
+
+    // Agreement with the batch output needs no ground truth and directly
+    // measures what VAD chunking costs (the NeMo compare-vs-offline pattern):
+    // a seam bug that drops or duplicates words at utterance boundaries
+    // shows up here even on audio we have no reference for.
+    const divergence = try wer.wordErrorRate(allocator, final, batch);
+    std.debug.print("  streaming vs batch divergence: {d:.1}%\n", .{divergence * 100.0});
 
     // The take is the utterance three times over, so so is the reference.
     var wer_pct: ?f64 = null;

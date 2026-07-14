@@ -202,6 +202,36 @@ test "Chunker: commits utterances during the take and finalizes the tail" {
     try testing.expect(first_hit != second_hit);
 }
 
+test "Chunker: noise-only audio produces no transcript" {
+    // Whisper hallucinates on non-speech ("[BLANK_AUDIO]", "Thanks for
+    // watching"); the VAD front-end is what protects the user from junk
+    // being typed into their app after a noise-only take. Guard it.
+    engine_mod.setLogSilent();
+    const allocator = testing.allocator;
+
+    const model_path = try homeModel(allocator, "ggml-base.en.bin");
+    defer allocator.free(model_path);
+    const vad_path = try homeModel(allocator, "ggml-silero-v6.2.0.bin");
+    defer allocator.free(vad_path);
+
+    var eng = Engine.init(model_path, .{}) catch return error.SkipZigTest;
+    defer eng.deinit();
+    var vad = whisper.Vad.init(vad_path) catch return error.SkipZigTest;
+    defer vad.deinit();
+
+    var chunker = Chunker.init(allocator, &eng, &vad);
+    defer chunker.deinit();
+
+    var prng = std.Random.DefaultPrng.init(0xb00);
+    const random = prng.random();
+    const noise = try allocator.alloc(f32, WHISPER_SAMPLE_RATE * 6);
+    defer allocator.free(noise);
+    for (noise) |*s| s.* = (random.float(f32) - 0.5) * 0.2;
+
+    try testing.expect(!try chunker.tick(noise));
+    try testing.expectEqual(@as(usize, 0), chunker.committed.items.len);
+}
+
 test "Chunker: pure silence commits nothing and bounds the pending window" {
     engine_mod.setLogSilent();
     const allocator = testing.allocator;

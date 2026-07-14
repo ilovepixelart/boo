@@ -77,7 +77,10 @@ jobs:
       - name: Verify bundle
         run: |
           test -x zig-out/Boo.app/Contents/MacOS/Boo
-          codesign -v zig-out/Boo.app
+          # --deep --strict: every nested binary must verify, not just the
+          # bundle root; catches a bundle.sh signing regression before users
+          # hit Gatekeeper with it.
+          codesign --verify --deep --strict --verbose=2 zig-out/Boo.app
           # A bundle without themes silently falls back to one built-in theme.
           test "$(ls zig-out/Boo.app/Contents/Resources/themes | wc -l)" -gt 400
           # The Ghostty injector must actually be linked in.
