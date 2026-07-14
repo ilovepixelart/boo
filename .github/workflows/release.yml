@@ -103,8 +103,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Show what we're publishing
-        run: ls -la dist/
+      - name: Checksums
+        # The macOS builds aren't notarized, so there's no Apple signature to
+        # vouch for them. Publishing SHA-256 sums lets anyone verify a download
+        # is intact and untampered — the integrity guarantee an open-source
+        # project offers in place of notarization.
+        working-directory: dist
+        run: |
+          shasum -a 256 * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create release
         env:

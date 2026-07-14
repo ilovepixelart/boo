@@ -5,6 +5,13 @@
 | `Boo-<ver>-arm64.dmg` | macOS, Apple Silicon |
 | `Boo-<ver>-x86_64.dmg` | macOS, Intel |
 | `boo-<ver>-x86_64.flatpak` | Linux, x86_64 — **preview, see below** |
+| `SHA256SUMS` | checksums for the above |
+
+**Verify your download** (these builds aren't notarized, so this is your integrity check):
+
+```sh
+shasum -a 256 -c SHA256SUMS   # run in the folder you downloaded to
+```
 
 ### macOS
 
