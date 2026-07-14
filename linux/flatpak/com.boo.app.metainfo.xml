@@ -31,9 +31,9 @@
       Everything runs locally — no audio leaves your machine.
     </p>
     <p>
-      Preview on Linux: the global shortcut and auto-paste are working, but
-      audio capture has not yet been verified on real hardware. Bug reports
-      are welcome.
+      Preview on Linux: recording, transcription and both portal permissions
+      are verified, but Boo has not yet been run on a real GNOME or KDE
+      desktop. Bug reports are welcome.
     </p>
   </description>
 
@@ -60,7 +60,7 @@
       <description>
         <p>First Linux preview, and the first build for Intel Macs.</p>
         <ul>
-          <li>Linux ships as a Flatpak. The global hotkey and auto-paste are verified end to end against a live D-Bus; audio capture is not yet verified on real hardware.</li>
+          <li>Linux ships as a Flatpak. Audio capture, transcription, the global hotkey and auto-paste are all verified; Boo has not yet been run on a real GNOME or KDE desktop.</li>
           <li>macOS now builds for Intel as well as Apple Silicon.</li>
         </ul>
       </description>

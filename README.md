@@ -33,15 +33,16 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 
 Linux ships as a **preview** Flatpak. Being precise about what that means, because "preview" usually isn't:
 
-**Verified, and re-checked by CI on every push** ([`integration.sh`](linux/tests/integration.sh)):
-- Builds and links against GTK4 / libadwaita / PipeWire.
-- **GlobalShortcuts portal**: CreateSession → BindShortcuts (`toggle-record`, `CTRL+SHIFT+space`) → an `Activated` signal reaches Boo's callback.
-- **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`.
+**Verified:**
+- Builds and links against GTK4 / libadwaita / PipeWire (CI, every push).
+- **Audio actually works.** In a real Ubuntu VM, Boo's PipeWire backend captured 6 s of speech (96,568 samples @ 16 kHz, RMS tracking the signal) and whisper transcribed it correctly. Reproduce with [`linux/tests/audio.sh`](linux/tests/audio.sh).
+- **GlobalShortcuts portal**: CreateSession → BindShortcuts (`toggle-record`, `CTRL+SHIFT+space`) → an `Activated` signal reaches Boo's callback. *(CI, every push.)*
+- **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`. *(CI, every push.)*
 - The restore token persists, so the permission prompt appears **once**, not every launch.
 
 **Not verified:**
-- ***Audio capture has never run on Linux.*** Boo's PipeWire backend has not captured a single sample on real hardware. For a dictation app that is the entire product — so this preview may simply record silence. That's the main thing bug reports would help with.
-- Behavior against a real GNOME/KDE compositor. The handshakes above run against a faithful mock portal, not `xdg-desktop-portal-gnome`.
+- Behavior against a real GNOME/KDE compositor. The portal handshakes run against a faithful mock portal, not `xdg-desktop-portal-gnome` — so the *protocol* is proven but the real desktop's grant dialogs are not.
+- The GTK4 UI has not been driven by a human on a real desktop.
 
 **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
 
@@ -75,7 +76,7 @@ Other sizes (`tiny`, `small`, `medium`, `large-v3`) work too — accuracy vs. CP
 
 ### Linux (preview)
 
-> Audio capture is **untested** on Linux — see [Status](#status). This build may record silence. It is published to gather bug reports, not because it's known to work.
+> **Preview.** Recording, transcription and both portal grants are verified — but nobody has yet run Boo on a real GNOME/KDE desktop, so the grant dialogs you'll see are untested. See [Status](#status). Bug reports welcome.
 
 ```sh
 flatpak install --user boo-<version>-x86_64.flatpak
@@ -274,9 +275,12 @@ git tag v0.1.0 && git push origin v0.1.0
 ## Tests
 
 ```sh
-zig build test                  # Zig core
+zig build test                  # Zig core (no test blocks yet — see below)
 ./linux/tests/run.sh            # portal payloads — needs gtk4; runs on macOS too
 ./linux/tests/integration.sh    # portal handshakes — Linux only, needs a D-Bus
+./linux/tests/audio.sh MODEL WAV  # PipeWire capture -> whisper — needs a real
+                                  # PipeWire graph, so a VM or desktop, NOT a
+                                  # container (WirePlumber needs systemd-logind)
 ```
 
 **`run.sh`** checks the D-Bus payloads are well-formed. That matters more than it looks: GVariant format strings are parsed at *runtime*, so a malformed payload compiles cleanly and then aborts on a user's desktop.
@@ -285,7 +289,20 @@ zig build test                  # Zig core
 
 Its real value is subtler. The portal's Request/Response protocol requires a client to *predict* the reply's object path and subscribe **before** issuing the call — subscribe after and you race the portal and lose the reply permanently. The mock derives that path independently, exactly as a real portal does, so a passing run proves Boo's prediction is correct. That bug is invisible to a compiler and impossible to reproduce on macOS.
 
-CI runs all of this on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work — neither can be checked on a macOS dev box.
+**`audio.sh`** is the one that can't run in CI. It needs a real PipeWire graph, and WirePlumber — PipeWire's session manager — refuses to start without systemd-logind. In a container it dies, no nodes get linked, and Boo's stream captures nothing. So this wants a VM or a desktop:
+
+```sh
+brew install lima
+limactl start --name=boo template://ubuntu-lts
+# inside: install pipewire wireplumber gtk4 libadwaita, then
+./linux/tests/audio.sh ggml-base.en.bin speech.wav
+```
+
+Given a WAV it builds a virtual microphone out of a null sink's monitor, plays the file into it, and asserts a transcript comes back — so it runs unattended. Given no WAV it records from your default source and you just speak.
+
+`zig build test` compiles the Zig core but contains **no test blocks yet** — it is not meaningful coverage, and saying otherwise would be a lie. The core's audio, whisper and C-ABI code is currently only exercised indirectly, through the tests above.
+
+CI runs everything except `audio.sh` on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work — neither can be checked on a macOS dev box.
 
 ## Build — Zig core only (CLI test binary)
 

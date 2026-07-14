@@ -23,9 +23,9 @@ flatpak install --user boo-<ver>-x86_64.flatpak
 flatpak run com.boo.app
 ```
 
-**What is verified:** it builds and links; the global hotkey and auto-paste complete their real XDG portal handshakes (GlobalShortcuts and RemoteDesktop), including the one-time permission grant that persists across restarts.
+**What is verified:** it builds and links; audio capture works (PipeWire → whisper, tested in a real VM); and the global hotkey and auto-paste complete their real XDG portal handshakes (GlobalShortcuts and RemoteDesktop), including the one-time permission grant that persists across restarts.
 
-**What is not:** *audio capture has never been exercised on Linux.* Boo's PipeWire backend has not yet captured a single sample on real hardware. For a dictation app that is the whole product, so treat this build as an experiment — it may well record silence. Bug reports very welcome; that's why it's here.
+**What is not:** the portal handshakes are proven against a faithful mock portal rather than a real `xdg-desktop-portal-gnome`/`-kde`, and nobody has yet driven the GTK4 UI on a real desktop. So the protocol is right, but your desktop's actual grant dialogs are untested. Bug reports very welcome; that's why it's a preview.
 
 The hotkey is **Ctrl+Shift+Space**. Your desktop will ask once to allow the shortcut and once to allow remote input; decline either and Boo still works from the Record button, copying to the clipboard.
 
