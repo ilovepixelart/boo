@@ -132,8 +132,15 @@ pub const AudioCapture = struct {
     /// Warm up the mic — activate the stream but stay in preroll mode.
     /// Call ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
-        const pre_alloc = WHISPER_SAMPLE_RATE * 60; // 60s
-        self.audio_buf.ensureTotalCapacity(self.allocator, pre_alloc) catch {};
+        // Reserve ~60s up front so onProcess never has to reallocate mid-stream.
+        // This MUST hold the mutex: growing the buffer moves it, and the
+        // PipeWire realtime thread may be appending to it at the same time — it
+        // would then write through a dangling pointer. The frontends happen to
+        // call warmUp only while stopped, but boo_warm_up is public C API and
+        // nothing enforces that.
+        self.mutex.lock();
+        self.audio_buf.ensureTotalCapacity(self.allocator, WHISPER_SAMPLE_RATE * 60) catch {};
+        self.mutex.unlock();
 
         if (self.loop) |l| {
             c.pw_thread_loop_lock(l);

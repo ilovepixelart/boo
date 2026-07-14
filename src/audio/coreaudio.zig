@@ -137,6 +137,7 @@ pub const AudioCapture = struct {
 
     pub fn init(allocator: std.mem.Allocator) !*AudioCapture {
         const self = try allocator.create(AudioCapture);
+        errdefer allocator.destroy(self);
         self.* = .{ .allocator = allocator };
 
         // 16kHz mono float32
@@ -150,8 +151,9 @@ pub const AudioCapture = struct {
         self.format.mChannelsPerFrame = 1;
         self.format.mBitsPerChannel = 32;
 
+        // The errdefer above owns `self` — don't destroy it by hand here, or the
+        // later failure paths would double-free.
         if (AudioQueueNewInput(&self.format, audioCallback, self, null, null, 0, &self.queue) != 0) {
-            allocator.destroy(self);
             return error.AudioQueueCreateFailed;
         }
         errdefer _ = AudioQueueDispose(self.queue, 1);
@@ -179,9 +181,15 @@ pub const AudioCapture = struct {
     /// Warm up the mic — start the queue but don't record yet.
     /// Call this ~500ms before startRecording() to eliminate cold-start lag.
     pub fn warmUp(self: *AudioCapture) void {
-        // Pre-allocate audio buffer for ~60s of recording to avoid reallocations
-        const pre_alloc = WHISPER_SAMPLE_RATE * 60; // 60 seconds
-        self.audio_buf.ensureTotalCapacity(self.allocator, pre_alloc) catch {};
+        // Reserve ~60s up front so the audio callback never has to reallocate
+        // mid-recording. This MUST hold the mutex: growing the buffer moves it,
+        // and the audio thread may be appending to it at the same time — the
+        // callback would then write through a dangling pointer. The frontends
+        // happen to call warmUp only while stopped, but boo_warm_up is public C
+        // API and nothing enforces that.
+        self.mutex.lock();
+        self.audio_buf.ensureTotalCapacity(self.allocator, WHISPER_SAMPLE_RATE * 60) catch {};
+        self.mutex.unlock();
 
         if (self.queue) |_| {
             _ = AudioQueueStart(self.queue, null);

@@ -9,7 +9,10 @@ const BooContext = struct {
     whisper: Whisper,
     audio: *AudioCapture,
     allocator: std.mem.Allocator,
-    transcribing: bool = false,
+    /// Atomic: boo_transcribe runs on a worker thread (it blocks for seconds),
+    /// while the UI polls boo_is_transcribing from the main thread. A plain bool
+    /// would be a data race.
+    transcribing: std.atomic.Value(bool) = .init(false),
     /// Owned null-terminated transcript string, or null if none.
     last_transcript: ?[]u8 = null,
     waveform_buf: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
@@ -83,7 +86,7 @@ export fn boo_is_recording(ctx: ?*BooContext) bool {
 
 export fn boo_is_transcribing(ctx: ?*BooContext) bool {
     const c = ctx orelse return false;
-    return c.transcribing;
+    return c.transcribing.load(.acquire);
 }
 
 export fn boo_get_waveform(ctx: ?*BooContext, out_bars: ?*c_int) ?[*]const f32 {
@@ -107,8 +110,8 @@ export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
 
 export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     const c = ctx orelse return null;
-    c.transcribing = true;
-    defer c.transcribing = false;
+    c.transcribing.store(true, .release);
+    defer c.transcribing.store(false, .release);
 
     const samples = c.audio.getAudioData(c.allocator) catch return null;
     defer c.allocator.free(samples);
@@ -191,6 +194,14 @@ test "every C entry point tolerates a null context" {
 
     // boo_get_waveform may also be called with a null out-param.
     try testing.expect(boo_get_waveform(null, null) == null);
+}
+
+test "the transcribing flag is atomic, not a plain bool" {
+    // boo_transcribe blocks for seconds on a worker thread while the UI polls
+    // boo_is_transcribing from the main thread. If this ever regresses to a
+    // plain bool, that is a data race — so pin the type.
+    const Field = @FieldType(BooContext, "transcribing");
+    try testing.expectEqual(std.atomic.Value(bool), Field);
 }
 
 test "boo_deinit is safe to call twice via a nulled-out handle" {
