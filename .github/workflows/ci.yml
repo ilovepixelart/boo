@@ -44,6 +44,33 @@ jobs:
         # which swiftc's link step does not provide.
         run: zig build app -Doptimize=ReleaseFast
 
+      - name: Cache bench models
+        uses: actions/cache@v4
+        with:
+          path: ~/.boo/models
+          key: bench-models-base-en-silero-v6.2.0
+
+      - name: Download bench models
+        run: |
+          mkdir -p ~/.boo/models
+          [ -f ~/.boo/models/ggml-base.en.bin ] || curl -sL \
+            -o ~/.boo/models/ggml-base.en.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+          [ -f ~/.boo/models/ggml-silero-v6.2.0.bin ] || curl -sL \
+            -o ~/.boo/models/ggml-silero-v6.2.0.bin \
+            https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin
+
+      - name: Quality gate (speed + accuracy)
+        # Real inference over jfk.wav, gated on realtime factor and word error
+        # rate. CPU-only for determinism on shared runners, and the thresholds
+        # are deliberately loose: this catches collapses (accidentally
+        # unoptimized ggml, transcript corruption, a broken chunker seam), not
+        # micro-regressions. The streaming pass guards the VAD chunker: seam
+        # bugs duplicate or drop words there and nowhere else.
+        run: |
+          zig build bench -Doptimize=ReleaseFast -- --cpu --assert-rtf 3 --assert-wer 5
+          zig build bench -Doptimize=ReleaseFast -- --cpu --stream --assert-wer 5
+
       - name: Bundle Boo.app
         run: ./bundle.sh
 

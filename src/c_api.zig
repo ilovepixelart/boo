@@ -247,6 +247,7 @@ test {
     _ = @import("wav.zig");
     _ = @import("stream.zig");
     _ = @import("engine.zig");
+    _ = @import("wer.zig");
 }
 
 const testing = std.testing;

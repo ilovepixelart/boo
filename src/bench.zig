@@ -5,7 +5,14 @@
 //   zig build bench -- --runs 10           # more warm iterations
 //   zig build bench -- --assert-rtf 20     # exit 1 if median falls below 20x
 //   zig build bench -- --stream            # VAD-chunked streaming vs batch
+//   zig build bench -- --expect "text"     # score WER against a reference
+//   zig build bench -- --assert-wer 5      # exit 1 if WER exceeds 5%
 //   zig build bench -- <model.bin> <audio.wav>
+//
+// With the default jfk.wav the reference transcript is built in, so
+// --assert-wer works in CI with no extra plumbing. WER is the accuracy gate:
+// a change that corrupts output (repetition loops, prompt echo, engine
+// misrouting) fails it even when the speed numbers still look fine.
 //
 // Defaults: ~/.boo/models/ggml-base.en.bin and the jfk.wav sample that ships
 // inside the whisper.cpp package, so a fresh checkout can bench with no setup
@@ -19,6 +26,7 @@ const engine_mod = @import("engine.zig");
 const whisper = engine_mod.whisper;
 const wav = @import("wav.zig");
 const stream = @import("stream.zig");
+const wer = @import("wer.zig");
 const build_options = @import("build_options");
 
 const c = @cImport({
@@ -29,6 +37,12 @@ const c = @cImport({
 const WHISPER_SAMPLE_RATE = 16000;
 const DEFAULT_WARM_RUNS = 5;
 const MAX_WAV_BYTES = 512 * 1024 * 1024;
+
+/// What jfk.wav actually says; the built-in reference for WER scoring when
+/// benching the default sample.
+const JFK_REFERENCE =
+    "And so my fellow Americans, ask not what your country can do for you, " ++
+    "ask what you can do for your country.";
 
 fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print("bench: " ++ fmt ++ "\n", args);
@@ -88,6 +102,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var warm_runs: usize = DEFAULT_WARM_RUNS;
     var assert_rtf: ?f64 = null;
     var stream_mode = false;
+    var expect_arg: ?[]const u8 = null;
+    var assert_wer: ?f64 = null;
 
     var args = std.process.Args.Iterator.init(init.args);
     _ = args.skip();
@@ -103,6 +119,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else if (std.mem.eql(u8, arg, "--assert-rtf")) {
             const v = args.next() orelse fatal("--assert-rtf needs a number", .{});
             assert_rtf = std.fmt.parseFloat(f64, v) catch fatal("bad --assert-rtf value: {s}", .{v});
+        } else if (std.mem.eql(u8, arg, "--expect")) {
+            expect_arg = args.next() orelse fatal("--expect needs the reference text", .{});
+        } else if (std.mem.eql(u8, arg, "--assert-wer")) {
+            const v = args.next() orelse fatal("--assert-wer needs a percentage", .{});
+            assert_wer = std.fmt.parseFloat(f64, v) catch fatal("bad --assert-wer value: {s}", .{v});
         } else if (std.mem.startsWith(u8, arg, "--")) {
             fatal("unknown flag: {s}", .{arg});
         } else if (model_arg == null) {
@@ -121,6 +142,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         break :blk try allocator.dupeZ(u8, joined);
     };
     const wav_path = wav_arg orelse try allocator.dupeZ(u8, build_options.jfk_wav);
+    // The bundled sample has a known transcript; custom audio needs --expect.
+    const reference: ?[]const u8 = expect_arg orelse (if (wav_arg == null) JFK_REFERENCE else null);
+    if (assert_wer != null and reference == null)
+        fatal("--assert-wer needs --expect (only the default jfk.wav has a built-in reference)", .{});
 
     // Audio first: it's the cheap step, and a bad path shouldn't cost a model load.
     const bytes = readFile(allocator, wav_path) catch |err|
@@ -154,7 +179,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     , .{ model_path, wav_path, audio_seconds, @tagName(ctx), if (use_gpu) "gpu" else "cpu", msFromNs(load_ns) });
 
     if (stream_mode) {
-        try runStreamBench(allocator, &ctx, samples);
+        try runStreamBench(allocator, &ctx, samples, reference, assert_wer);
         return;
     }
 
@@ -181,23 +206,58 @@ pub fn main(init: std.process.Init.Minimal) !void {
     std.mem.sort(u64, times, {}, std.sort.asc(u64));
     const median_ms = msFromNs(times[times.len / 2]);
     const rtf = audio_seconds * std.time.ms_per_s / median_ms;
-    std.debug.print("  median:     {d:.0} ms -> {d:.1}x realtime\n\ntranscript:{s}\n", .{ median_ms, rtf, cold_text });
+    std.debug.print("  median:     {d:.0} ms -> {d:.1}x realtime\n", .{ median_ms, rtf });
+
+    const wer_pct = try scoreWer(allocator, cold_text, reference);
+    std.debug.print("\ntranscript:{s}\n", .{cold_text});
     allocator.free(cold_text);
 
+    var failed = false;
     if (assert_rtf) |threshold| {
         if (rtf < threshold) {
             std.debug.print("\nFAIL: {d:.1}x realtime is below the required {d:.1}x\n", .{ rtf, threshold });
-            std.process.exit(1);
+            failed = true;
+        } else {
+            std.debug.print("\nOK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
         }
-        std.debug.print("\nOK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
+    }
+    checkWerGate(wer_pct, assert_wer, &failed);
+    if (failed) std.process.exit(1);
+}
+
+/// Print and return the WER percentage when a reference is known.
+fn scoreWer(allocator: std.mem.Allocator, transcript: []const u8, reference: ?[]const u8) !?f64 {
+    const ref = reference orelse return null;
+    const rate = try wer.wordErrorRate(allocator, transcript, ref);
+    const pct = rate * 100.0;
+    std.debug.print("  WER:        {d:.1}% vs reference\n", .{pct});
+    return pct;
+}
+
+fn checkWerGate(wer_pct: ?f64, assert_wer: ?f64, failed: *bool) void {
+    const threshold = assert_wer orelse return;
+    const pct = wer_pct orelse return;
+    if (pct > threshold) {
+        std.debug.print("FAIL: {d:.1}% WER exceeds the allowed {d:.1}%\n", .{ pct, threshold });
+        failed.* = true;
+    } else {
+        std.debug.print("OK: {d:.1}% WER is within the allowed {d:.1}%\n", .{ pct, threshold });
     }
 }
 
 /// Simulate a dictation session: several utterances separated by pauses,
 /// fed to the VAD chunker in 250ms ticks exactly as a frontend would, then
 /// "stop". The number that matters is stop-to-text: what the user waits for
-/// after releasing the hotkey, streaming vs batch.
-fn runStreamBench(allocator: std.mem.Allocator, ctx: *engine_mod.Engine, utterance: []const f32) !void {
+/// after releasing the hotkey, streaming vs batch. WER against the repeated
+/// reference guards the chunker itself: a seam bug (dropped or duplicated
+/// words at utterance boundaries) shows up here and nowhere else.
+fn runStreamBench(
+    allocator: std.mem.Allocator,
+    ctx: *engine_mod.Engine,
+    utterance: []const f32,
+    reference: ?[]const u8,
+    assert_wer: ?f64,
+) !void {
     const home = std.c.getenv("HOME") orelse fatal("no HOME; cannot find VAD model", .{});
     const vad_joined = try std.mem.concat(allocator, u8, &.{ std.mem.span(home), "/.boo/models/ggml-silero-v6.2.0.bin" });
     defer allocator.free(vad_joined);
@@ -257,7 +317,18 @@ fn runStreamBench(allocator: std.mem.Allocator, ctx: *engine_mod.Engine, utteran
         \\  worst tick:   {d:.0} ms (must stay well under the cadence)
         \\  stop-to-text: {d:.0} ms streaming vs {d:.0} ms batch ({d:.1}x faster)
         \\
-        \\transcript:{s}
-        \\
-    , .{ take_seconds, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms, final });
+    , .{ take_seconds, ticks, commits, worst_tick_ms, stop_ms, batch_ms, batch_ms / stop_ms });
+
+    // The take is the utterance three times over, so so is the reference.
+    var wer_pct: ?f64 = null;
+    if (reference) |ref| {
+        const ref3 = try std.mem.join(allocator, " ", &.{ ref, ref, ref });
+        defer allocator.free(ref3);
+        wer_pct = try scoreWer(allocator, final, ref3);
+    }
+    std.debug.print("\ntranscript:{s}\n", .{final});
+
+    var failed = false;
+    checkWerGate(wer_pct, assert_wer, &failed);
+    if (failed) std.process.exit(1);
 }
