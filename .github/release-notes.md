@@ -8,13 +8,15 @@
 
 ### macOS
 
-Drag Boo to Applications. It is **ad-hoc signed, not notarized** (notarization needs a paid Apple Developer ID), so macOS refuses to open it on first launch — "Boo is damaged" or "unidentified developer". Clear the quarantine flag once:
+Drag Boo to Applications. It is **ad-hoc signed, not notarized** (notarization needs a paid Apple Developer ID), so on first launch macOS blocks it with *"Apple could not verify Boo is free of malware…"*. That's expected. Clear the quarantine flag once and it opens normally from then on:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Boo.app
 ```
 
-…or right-click the app → **Open** → **Open**. Once only.
+…or double-click Boo, dismiss the dialog, then **System Settings → Privacy & Security → Open Anyway** (that button only shows for about an hour after the blocked launch).
+
+Control-click → Open does **not** work — [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa).
 
 ### Linux — preview, and please read this
 

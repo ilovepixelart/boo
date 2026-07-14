@@ -53,13 +53,19 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 
 **1. Install.** Grab the `.dmg` for your Mac from [Releases](https://github.com/ilovepixelart/boo/releases) — `arm64` for Apple Silicon, `x86_64` for Intel — and drag Boo to Applications.
 
-Boo is ad-hoc signed, not notarized — Apple notarization needs a paid Developer ID. macOS will refuse to open it on first launch ("Boo is damaged" or "unidentified developer"). Clear the quarantine flag once:
+Boo is **ad-hoc signed, not notarized** (notarization needs a paid Apple Developer ID). So on first launch macOS blocks it with:
+
+> Apple could not verify "Boo" is free of malware that may harm your Mac or compromise your privacy.
+
+That is expected. Clear the quarantine flag once, and it opens normally from then on:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Boo.app
 ```
 
-Or right-click the app → **Open** → **Open**. You only do this once.
+Prefer not to run a shell command? Double-click Boo, dismiss the dialog, then go to **System Settings → Privacy & Security**, scroll to Security, and click **Open Anyway**. Note that button only appears for about an hour after the blocked launch — if you don't see it, double-click Boo again first.
+
+> Control-clicking the app and choosing **Open** does **not** work: [Apple removed that bypass in macOS 15](https://developer.apple.com/news/?id=saqachfa). Most guides on the internet still tell you to do it.
 
 **2. Get a model.** Boo needs a `whisper.cpp` GGML model — none is bundled (they're 140 MB+). Put `base.en` where Boo looks for it:
 
@@ -171,7 +177,7 @@ Note the hotkey is a *request*: the portal dialog lets you rebind it, and some d
 
 ## Troubleshooting
 
-**"Boo is damaged and can't be opened" / "unidentified developer"** — expected; the app isn't notarized. Run `xattr -dr com.apple.quarantine /Applications/Boo.app`, or right-click → Open.
+**"Apple could not verify Boo is free of malware"** — expected; the app is ad-hoc signed rather than notarized. Run `xattr -dr com.apple.quarantine /Applications/Boo.app`, or use **System Settings → Privacy & Security → Open Anyway**. Control-click → Open does *not* work on macOS 15+.
 
 **Recording works, but no text appears anywhere** — Accessibility isn't granted (macOS), or the RemoteDesktop portal was declined (Linux). The transcript is still on your clipboard, so paste it manually to confirm that's the issue.
 
