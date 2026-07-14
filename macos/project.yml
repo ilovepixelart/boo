@@ -60,8 +60,8 @@ targets:
         CFBundleName: Boo
         CFBundleDisplayName: Boo
         CFBundleIdentifier: com.boo.app
-        CFBundleVersion: "0.1.1"
-        CFBundleShortVersionString: "0.1.1"
+        CFBundleVersion: "0.1.2"
+        CFBundleShortVersionString: "0.1.2"
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleIconFile: boo
         CFBundlePackageType: APPL

@@ -30,9 +30,9 @@ cat > "$CONTENTS/Info.plist" << 'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.boo.app</string>
     <key>CFBundleVersion</key>
-    <string>0.1.1</string>
+    <string>0.1.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>0.1.2</string>
     <key>CFBundleExecutable</key>
     <string>Boo</string>
     <key>CFBundleIconFile</key>

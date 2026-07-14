@@ -56,7 +56,7 @@
   </requires>
 
   <releases>
-    <release version="0.1.1" date="2026-07-14">
+    <release version="0.1.2" date="2026-07-14">
       <description>
         <p>First Linux preview, and the first build for Intel Macs.</p>
         <ul>

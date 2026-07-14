@@ -22,9 +22,14 @@ jobs:
           # Native runners per architecture — cross-compiling Swift + Zig +
           # whisper and lipo-ing them is far more fragile than just building
           # each on its own machine.
-          - runner: macos-14   # Apple Silicon
+          #
+          # Use macos-15, not macos-13/14: macos-13 has been retired (a job
+          # targeting it queues forever without ever starting, which is not an
+          # obvious failure mode) and macos-14 is deprecated. Intel is now
+          # `macos-15-intel`.
+          - runner: macos-15        # Apple Silicon
             arch: arm64
-          - runner: macos-13   # Intel
+          - runner: macos-15-intel  # Intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
