@@ -119,6 +119,31 @@ pub fn build(b: *std.Build) void {
     // ── macOS app bundle ──
     if (target_os == .macos) {
         const bundle_step = b.step("app", "Build macOS Boo.app");
+
+        // Zig's archiver emits Mach-O members without the 8-byte alignment
+        // Apple's ld requires, and linkLibrary does not merge whisper's
+        // objects into libboo-core.a — so repack libwhisper.a the same way
+        // scripts/build-zig-libs.sh does for the Xcode path: extract, merge
+        // via `ld -r` into one aligned object, re-archive.
+        const macos_arch = switch (target.result.cpu.arch) {
+            .aarch64 => "arm64",
+            .x86_64 => "x86_64",
+            else => @panic("unsupported macOS architecture"),
+        };
+        const repack = b.addSystemCommand(&.{ "/bin/sh", "-c",
+            \\set -e
+            \\ARCHIVE="$0"; OUT="$1"; ARCH="$2"
+            \\case "$ARCHIVE" in /*) ;; *) ARCHIVE="$PWD/$ARCHIVE" ;; esac
+            \\case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+            \\WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+            \\cd "$WORK"; ar -x "$ARCHIVE"; chmod u+r ./*.o
+            \\ld -r -arch "$ARCH" ./*.o -o whisper-merged.o
+            \\ar -rcs "$OUT/libwhisper.a" whisper-merged.o
+        });
+        repack.addFileArg(whisper_lib.getEmittedBin());
+        const repack_dir = repack.addOutputDirectoryArg("whisper-repacked");
+        repack.addArg(macos_arch);
+
         const swift_compile = b.addSystemCommand(&.{
             "swiftc",
             "-O",
@@ -129,11 +154,11 @@ pub fn build(b: *std.Build) void {
             "-L",
         });
         swift_compile.addDirectoryArg(boo_lib.getEmittedBinDirectory());
-        // whisper symbols are merged into libboo-core.a via linkLibrary, so we
-        // don't pass -lwhisper directly. Apple's ld also rejects whisper.cpp's
-        // object alignment in Zig-emitted archives, so this also sidesteps that.
+        swift_compile.addArg("-L");
+        swift_compile.addDirectoryArg(repack_dir);
         swift_compile.addArgs(&.{
             "-lboo-core",
+            "-lwhisper",
             "-lc++",
             "-framework",
             "Cocoa",
@@ -147,7 +172,7 @@ pub fn build(b: *std.Build) void {
             "Carbon",
             "-o",
         });
-        swift_compile.addArg(b.fmt("{s}/Boo", .{b.install_path}));
+        const swift_out = swift_compile.addOutputFileArg("Boo");
 
         // Add all Swift source files
         swift_compile.addFileArg(b.path("macos/Sources/AppDelegate.swift"));
@@ -160,7 +185,8 @@ pub fn build(b: *std.Build) void {
         swift_compile.addFileArg(b.path("macos/Sources/main.swift"));
 
         swift_compile.step.dependOn(&boo_lib.step);
-        bundle_step.dependOn(&swift_compile.step);
+        // Lands at zig-out/Boo, where bundle.sh picks it up.
+        bundle_step.dependOn(&b.addInstallFile(swift_out, "Boo").step);
     }
 
     // Tests

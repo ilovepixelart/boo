@@ -82,6 +82,14 @@ Or re-sign post-build:
 BOO_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./bundle.sh
 ```
 
+### Without Xcode (Command Line Tools only)
+
+```sh
+zig build app -Doptimize=ReleaseFast   # ReleaseFast required: Debug C objects
+./bundle.sh                            # reference the UBSan runtime, which
+open zig-out/Boo.app                   # swiftc's link step doesn't provide
+```
+
 ## Build — Linux
 
 System packages (Debian/Ubuntu):
