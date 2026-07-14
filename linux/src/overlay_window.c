@@ -20,6 +20,11 @@ typedef struct {
     AdwToastOverlay *toast_overlay;
     BooGlobalShortcut *shortcut;
     BooTextInject *inject;
+
+    // The UI's own view of whether we're recording. Deliberately not
+    // boo_is_recording(): the core clears that when it hits the recording cap.
+    gboolean ui_recording;
+    guint auto_stop_poll; // 0 == not polling
 } WindowState;
 
 typedef struct {
@@ -29,6 +34,9 @@ typedef struct {
 
 static void window_state_free(gpointer data) {
     WindowState *state = data;
+    // Cancel the auto-stop poll first: closing the window mid-recording would
+    // otherwise leave a timer firing against freed state.
+    if (state->auto_stop_poll != 0) g_source_remove(state->auto_stop_poll);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     g_free(state);
@@ -94,18 +102,48 @@ static gpointer transcribe_worker(gpointer task_data) {
     return NULL;
 }
 
+// Stop capturing and kick off transcription on a worker thread.
+static void begin_transcription(WindowState *state) {
+    state->ui_recording = FALSE;
+    if (state->auto_stop_poll != 0) {
+        g_source_remove(state->auto_stop_poll);
+        state->auto_stop_poll = 0;
+    }
+
+    boo_stop_recording(state->ctx);
+    gtk_button_set_label(state->record_button, "Transcribing…");
+    gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
+    g_thread_unref(g_thread_new("boo-transcribe", transcribe_worker, state));
+}
+
+// The core stops capturing by itself once a recording hits MAX_RECORDING_SECONDS
+// (see src/audio/common.zig) — it can't finish the job from inside the audio
+// callback. Poll for that and wrap up as though the user had pressed stop.
+static gboolean check_auto_stop(gpointer data) {
+    WindowState *state = data;
+    if (!state->ui_recording) return G_SOURCE_REMOVE;
+    if (boo_is_recording(state->ctx)) return G_SOURCE_CONTINUE;
+
+    show_toast(state, "Maximum recording length reached");
+    state->auto_stop_poll = 0; // about to be removed; don't remove twice
+    begin_transcription(state);
+    return G_SOURCE_REMOVE;
+}
+
 static void toggle_recording(WindowState *state) {
-    GtkButton *btn = state->record_button;
-    if (boo_is_recording(state->ctx)) {
-        boo_stop_recording(state->ctx);
-        gtk_button_set_label(btn, "Transcribing…");
-        gtk_widget_set_sensitive(GTK_WIDGET(btn), FALSE);
-        g_thread_unref(g_thread_new("boo-transcribe", transcribe_worker, state));
+    // Track the UI's own recording state rather than reading boo_is_recording():
+    // the core drops that flag when it auto-stops, and trusting it would make
+    // the next press start a fresh recording instead of transcribing this one.
+    if (state->ui_recording) {
+        begin_transcription(state);
     } else {
         boo_warm_up(state->ctx);
         boo_start_recording(state->ctx);
         gtk_label_set_text(state->transcript_label, "");
         set_button_recording(state);
+
+        state->ui_recording = TRUE;
+        state->auto_stop_poll = g_timeout_add(500, check_auto_stop, state);
     }
 }
 

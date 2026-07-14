@@ -271,9 +271,20 @@ pub const AudioCapture = struct {
         defer self.mutex.unlock();
 
         if (self.recording) {
-            self.audio_buf.appendSlice(self.allocator, samples[0..count]) catch {};
-            common.computeWaveform(self.audio_buf.items, &self.waveform);
-            common.updatePeakRms(&self.peak_rms, &self.waveform);
+            // Stop exactly on the cap rather than overshooting by a buffer.
+            const take = common.samplesUntilCap(self.audio_buf.items.len, count);
+            if (take > 0) {
+                self.audio_buf.appendSlice(self.allocator, samples[0..take]) catch {};
+                common.computeWaveform(self.audio_buf.items, &self.waveform);
+                common.updatePeakRms(&self.peak_rms, &self.waveform);
+            }
+            if (self.audio_buf.items.len >= common.MAX_RECORDING_SAMPLES) {
+                // Cap reached. Just drop the recording flag — the frontend polls
+                // isRecording(), notices, and transcribes what we captured.
+                // Stopping the queue must not happen from inside its own
+                // callback, so leave that to the frontend's stopRecording().
+                self.recording = false;
+            }
         } else {
             // Warm-up phase: capture into preroll (last 500ms)
             self.preroll.appendSlice(self.allocator, samples[0..count]) catch {};

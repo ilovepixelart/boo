@@ -535,6 +535,16 @@ class OverlayWindow: NSWindow {
     }
 
     func updateWaveform() {
+        // The core stops capturing on its own at MAX_RECORDING_SECONDS, to keep
+        // an accidentally-abandoned recording from ballooning memory and then
+        // freezing the app in whisper. It can't finish the job from inside the
+        // audio callback, so notice it here and transcribe what was captured.
+        if isRecording && !boo_is_recording(booCtx) {
+            statusLabel.stringValue = "max length reached"
+            stopAndTranscribe()
+            return
+        }
+
         var bars: Int32 = 0
         guard let data = boo_get_waveform(booCtx, &bars) else { return }
         let count = Int(bars)

@@ -8,6 +8,26 @@ pub const WAVEFORM_BARS: usize = 40;
 pub const PREROLL_SAMPLES: usize = WHISPER_SAMPLE_RATE / 2; // 500ms
 pub const PEAK_DECAY_FACTOR: f32 = 0.995; // ~1s half-life
 
+/// Hard cap on a single recording.
+///
+/// The capture buffer is otherwise unbounded (~3.8MB/min), and boo_transcribe
+/// runs whisper synchronously over the whole of it — so a recording left running
+/// by accident would balloon memory and then freeze the app for minutes. On
+/// reaching the cap the backend simply stops capturing; the frontends poll
+/// boo_is_recording(), notice, and transcribe what was captured. Nothing is
+/// silently discarded, and the user sees the recording end rather than the app
+/// hang.
+pub const MAX_RECORDING_SECONDS: usize = 600; // 10 minutes
+pub const MAX_RECORDING_SAMPLES: usize = WHISPER_SAMPLE_RATE * MAX_RECORDING_SECONDS;
+
+/// How many of `incoming` samples may still be appended before hitting the cap.
+/// Returns 0 once the buffer is full, so the audio callback can stop cleanly on
+/// an exact boundary rather than overshooting by a buffer.
+pub fn samplesUntilCap(captured: usize, incoming: usize) usize {
+    if (captured >= MAX_RECORDING_SAMPLES) return 0;
+    return @min(MAX_RECORDING_SAMPLES - captured, incoming);
+}
+
 // pthread-backed mutex. `std.Thread.Mutex` was removed in Zig 0.16 in favor of
 // `std.Io.Mutex`, which threads an Io context through every call site — too
 // invasive for our audio callback path. pthread works on macOS and Linux alike.
@@ -117,6 +137,30 @@ test "computeWaveform: a single sample does not divide by zero" {
     var bars: [WAVEFORM_BARS]f32 = undefined;
     computeWaveform(&samples, &bars);
     try testing.expectApproxEqAbs(@as(f32, 0.25), bars[0], 0.001);
+}
+
+test "samplesUntilCap: takes everything while there is room" {
+    try testing.expectEqual(@as(usize, 1024), samplesUntilCap(0, 1024));
+    try testing.expectEqual(@as(usize, 1024), samplesUntilCap(MAX_RECORDING_SAMPLES - 5000, 1024));
+}
+
+test "samplesUntilCap: truncates the final buffer to land exactly on the cap" {
+    // Without this the last append would overshoot by up to one audio buffer,
+    // so the cap would only be approximate.
+    const nearly_full = MAX_RECORDING_SAMPLES - 100;
+    try testing.expectEqual(@as(usize, 100), samplesUntilCap(nearly_full, 1024));
+}
+
+test "samplesUntilCap: refuses everything once full" {
+    try testing.expectEqual(@as(usize, 0), samplesUntilCap(MAX_RECORDING_SAMPLES, 1024));
+    // Defensive: must not underflow if the buffer somehow ran past the cap.
+    try testing.expectEqual(@as(usize, 0), samplesUntilCap(MAX_RECORDING_SAMPLES + 999, 1024));
+}
+
+test "the recording cap is a sane duration" {
+    try testing.expectEqual(@as(usize, 600), MAX_RECORDING_SECONDS);
+    // ~38MB of f32 — bounded, and small enough that whisper still finishes.
+    try testing.expectEqual(@as(usize, 9_600_000), MAX_RECORDING_SAMPLES);
 }
 
 test "updatePeakRms: attacks instantly" {
