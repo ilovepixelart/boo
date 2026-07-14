@@ -85,6 +85,14 @@ jobs:
           ruff check linux/tests
           ruff format --check linux/tests
 
+      - name: YAML (workflows + dependabot + flatpak)
+        # A malformed workflow or dependabot file fails silently — GitHub just
+        # ignores it — so lint them here rather than discover it isn't running.
+        run: |
+          pipx install yamllint
+          yamllint -d '{extends: relaxed, rules: {line-length: disable}}' \
+            .github/ linux/flatpak/*.yaml
+
   linux:
     name: Linux (build + portal tests)
     runs-on: ubuntu-24.04

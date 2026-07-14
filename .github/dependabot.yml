@@ -16,6 +16,6 @@ updates:
       # DMG/flatpak round-trip. Pinned at v5 until a release validates a move;
       # patch/minor security updates still come through.
       - dependency-name: actions/upload-artifact
-        update-types: [version-update:semver-major]
+        update-types: ["version-update:semver-major"]
       - dependency-name: actions/download-artifact
-        update-types: [version-update:semver-major]
+        update-types: ["version-update:semver-major"]
