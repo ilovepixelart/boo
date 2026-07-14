@@ -39,10 +39,12 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`. *(CI, every push.)*
 - The restore token persists, so the permission prompt appears **once**, not every launch.
 
-**Verified against a real GNOME 46 desktop** (not just the mock): the RemoteDesktop portal is present and reachable, and the GlobalShortcuts portal is **absent** — so Boo now detects that and says so. See the hotkey warning under [Permissions](#permissions).
+**Verified against real desktop portal backends, not just the mock:**
+- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent** — the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface". Boo detects this and says so (see [Permissions](#permissions)).
+- **KDE Plasma**: its `xdg-desktop-portal-kde` manifest **does** declare GlobalShortcuts, and its backend serviced a real `CreateSession` (returning a proper Request path) — so the hotkey is a live capability there, unlike GNOME 46.
 
 **Not verified:**
-- KDE Plasma and Hyprland, which do implement GlobalShortcuts — the hotkey path has only been exercised against the mock portal.
+- A full end-to-end hotkey *bind* on a live KDE/Hyprland session (KDE's Qt backend needs a real display, which a headless VM only partly provides). The interface is confirmed present and responsive; a human on real KDE hardware is the remaining check.
 - The GTK4 UI has not been driven by a human on a real desktop.
 
 **The Linux app is smaller than the macOS one:** no menu-bar item, no settings dialog, no theme picker, and it doesn't stay on top. Recording, transcription and auto-paste all work.
