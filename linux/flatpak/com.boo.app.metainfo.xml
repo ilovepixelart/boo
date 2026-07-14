@@ -51,9 +51,14 @@
   </requires>
 
   <releases>
-    <release version="0.1.0" date="2026-05-06">
+    <release version="0.1.0" date="2026-07-14">
       <description>
-        <p>Initial Linux preview build.</p>
+        <p>First release.</p>
+        <ul>
+          <li>On-device speech-to-text with whisper.cpp — audio never leaves the machine.</li>
+          <li>Global hotkey (Ctrl+Shift+Space) via the GlobalShortcuts portal.</li>
+          <li>Transcripts are copied to the clipboard and pasted into the focused app via the RemoteDesktop portal.</li>
+        </ul>
       </description>
     </release>
   </releases>
