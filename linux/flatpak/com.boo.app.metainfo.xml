@@ -30,6 +30,11 @@
     <p>
       Everything runs locally — no audio leaves your machine.
     </p>
+    <p>
+      Preview on Linux: the global shortcut and auto-paste are working, but
+      audio capture has not yet been verified on real hardware. Bug reports
+      are welcome.
+    </p>
   </description>
 
   <launchable type="desktop-id">com.boo.app.desktop</launchable>

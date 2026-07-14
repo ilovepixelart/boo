@@ -31,17 +31,25 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Preview — portals verified, audio untested |
 | Windows | — | — | — | Not planned |
 
-Linux ships as a **preview** Flatpak. Precisely what that means:
+Linux ships as a **preview** Flatpak. Being precise about what that means, because "preview" usually isn't:
 
-- **Verified.** It builds and links (CI, every push). Both XDG portal clients complete their real D-Bus handshakes against a live session bus: GlobalShortcuts (CreateSession → BindShortcuts → `Activated` reaches Boo's callback) and RemoteDesktop (CreateSession → SelectDevices → Start, then a correctly-formed Ctrl+Shift+V chord). The restore token persists, so the permission prompt appears once rather than every launch.
-- **Not verified.** *Audio capture has never run on Linux.* Boo's PipeWire backend has not captured a single sample on real hardware. For a dictation app that is the whole product — so the preview may simply record silence. Reports welcome.
-- **Not verified.** Behavior against a real GNOME/KDE compositor. The portal handshakes above were driven against a faithful mock portal, not `xdg-desktop-portal-gnome`.
+**Verified, and re-checked by CI on every push** ([`integration.sh`](linux/tests/integration.sh)):
+- Builds and links against GTK4 / libadwaita / PipeWire.
+- **GlobalShortcuts portal**: CreateSession → BindShortcuts (`toggle-record`, `CTRL+SHIFT+space`) → an `Activated` signal reaches Boo's callback.
+- **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`.
+- The restore token persists, so the permission prompt appears **once**, not every launch.
+
+**Not verified:**
+- ***Audio capture has never run on Linux.*** Boo's PipeWire backend has not captured a single sample on real hardware. For a dictation app that is the entire product — so this preview may simply record silence. That's the main thing bug reports would help with.
+- Behavior against a real GNOME/KDE compositor. The handshakes above run against a faithful mock portal, not `xdg-desktop-portal-gnome`.
 
 **Still deferred on Linux:** the 486-theme port from macOS, settings dialog, layer-shell always-on-top.
 
-## Quick start (macOS)
+## Quick start
 
-**1. Install.** Grab the `.dmg` from [Releases](https://github.com/ilovepixelart/boo/releases) and drag Boo to Applications.
+### macOS
+
+**1. Install.** Grab the `.dmg` for your Mac from [Releases](https://github.com/ilovepixelart/boo/releases) — `arm64` for Apple Silicon, `x86_64` for Intel — and drag Boo to Applications.
 
 Boo is ad-hoc signed, not notarized — Apple notarization needs a paid Developer ID. macOS will refuse to open it on first launch ("Boo is damaged" or "unidentified developer"). Clear the quarantine flag once:
 
@@ -65,23 +73,41 @@ Other sizes (`tiny`, `small`, `medium`, `large-v3`) work too — accuracy vs. CP
 
 **4. Dictate.** Focus any app, press **Ctrl+Shift+Space**, speak, press it again. The text appears where your cursor is.
 
+### Linux (preview)
+
+> Audio capture is **untested** on Linux — see [Status](#status). This build may record silence. It is published to gather bug reports, not because it's known to work.
+
+```sh
+flatpak install --user boo-<version>-x86_64.flatpak
+```
+
+The model goes inside the sandbox's data dir:
+
+```sh
+mkdir -p ~/.var/app/com.boo.app/data/boo/models
+curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+flatpak run com.boo.app
+```
+
+Your desktop will ask once to allow the global shortcut, and once to allow remote input (used to paste). Both grants persist. Decline either and Boo still works from the Record button, copying to the clipboard.
+
 ## Using Boo
 
-Boo lives in the menu bar (a waveform icon) and in a small overlay window.
+On macOS, Boo lives in the menu bar (a waveform icon) plus a small overlay window. On Linux it's a single window — the menu-bar item, settings dialog and theme picker are macOS-only for now.
 
-| Action | How |
-|---|---|
-| Start / stop dictation | **Ctrl+Shift+Space**, anywhere |
-| Same, from the menu bar | Click the waveform icon |
-| Same, from the window | Click the Record button, or the waveform |
-| See how long you've been recording | The menu bar icon shows a live timer |
-| Review past transcripts | They stack up in the overlay window |
-| Copy an old transcript | Click its bubble |
-| Settings | **⌘,** |
+| Action | macOS | Linux |
+|---|---|---|
+| Start / stop dictation | **Ctrl+Shift+Space** | **Ctrl+Shift+Space** |
+| …from the app | Menu-bar icon, Record button, or waveform | Record button |
+| Recording elapsed time | Live timer in the menu bar | — |
+| Past transcripts | Stack up in the window; click a bubble to copy | Last transcript shown |
+| Settings | **⌘,** | — |
 
-Every transcript is **copied to the clipboard** and **typed into whatever app was focused** when you started recording. Boo deliberately targets the app you were in — not itself — so you can trigger it from the overlay window without the text landing back in Boo.
+Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from — never itself — so triggering it from its own window still delivers the text to the right place.
 
-**Settings (⌘,)** has two things worth knowing:
+**Settings (⌘, — macOS)** has two things worth knowing:
 
 - **Auto-type** (on by default). Turn it off to make Boo clipboard-only — it will transcribe and copy, but never type into other apps.
 - **Theme** — 486 [Ghostty-format](https://ghostty.org) color themes, searchable. Defaults to Ghostty's own.
@@ -143,9 +169,11 @@ Note the hotkey is a *request*: the portal dialog lets you rebind it, and some d
 
 **Nothing types at a `sudo` / password prompt** — macOS Secure Input blocks synthesized keystrokes by design. Dictating into **Ghostty** works anyway (it uses Ghostty's API, not keystrokes); other apps can't be worked around.
 
-**"Model not found"** — Boo looked in `~/.boo/models/`, `./models/`, and the repo checkout. Put `ggml-base.en.bin` in one of them, or set `BOO_MODEL=/path/to/model.bin` (Linux).
+**"Model not found"** — on macOS Boo looks in `~/.boo/models/`, `./models/`, and the repo checkout. On Linux it looks at `$BOO_MODEL`, `./models/`, `$XDG_DATA_HOME/boo/models/`, then `/usr/share/boo/models/`. Under Flatpak that means `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin`.
 
-**The hotkey does nothing (Linux)** — the GlobalShortcuts portal was declined, or your desktop rebound it. Use the Record button; re-approve by restarting Boo.
+**The hotkey does nothing (Linux)** — the GlobalShortcuts portal was declined, or your desktop rebound it. Use the Record button; restart Boo to be re-asked. Note the trigger is only a *preference*: the portal dialog lets you rebind it, and some desktops ignore the preference entirely.
+
+**Boo records but the transcript is empty (Linux)** — most likely the known gap: audio capture is unverified on Linux (see [Status](#status)). Check Boo is picking up your default PipeWire source (`pactl info`, `wpctl status`). A bug report with your desktop, compositor and PipeWire version is genuinely useful.
 
 **Transcripts are garbage** — `base.en` is small and English-only. Try a bigger model (`small`, `medium`), and check your input device is the mic you think it is.
 
@@ -219,6 +247,8 @@ Inside the Flatpak sandbox, place the model at `~/.var/app/com.boo.app/data/boo/
 
 ## Packaging a release
 
+macOS DMG:
+
 ```sh
 zig build app -Doptimize=ReleaseFast
 ./bundle.sh              # -> zig-out/Boo.app
@@ -227,7 +257,15 @@ zig build app -Doptimize=ReleaseFast
 
 `make-dmg.sh` mounts the image and checks the bundle before declaring success, so a broken DMG fails here rather than on someone else's machine.
 
-Pushing a `v*` tag runs the release workflow, which builds the DMG and publishes a GitHub Release. Bump the version in `build.zig.zon`, `macos/project.yml`, and `bundle.sh` first — then:
+Linux Flatpak bundle:
+
+```sh
+flatpak-builder --user --force-clean --repo=repo build-dir \
+  linux/flatpak/com.boo.app.yaml
+flatpak build-bundle repo boo.flatpak com.boo.app
+```
+
+Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-14` → arm64, `macos-13` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile) plus the Linux Flatpak, then publishes a GitHub Release. Bump the version in `build.zig.zon`, `macos/project.yml`, `bundle.sh`, and the metainfo `<release>` entry first — then:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
@@ -236,13 +274,18 @@ git tag v0.1.0 && git push origin v0.1.0
 ## Tests
 
 ```sh
-zig build test           # Zig core
-./linux/tests/run.sh     # XDG portal payloads (needs gtk4; runs on macOS too)
+zig build test                  # Zig core
+./linux/tests/run.sh            # portal payloads — needs gtk4; runs on macOS too
+./linux/tests/integration.sh    # portal handshakes — Linux only, needs a D-Bus
 ```
 
-The portal tests matter more than they look: GVariant format strings are parsed at *runtime*, so a malformed D-Bus payload compiles cleanly and then aborts on a user's desktop. These assert the exact signature each portal method expects.
+**`run.sh`** checks the D-Bus payloads are well-formed. That matters more than it looks: GVariant format strings are parsed at *runtime*, so a malformed payload compiles cleanly and then aborts on a user's desktop.
 
-CI builds both platforms on every push. The Linux job is what actually proves the GTK4 frontend links — it can't be linked on a macOS dev box.
+**`integration.sh`** runs both portal clients end to end against a live session bus, driven by a stand-in portal (`mock_portal.py`) that speaks the real Request/Response protocol. It asserts the hotkey is bound as `toggle-record`/`CTRL+SHIFT+space`, that an `Activated` signal reaches Boo's callback, that RemoteDesktop requests the keyboard with a persisted grant, and that a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`.
+
+Its real value is subtler. The portal's Request/Response protocol requires a client to *predict* the reply's object path and subscribe **before** issuing the call — subscribe after and you race the portal and lose the reply permanently. The mock derives that path independently, exactly as a real portal does, so a passing run proves Boo's prediction is correct. That bug is invisible to a compiler and impossible to reproduce on macOS.
+
+CI runs all of this on every push. The Linux job is what actually proves the GTK4 frontend links and that the portals work — neither can be checked on a macOS dev box.
 
 ## Build — Zig core only (CLI test binary)
 
@@ -274,7 +317,14 @@ macos/
 
 linux/
   src/              C / GTK4 + libadwaita frontend
-  tests/            XDG portal payload tests
+    global_shortcut.c  GlobalShortcuts portal — the Ctrl+Shift+Space hotkey
+    text_inject.c      RemoteDesktop portal — synthesizes the paste chord
+  tests/
+    portal_payloads.c  D-Bus payload signatures (runs anywhere with gtk4)
+    portal_harness.c   Drives both portal clients (Linux)
+    mock_portal.py     Stand-in xdg-desktop-portal speaking the real protocol
+    run.sh             Payload tests
+    integration.sh     End-to-end portal handshakes against a live D-Bus
   flatpak/          Manifest, .desktop entry, AppStream metainfo
 
 themes/             486 Ghostty-format color themes (consumed by the macOS
@@ -285,7 +335,7 @@ scripts/
   build-zig-libs.sh Repacks Zig's whisper archive for macOS ld
   make-dmg.sh       Packages Boo.app into a distributable DMG
 
-.github/workflows/  CI (build both platforms, portal tests) + release
+.github/workflows/  CI (both platforms, portal tests) + multi-platform release
 
 build.zig           OS-conditional Zig build orchestration
 bundle.sh           macOS: ad-hoc / re-sign helper

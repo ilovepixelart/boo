@@ -53,7 +53,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libadwaita-1-dev libpipewire-0.3-dev pkg-config
+            libgtk-4-dev libadwaita-1-dev libpipewire-0.3-dev pkg-config \
+            xvfb dbus-x11 python3-gi
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -74,6 +75,12 @@ jobs:
         # GVariant format strings are parsed at runtime, so a malformed payload
         # would otherwise crash on a user's desktop rather than fail the build.
         run: ./linux/tests/run.sh
+
+      - name: Portal integration tests
+        # Runs both portal handshakes end to end against a live session bus.
+        # This is what proves Boo's predicted Request path matches the one the
+        # portal replies on — get that wrong and Boo waits forever.
+        run: ./linux/tests/integration.sh
 
   flatpak:
     name: Linux (flatpak manifest)
