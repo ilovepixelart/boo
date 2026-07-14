@@ -9,10 +9,8 @@
 # Place the whisper model at ~/.var/app/com.boo.app/data/models/ggml-base.en.bin
 # (the app reads from $XDG_DATA_HOME/boo/models inside the sandbox).
 #
-# TODOs before submission:
-#   - Fill in the Zig 0.16.0 tarball sha256s (run: sha256sum zig-*.tar.xz)
-#   - Provide assets/boo.png (256x256+) and uncomment the icon install step
-#   - Add a LICENSE file at the repo root and update metainfo project_license
+# Zig tarball sha256s below are the published ones from
+# https://ziglang.org/download/index.json — re-check them when bumping Zig.
 
 app-id: com.boo.app
 runtime: org.gnome.Platform
@@ -42,7 +40,7 @@ modules:
     sources:
       - type: archive
         url: https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
-        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
         strip-components: 1
     build-commands:
       - install -Dm755 zig "${FLATPAK_DEST}/bin/zig"
@@ -55,7 +53,7 @@ modules:
     sources:
       - type: archive
         url: https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz
-        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        sha256: ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
         strip-components: 1
     build-commands:
       - install -Dm755 zig "${FLATPAK_DEST}/bin/zig"
@@ -73,6 +71,7 @@ modules:
         "${FLATPAK_DEST}/share/applications/com.boo.app.desktop"
       - install -Dm644 linux/flatpak/com.boo.app.metainfo.xml
         "${FLATPAK_DEST}/share/metainfo/com.boo.app.metainfo.xml"
-      # Icon — uncomment once assets/boo.png exists.
-      # - install -Dm644 assets/boo.png
-      #   "${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/com.boo.app.png"
+      - install -Dm644 assets/icon_256x256.png
+        "${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/com.boo.app.png"
+      - install -Dm644 assets/icon_512x512.png
+        "${FLATPAK_DEST}/share/icons/hicolor/512x512/apps/com.boo.app.png"

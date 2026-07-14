@@ -2,8 +2,7 @@
 <component type="desktop-application">
   <id>com.boo.app</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <!-- TODO: replace with the actual project license once a LICENSE file is added. -->
-  <project_license>LicenseRef-proprietary</project_license>
+  <project_license>MIT</project_license>
 
   <name>Boo</name>
   <summary>Local speech-to-text overlay</summary>
