@@ -118,8 +118,12 @@ pub const Vad = struct {
     pub fn init(model_path: [:0]const u8) !Vad {
         var params = c.whisper_vad_default_context_params();
         // Silero is a tiny LSTM: instant on CPU, and keeping it there leaves
-        // the GPU free for whisper itself.
+        // the GPU free for whisper itself. The default context asks for 4
+        // threads, which a 2MB model scanning 250ms ticks never needs, and
+        // which reintroduced spin-waiting workers under the valgrind CI job
+        // after $BOO_THREADS had removed them from transcription.
         params.use_gpu = false;
+        params.n_threads = threadCount();
         const ctx = c.whisper_vad_init_from_file_with_params(model_path.ptr, params) orelse
             return error.ModelLoadFailed;
         return .{ .ctx = ctx };
