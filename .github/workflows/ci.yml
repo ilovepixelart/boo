@@ -208,9 +208,11 @@ jobs:
             https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin
 
       - name: Build bench
-        # ReleaseFast to match the proven-green linux build job; the C code
-        # carries -O2 either way, and memcheck needs no special build.
-        run: zig build -Doptimize=ReleaseFast
+        # x86_64_v2: the runner's native ISA includes AVX-512-class
+        # instructions that ubuntu-24.04's valgrind cannot decode (SIGILL in
+        # Zig's ReleaseFast memcpy before main). Performance under memcheck
+        # is irrelevant, correctness of decoding is not.
+        run: zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2
 
       - name: Memcheck full inference
         # The entire stack (model load, mel, encoder, decoder, VAD, chunker
