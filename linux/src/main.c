@@ -15,7 +15,7 @@
 #include "overlay_window.h"
 
 #define VAD_MODEL_NAME "ggml-silero-v6.2.0.bin"
-#define VAD_MODEL_URL \
+#define VAD_MODEL_URL                                                                    \
     "https://huggingface.co/ggml-org/whisper-vad/resolve/main/" VAD_MODEL_NAME
 
 typedef struct {
@@ -181,8 +181,7 @@ static void on_vad_downloaded(GObject *source, GAsyncResult *result, gpointer us
     SoupSession *session = SOUP_SESSION(source);
 
     g_autoptr(GError) error = NULL;
-    g_autoptr(GBytes) bytes =
-        soup_session_send_and_read_finish(session, result, &error);
+    g_autoptr(GBytes) bytes = soup_session_send_and_read_finish(session, result, &error);
     SoupMessage *msg = soup_session_get_async_result_message(session, result);
     guint status = msg ? soup_message_get_status(msg) : 0;
 
@@ -193,8 +192,7 @@ static void on_vad_downloaded(GObject *source, GAsyncResult *result, gpointer us
         return;
     }
 
-    g_autofree char *dir =
-        g_build_filename(g_get_user_data_dir(), "boo", "models", NULL);
+    g_autofree char *dir = g_build_filename(g_get_user_data_dir(), "boo", "models", NULL);
     g_autofree char *dest = g_build_filename(dir, VAD_MODEL_NAME, NULL);
     gsize size = 0;
     const char *data = g_bytes_get_data(bytes, &size);
