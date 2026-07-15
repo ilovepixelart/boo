@@ -140,8 +140,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libadwaita-1-dev libpipewire-0.3-dev pkg-config \
-            xvfb dbus-x11 python3-gi
+            libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
+            pkg-config xvfb dbus-x11 python3-gi
 
       - uses: mlugg/setup-zig@v2
         with:

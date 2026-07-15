@@ -283,7 +283,7 @@ open zig-out/Boo.app                   # swiftc's link step doesn't provide
 System packages (Debian/Ubuntu):
 
 ```sh
-sudo apt install libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev pkg-config
+sudo apt install libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev pkg-config
 ```
 
 Zig ≥ 0.16 is required (`build.zig.zon` enforces it) and distro packages lag , 

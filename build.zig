@@ -332,6 +332,9 @@ pub fn build(b: *std.Build) void {
         // libadwaita-1 pulls gtk4, glib, gobject, gio, cairo transitively via pkg-config.
         linux_app.root_module.linkSystemLibrary("libadwaita-1", .{});
         linux_app.root_module.linkSystemLibrary("gtk4", .{});
+        // The first-run VAD model download; part of both desktop installs and
+        // the GNOME Flatpak runtime.
+        linux_app.root_module.linkSystemLibrary("libsoup-3.0", .{});
         linux_app.root_module.addIncludePath(b.path("include"));
         linux_app.root_module.addIncludePath(b.path("linux/src"));
         linux_app.root_module.addCSourceFiles(.{
