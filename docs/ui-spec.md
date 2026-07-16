@@ -12,7 +12,7 @@ measured against it, and the gaps are the work.
 | Property | Value | Source |
 |---|---|---|
 | Size | 400 wide, 500 tall; min 400x300, max 400x800 (width fixed) | `OverlayWindow.swift:32,39-40` |
-| Background | hardcoded `rgba(0.16, 0.17, 0.2, 0.95)` (~`#292B33`), translucent, non-opaque, shadowed; distinct from the theme bg | `OverlayWindow.swift:47-49` |
+| Background | `theme.bg` at the user's opacity (default 0.95), translucent, non-opaque, shadowed; `rgba(0.16,0.17,0.2,0.95)` is only the pre-theme first paint | `OverlayWindow.swift:47,192-193`, `AppDelegate.swift:217` |
 | Chrome | Titlebar hidden and transparent, full-size content, draggable by background | `OverlayWindow.swift:44-46` |
 | Placement | Top-right of the main screen (20px right margin, 50px top) | `OverlayWindow.swift:52-56` |
 | Level | Normal (not always-on-top on macOS); does not hide on deactivate | `OverlayWindow.swift:43,50` |
@@ -26,23 +26,29 @@ Colors come from the active **Ghostty-format theme** (`Theme.swift`): 16-color
 ANSI palette plus bg/fg, 486 themes, default "Ghostty Default Style Dark".
 Text uses theme colors; a few accents are hardcoded (flagged).
 
-| Token | Value | Notes |
-|---|---|---|
-| `bg` | theme background (`#292C33` default) | window + surfaces |
-| `fg` | theme foreground (white default) | transcript text |
-| `dim` | `palette[8]` (bright black) | status line, icons, hints |
-| `accent.record` | **hardcoded** `#FF3B30` | record button, recording waveform is `systemRed` |
-| `accent.thinking` | **hardcoded** `systemOrange` | transcribing waveform |
-| `accent.idle` | **hardcoded** `rgb(.51,.74,.69)` ~cyan | idle waveform |
-| `accent.confirm` | `palette[14]` (cyan) | copy-success flash |
-| Body font | system 13pt | transcript |
-| Mono font | monospaced system 11pt | status/hotkey hint |
-| Corner radius | window system; bubbles 10px; record circle 20px | |
+**The theme drives the colors.** `applyTheme` (`OverlayWindow.swift:192-197`)
+re-colors the window and every state from the active Ghostty theme; the values
+hardcoded at construction are only the pre-theme first paint. The single true
+hardcode is the record disc's `#FF3B30`.
 
-Consistency note: the record accent (`#FF3B30`) and the three waveform state
-colors are hardcoded, not theme-derived. For cross-platform parity these become
-the **shared brand tokens** every frontend uses, overriding the OS accent
-(Windows system blue, Linux adwaita blue/cyan).
+| Token | Source | Default theme value ("Ghostty Default Style Dark") | Used for |
+|---|---|---|---|
+| `bg` | `theme.bg` at the user's opacity (default 0.95) | `#282C34` | window |
+| `fg` | `theme.fg` | `#FFFFFF` | transcript text |
+| `dim` | `palette[8]` | `#666666` | status/hint, card icons |
+| `wave.idle` | `palette[14]` (cyan) | `#70C0B1` | idle waveform |
+| `wave.recording` | `palette[9]` (red) | `#D54E53` | recording waveform |
+| `wave.thinking` | `palette[11]` (yellow) | `#E7C547` | transcribing waveform |
+| `accent.confirm` | `palette[14]` | `#70C0B1` | copy-success flash |
+| `record` | **hardcoded** `#FF3B30` | same on every theme | the record disc |
+| Card fills | fixed `white@6%` / `white@3%` over `bg` | | cards / live card |
+| Body font | system 13pt | | transcript |
+| Mono font | monospaced system 11pt | | status/hotkey hint |
+
+Parity rule: until Linux/Windows gain theme support (feasibility phase 3),
+they use the **default theme's values above verbatim**, plus the `#FF3B30`
+record disc, so an un-themed frontend is pixel-equivalent to a default-themed
+macOS build rather than a lookalike with invented colors.
 
 ## 3. Components
 
