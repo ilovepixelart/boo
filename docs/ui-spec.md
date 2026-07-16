@@ -78,8 +78,21 @@ Monospace 11pt, `dim`, centered, directly above the record button. State text:
 | Needs permission | `copied, grant Accessibility to auto-paste` |
 
 ### Menu bar item (macOS-only, `AppDelegate.swift:83-149`)
-`NSStatusItem` with a `waveform` symbol (animated while active); menu: Boo,
-Record/Stop, Show Window, Settings (Cmd+,), Quit (Cmd+Q).
+`NSStatusItem` with a `waveform` symbol. **Live state in the menu bar itself**:
+while recording, the symbol tints `systemRed` and the button title shows a live
+elapsed timer (` 4s`, then ` 1:23`); while transcribing, it switches to
+`waveform.badge.magnifyingglass` dimmed; idle is the plain symbol. The menu:
+`Boo`, **`Record (Ctrl+Shift+Space)`** (the hotkey is shown here too),
+`Show Window`, `Settings...` (Cmd+,), `Quit Boo` (Cmd+Q).
+
+### Settings window (macOS-only, `SettingsWindow.swift`)
+- **Opacity** slider, 0.1-1.0, default 0.95, with a live monospace value label;
+  drives the overlay window's alpha.
+- **Auto-type** checkbox ("Auto-type into focused app after transcription", on by
+  default); off = clipboard-only, never paste.
+- **Theme**: a search field filters the 486 Ghostty themes; each row shows a
+  color **swatch** + name; a 16-color **palette preview strip** sits at the
+  bottom. Selecting one re-themes the overlay live.
 
 ## 4. Required behaviors (all platforms)
 
