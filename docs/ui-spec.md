@@ -137,36 +137,71 @@ elapsed timer (` 4s`, then ` 1:23`); while transcribing, it switches to
 5. **Per-action feedback**: an explicit "copied / pasted" confirmation (Windows
    already does this well; make it universal).
 
-## 5. Gap analysis (reference vs current)
+## 5. Per-element parity status
 
-| Aspect | macOS (spec) | Linux (GTK4) | Windows (Win32) |
+Every element above, as shipped per frontend (`linux/src/overlay_window.c`,
+`linux/src/waveform_widget.c`, `windows/src/overlay.c`). Deltas are the
+platform-native chrome and the deferred items, nothing else.
+
+| Element | macOS | Linux (GTK4) | Windows (Win32) |
 |---|---|---|---|
-| Window | translucent dark overlay, top-right | titled adwaita window | borderless tray overlay, bottom-right |
-| Accent | brand red `#FF3B30` + cyan/orange states | adwaita blue + cyan bars | **system blue** |
-| Waveform | 40 rounded center bars, 3 states | cyan Cairo bars, top-anchored, 1 state | 40 GDI bars, 1 state |
-| Transcript | bubble **history** + copy + dismiss | last-only plain label | last-only plain text |
-| Record control | red **circle <-> rounded square** | blue/red **pill** ("Record"/"Stop") | blue **pill** ("Record") |
-| Hotkey hint | **always visible** status line | shown only on failure | **idle-only**, lost after first transcript |
-| Deliver at caret | yes (pty / Cmd+V) | yes (Ctrl+Shift+V) | yes (Ctrl+V) |
-| Confirmation | in status/bubble | toast | status line (good) |
-| Tray / menu | menu-bar item | none | tray icon |
-| Theming | 486 Ghostty themes | none | light/dark auto |
+| Window chrome | hidden titlebar, translucent, shadowed | adwaita header bar, opaque | borderless popup, always-on-top, drawn `x` glyph hides |
+| Placement | top-right | window-manager decided | bottom-right above the tray |
+| Background | `theme.bg` at opacity | `#282C34` opaque, pinned dark | `#282C34`; light surfaces follow the system toggle |
+| Waveform, 3 states + colors | reference | full (Cairo, real per-bar alpha) | full (GDI) |
+| History cards + copy + dismiss | full, text selectable | full | full |
+| Live (provisional) card | `white@3%`, dim, no buttons | same | same |
+| Copy flash `accent.confirm` 0.5s | yes | yes | yes |
+| Dismiss animation | 0.2s fade | instant remove | instant remove |
+| Auto-scroll to newest card | yes | yes | yes |
+| Record disc `#FF3B30`, 20 -> 6 morph | 0.15s | CSS transition 150ms | eased per paint tick |
+| Status line, all six states | yes | yes | yes |
+| Elapsed timer | status + menu bar | status | status + tray tooltip |
+| Tray / menu bar | live waveform + timer + menu | none (GNOME has no tray) | icon + menu; elapsed in tooltip only |
+| Settings (opacity, auto-type, themes) | full | none | none |
+| Theming | 486 Ghostty themes | pinned default dark | default dark + system light/dark |
 
-## 6. Convergence priorities
+The behavior-parity matrix and the remaining backlog live in
+[features.md](features.md).
 
-Highest visible impact first, each implementable natively:
+## 6. UI acceptance walkthrough
 
-1. **One accent.** Adopt `#FF3B30` (record) + the cyan/orange waveform states on
-   Linux and Windows, overriding the OS accent. Single biggest "different app"
-   cue removed.
-2. **Persistent hotkey hint.** A dedicated status line showing
-   `ctrl+shift+space` at all times, not just idle/failure. (Your requirement.)
-3. **Record control shape.** Circular record button with the idle-circle /
-   recording-rounded-square transition, replacing the pills.
-4. **Waveform parity.** Center-symmetric rounded bars with the 3 colored states.
-5. **Transcript bubbles** with copy + dismiss and short history, replacing the
-   last-only labels.
-6. **Universal "copied/pasted" confirmation** and caret-insertion guarantee.
+Run this element script on each OS and compare against sections 1-3; it is the
+"is the UI actually unified" pass, one observation per element. Values in
+parentheses are the default-theme tokens from section 2.
 
-Deferred (bigger, platform-bound): the 486-theme picker (macOS-only today), the
-menu-bar/tray parity, translucency on Linux/Windows.
+1. **Launch.** Window ~400x500, dark bg (`#282C34`). Chrome per the parity
+   table: macOS frameless/translucent, Linux header bar, Windows borderless
+   topmost with the `x` glyph. Layout top-to-bottom: waveform, transcript
+   area, status line, record disc.
+2. **Idle.** 40 flat rounded bars, dim cyan (`#70C0B1`, alpha 0.2). Status
+   line monospace, dim (`#666666`), reads `ctrl+shift+space` (Linux without a
+   granted portal: `click record to dictate`). Record disc 40px `#FF3B30`,
+   perfect circle.
+3. **Start recording**, once each via hotkey, disc click, and tray/menu where
+   present. Disc morphs circle to rounded square (radius 6) in ~0.15s. Status
+   shows `recording...` then a live elapsed count. Bars turn red (`#D54E53`),
+   center-weighted, tracking the voice. macOS menu-bar icon tints red with a
+   timer; Windows tray tooltip carries the elapsed time.
+4. **While speaking** (silero model present): a dim provisional card
+   (`white@3%`, no buttons) grows with committed text.
+5. **Stop.** Bars turn yellow (`#E7C547`) and breathe; status `thinking...`;
+   then the transcript card appears: `white@6%` fill, radius 10, copy icon
+   left and `x` right in dim, hairline under the header, 13pt `fg` text. The
+   stack scrolls to it, the disc is a circle again, the status returns to the
+   hotkey.
+6. **Copy** on a card: clipboard holds the full text; the icon flashes cyan
+   (`#70C0B1`) for 0.5s.
+7. **Dismiss** on a card: the card goes away (macOS fades 0.2s, Linux/Windows
+   remove instantly) and the stack closes the gap.
+8. **Several takes** stack chronologically, newest at the bottom.
+9. **Silent take**: no card, status `no speech detected`.
+10. **Cap**: a recording left running stops itself at 10 minutes with
+    `max length reached` and transcribes what it captured.
+11. **Delivery**: caret mid-sentence in another app, dictate, text inserts at
+    the caret, an explicit confirmation shows, and nothing ever lands in Boo's
+    own window.
+12. **OS-specific tail**: macOS settings (opacity, auto-type, theme picker
+    re-themes live); Windows light-mode follow and the SmartScreen/Unblock
+    first-run path; Linux portal grant prompts on first hotkey and first
+    auto-paste.
