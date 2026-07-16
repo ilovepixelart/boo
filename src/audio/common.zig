@@ -43,6 +43,7 @@ pub const Mutex = switch (builtin.os.tag) {
         const SRWLOCK = extern struct { ptr: ?*anyopaque = null };
         extern "ntdll" fn RtlAcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
         extern "ntdll" fn RtlReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
+        extern "ntdll" fn RtlTryAcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) u8;
 
         pub fn lock(self: *@This()) void {
             RtlAcquireSRWLockExclusive(&self.handle);
@@ -50,6 +51,10 @@ pub const Mutex = switch (builtin.os.tag) {
 
         pub fn unlock(self: *@This()) void {
             RtlReleaseSRWLockExclusive(&self.handle);
+        }
+
+        pub fn tryLock(self: *@This()) bool {
+            return RtlTryAcquireSRWLockExclusive(&self.handle) != 0;
         }
     },
     else => struct {
@@ -61,6 +66,10 @@ pub const Mutex = switch (builtin.os.tag) {
 
         pub fn unlock(self: *@This()) void {
             _ = std.c.pthread_mutex_unlock(&self.handle);
+        }
+
+        pub fn tryLock(self: *@This()) bool {
+            return std.c.pthread_mutex_trylock(&self.handle) == .SUCCESS;
         }
     },
 };
@@ -427,6 +436,32 @@ test "Capture: copyFrom past the end is empty, not an error" {
     const tail = try cap.copyFrom(testing.allocator, 5000);
     defer testing.allocator.free(tail);
     try testing.expectEqual(@as(usize, 0), tail.len);
+}
+
+test "Mutex: tryLock acquires when free and fails when held" {
+    var m: Mutex = .{};
+
+    // Uncontended: acquires and can be released.
+    try testing.expect(m.tryLock());
+    m.unlock();
+
+    // Contended: a second thread must see the lock as taken, without blocking.
+    m.lock();
+    const Prober = struct {
+        fn run(mu: *Mutex, got_it: *bool) void {
+            got_it.* = mu.tryLock();
+            if (got_it.*) mu.unlock();
+        }
+    };
+    var got_it = true;
+    const t = try std.Thread.spawn(.{}, Prober.run, .{ &m, &got_it });
+    t.join();
+    try testing.expect(!got_it);
+    m.unlock();
+
+    // Released again: acquirable once more.
+    try testing.expect(m.tryLock());
+    m.unlock();
 }
 
 test "Mutex: provides mutual exclusion across threads" {

@@ -30,10 +30,16 @@ const BooContext = struct {
     /// thread, while recording) and boo_transcribe (a worker thread, after).
     whisper_mutex: common.Mutex = .{},
     /// Committed-so-far text handed out via boo_get_live_transcript. Replaced
-    /// buffers are retired, not freed, until the next take starts: a frontend
-    /// may still be reading the pointer it fetched a moment ago.
+    /// or superseded buffers are retired, never freed before deinit: a
+    /// frontend thread may still be copying a pointer it fetched a moment
+    /// ago, after the lock that published it was released. Retention is one
+    /// small string per committed utterance, reclaimed at boo_deinit.
     live_transcript: ?[:0]u8 = null,
     retired_transcripts: std.ArrayList([:0]u8) = .empty,
+    /// The pointer boo_get_live_transcript hands out, published atomically so
+    /// the getter is safe from any thread without taking (and potentially
+    /// blocking seconds on) whisper_mutex.
+    live_ptr: std.atomic.Value(?[*:0]const u8) = .init(null),
 
     fn freeTranscript(self: *BooContext) void {
         if (self.last_transcript) |t| {
@@ -42,7 +48,20 @@ const BooContext = struct {
         }
     }
 
+    /// Take the current live buffer out of service without freeing it; a
+    /// reader that fetched the pointer moments ago keeps a valid target. On
+    /// the (OOM) failure to record it for later freeing, leak it: a leaked
+    /// string beats freeing under a live reader.
+    fn retireLiveTranscript(self: *BooContext) void {
+        self.live_ptr.store(null, .release);
+        if (self.live_transcript) |t| {
+            self.retired_transcripts.append(self.allocator, t) catch {};
+            self.live_transcript = null;
+        }
+    }
+
     fn freeLiveTranscripts(self: *BooContext) void {
+        self.live_ptr.store(null, .release);
         if (self.live_transcript) |t| {
             self.allocator.free(t);
             self.live_transcript = null;
@@ -59,9 +78,12 @@ const BooContext = struct {
         const buf = self.allocator.allocSentinel(u8, ch.committed.items.len, 0) catch return;
         @memcpy(buf[0..ch.committed.items.len], ch.committed.items);
         if (self.live_transcript) |old| {
-            self.retired_transcripts.append(self.allocator, old) catch self.allocator.free(old);
+            // On OOM, leak `old` rather than free it: a frontend thread may
+            // still be copying the pointer it fetched from live_ptr.
+            self.retired_transcripts.append(self.allocator, old) catch {};
         }
         self.live_transcript = buf;
+        self.live_ptr.store(buf.ptr, .release);
     }
 };
 
@@ -97,11 +119,17 @@ export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
 
 export fn boo_deinit(ctx: ?*BooContext) void {
     const c = ctx orelse return;
+    // Flush any in-flight inference: a straggling boo_stream_tick or a
+    // boo_transcribe the frontend failed to join still holds the mutex and is
+    // reading the state torn down below. Held only across the frees; calls
+    // arriving after deinit returns are use-after-free by contract.
+    c.whisper_mutex.lock();
     c.freeTranscript();
     c.freeLiveTranscripts();
     c.retired_transcripts.deinit(c.allocator);
     if (c.chunker) |*ch| ch.deinit();
     if (c.vad) |*v| v.deinit();
+    c.whisper_mutex.unlock();
     c.audio.deinit();
     c.engine.deinit();
     c.allocator.destroy(c);
@@ -136,8 +164,20 @@ export fn boo_load_vad(ctx: ?*BooContext, vad_model_path: [*:0]const u8) bool {
 
 export fn boo_start_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    c.freeTranscript();
-    c.freeLiveTranscripts();
+    // One take at a time. Starting while the previous take is still being
+    // transcribed (a multi-second window the frontends' hotkeys can hit) or
+    // while a stream tick is mid-inference would mutate the chunker and the
+    // transcript buffers under a running inference. Reject rather than block:
+    // this runs on UI threads, and waiting here would freeze the app for the
+    // duration of a whisper decode.
+    if (c.transcribing.load(.acquire)) return;
+    if (!c.whisper_mutex.tryLock()) return;
+    defer c.whisper_mutex.unlock();
+
+    // last_transcript is deliberately NOT freed here: the pointer returned by
+    // boo_transcribe stays valid until the next boo_transcribe/boo_deinit, so
+    // a frontend worker still copying it cannot race a fresh recording.
+    c.retireLiveTranscript();
     if (c.chunker) |*ch| ch.reset();
     c.audio.startRecording();
 }
@@ -204,11 +244,12 @@ export fn boo_stream_tick(ctx: ?*BooContext) bool {
 }
 
 /// Text committed so far in the current take, or null. Owned by Boo; the
-/// pointer stays valid until the next boo_start_recording or boo_deinit.
+/// pointer stays valid until boo_deinit (superseded buffers are retired, not
+/// freed). Reads an atomically published pointer, so it is callable from any
+/// thread without contending on the inference mutex.
 export fn boo_get_live_transcript(ctx: ?*BooContext) ?[*:0]const u8 {
     const c = ctx orelse return null;
-    const live = c.live_transcript orelse return null;
-    return live.ptr;
+    return c.live_ptr.load(.acquire);
 }
 
 export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
