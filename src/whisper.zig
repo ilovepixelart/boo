@@ -95,7 +95,9 @@ pub const WhisperContext = struct {
             if (segment_text == null) continue;
             const no_speech = c.whisper_full_get_segment_no_speech_prob(self.ctx, @intCast(i));
             if (!keepSegment(no_speech, self.segmentAvgLogprob(@intCast(i)))) continue;
-            try text.appendSlice(allocator, std.mem.span(segment_text));
+            const slice = std.mem.span(segment_text);
+            if (isAnnotation(slice)) continue;
+            try text.appendSlice(allocator, slice);
         }
 
         return text.toOwnedSlice(allocator);
@@ -123,6 +125,24 @@ pub const WhisperContext = struct {
 /// mumbled-but-present real speech are never dropped.
 pub fn keepSegment(no_speech_prob: f32, avg_logprob: f32) bool {
     return !(no_speech_prob > 0.6 and avg_logprob < -0.4);
+}
+
+/// Whether a segment is purely a non-speech annotation: "[BLANK_AUDIO]",
+/// "[MUSIC]", "(wind blowing)". suppress_nst blocks most of these at the
+/// token level but they still slip through on some models, so this is the
+/// text-level backstop. Only a segment that is exactly ONE balanced bracketed
+/// or parenthesized span counts; real dictation containing brackets survives.
+pub fn isAnnotation(text: []const u8) bool {
+    const t = std.mem.trim(u8, text, " \t\r\n");
+    if (t.len < 2) return false;
+    const close: u8 = switch (t[0]) {
+        '[' => ']',
+        '(' => ')',
+        else => return false,
+    };
+    if (t[t.len - 1] != close) return false;
+    // A closing bracket before the end means surrounding real text.
+    return std.mem.indexOfScalar(u8, t[1 .. t.len - 1], close) == null;
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -156,6 +176,25 @@ test "keepSegment: thresholds are exclusive at the boundary" {
     try testing.expect(keepSegment(0.6, -0.4));
     try testing.expect(keepSegment(0.6, -1.0));
     try testing.expect(keepSegment(0.9, -0.4));
+}
+
+test "isAnnotation: bracketed non-speech markers are annotations" {
+    // The classics that leak into dictation transcripts on silence.
+    try testing.expect(isAnnotation("[BLANK_AUDIO]"));
+    try testing.expect(isAnnotation(" [BLANK_AUDIO]")); // whisper pads a space
+    try testing.expect(isAnnotation("[MUSIC]"));
+    try testing.expect(isAnnotation("(wind blowing)"));
+    try testing.expect(isAnnotation(" (keyboard clacking) "));
+}
+
+test "isAnnotation: real speech is never an annotation" {
+    try testing.expect(!isAnnotation("hello world"));
+    try testing.expect(!isAnnotation(""));
+    try testing.expect(!isAnnotation(" "));
+    // Real text that merely contains or borders brackets must survive.
+    try testing.expect(!isAnnotation("[a] and [b]"));
+    try testing.expect(!isAnnotation("(so I said) let's go"));
+    try testing.expect(!isAnnotation("[")); // too short / unbalanced
 }
 
 /// Decode thread count: min(cores, 8), overridable with $BOO_THREADS.
