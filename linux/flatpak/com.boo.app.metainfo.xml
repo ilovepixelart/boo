@@ -56,6 +56,17 @@
   </requires>
 
   <releases>
+    <release version="0.4.1" date="2026-07-16">
+      <description>
+        <p>Reliability fixes from the first automated UI test pass.</p>
+        <ul>
+          <li>Recording silence no longer produces made-up filler text; the take ends with "no speech detected", in both batch and streaming modes.</li>
+          <li>Launching without a speech model now shows the install instructions instead of exiting silently.</li>
+          <li>The waveform returns to its idle colour after a recording that captured nothing.</li>
+          <li>The Flatpak moves from the end-of-life GNOME 47 runtime to GNOME 50.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-07-16">
       <description>
         <p>The consistency release: Linux now looks and behaves like the macOS build, plus a broad reliability and security pass.</p>

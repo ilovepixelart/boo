@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="com.boo.app" version="0.4.0.0"/>
+  <assemblyIdentity type="win32" name="com.boo.app" version="0.4.1.0"/>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!-- UTF-8 process code page (Win10 1903+): model paths flow through the
