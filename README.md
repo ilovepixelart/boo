@@ -32,7 +32,7 @@ The architecture is borrowed wholesale from [Ghostty](https://github.com/ghostty
 |---|---|---|---|
 | macOS 14+ (Apple Silicon + Intel) | CoreAudio | Swift + AppKit | ✅ Working |
 | Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | ⚠️ Preview |
-| Windows 10+ (x86_64) | WASAPI | Win32 (C) | 🧪 Experimental |
+| Windows 10+ (x86_64 + ARM64) | WASAPI | Win32 (C) | 🧪 Experimental |
 
 **Preview** means machine-verified but not yet human-verified. **Experimental** is one notch below: it compiles, links and passes the core's tests on real Windows runners in CI, but nobody has dictated on real hardware yet. The precise ledger is in [docs/platform-status.md](docs/platform-status.md); working through [`windows/tests/manual.md`](windows/tests/manual.md) on a real machine is what promotes Windows to preview, and bug reports count.
 

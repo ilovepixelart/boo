@@ -108,9 +108,10 @@ Windows hardware, like the Linux portal/audio story before it).
 
 ### Release
 
-- **WIN-030** The release workflow builds `boo-<version>-windows-x86_64.zip` (exe +
-  LICENSE) on windows-latest, listed in SHA256SUMS; a Windows job failure does not block
-  the macOS release (same policy as Linux). Check: release workflow on the next `v*` tag.
+- **WIN-030** The release workflow builds `boo-<version>-windows-x86_64.zip` and
+  `boo-<version>-windows-arm64.zip` (exe + LICENSE) on windows-latest, each guarded by a
+  PE-machine check, both listed in SHA256SUMS; a Windows job failure does not block the
+  macOS release (same policy as Linux). Check: release workflow on the next `v*` tag.
 - **WIN-031** README gains Windows sections: quick start (zip, SmartScreen "More info >
   Run anyway", model download via curl.exe), status table row (preview), permissions table
   (mic toggle, UIPI note, no prompts otherwise), tray pinning note, hotkey conflict note
@@ -121,7 +122,7 @@ Windows hardware, like the Linux portal/audio story before it).
 Settings UI and themes; KEYEVENTF_UNICODE typing mode and TSF integration; clipboard
 restore; IMMNotificationClient device hot-swap (a new recording re-resolves the default
 device); autostart; code signing (apply to SignPath in parallel); winget manifest, Inno
-Setup, MSIX; ARM64 release artifacts; any TTS/VibeVoice work.
+Setup, MSIX; any TTS/VibeVoice work.
 
 ## Risks
 

@@ -6,10 +6,16 @@ Cairo) and Windows (Win32 + GDI), an effort estimate (**S** < ~50 lines, **M**
 ([ui-spec.md](ui-spec.md)); status is in [features.md](features.md). Ordered by
 the convergence priority.
 
+> **Status:** the convergence items below (cards, hint line, accent, record-button
+> morph, 3-state waveform) all shipped on Linux and Windows in v0.4.0. This doc is
+> kept as the feasibility record; current per-element parity is in
+> [ui-spec.md §5](ui-spec.md) and [features.md](features.md). What remains is the
+> deferred set (Settings/themes, tray depth, Linux light/dark).
+
 Guiding fact: **GTK4 has real widgets, Win32/GDI does not.** Anything list- or
 control-shaped is cheaper on Linux; anything custom-drawn is roughly equal.
-Neither can be runtime-verified on the macOS dev box, so every item ships
-compile-verified + logged in the platform UAT.
+Neither can be runtime-verified on the macOS dev box: Linux is now exercised
+end to end under Xvfb, and Windows is in its first VM UAT (the arm64 build).
 
 | # | Feature | Linux (GTK4/Cairo) | Windows (Win32/GDI) | Risk |
 |---|---|---|---|---|

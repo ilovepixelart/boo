@@ -10,7 +10,7 @@ Status: `have` (shipped, keep it working), `verify` (probably fine, prove it),
 
 | # | Action | Status | Notes |
 |---|---|---|---|
-| 1 | Harden decode parameters against silence hallucinations and repetition loops: no timestamps and single segment for short utterances, no carried context, and drop segments with high no-speech probability plus low average logprob | verify → build | The single most-mocked defect class in this category ("Thank you." on silence). Audit engine defaults, then add the segment filter with a test on a silence fixture |
+| 1 | Harden decode parameters against silence hallucinations and repetition loops: no timestamps, no carried context, suppress non-speech tokens, drop high-no-speech/low-logprob segments and bracketed annotations, and gate transcription on a minimum audio level | have | Shipped in `whisper.zig` (`keepSegment`, `isAnnotation`, pinned params) and `audio/common.zig` (`maxWindowRms` + `SILENCE_RMS_FLOOR`); a silent take now reads "no speech detected" instead of "Thank you." |
 | 2 | Mic pre-roll ring buffer so the first word is never clipped | have | `common.zig` preroll + `boo_warm_up`; guard it with the existing tests, it is the category's most-reported defect |
 | 3 | Never lose a dictation: persist the raw take to disk before transcribing, watchdog every pipeline stage, and on any delivery failure say "transcript copied to clipboard" instead of failing silently | build (partial: clipboard fallback exists) | Eaten dictations are the top reason users abandon comparable tools |
 | 4 | Distinct audible/visible state cues: start sound, stop sound, live level meter, explicit "transcribing" and error states | build (visual partial, no audio cues) | Absence of a recording indicator is a named public criticism of a comparable tool |
@@ -22,7 +22,7 @@ Status: `have` (shipped, keep it working), `verify` (probably fine, prove it),
 | # | Action | Status | Notes |
 |---|---|---|---|
 | 7 | Deterministic word replacements + user vocabulary (initial prompt) + optional filler-word removal | build | Top-3 request everywhere; keep replacements deterministic and local. Carried prompts can cause repetition, see item 1 |
-| 8 | Transcript history with re-copy (and the raw audio from item 3) | build (macOS shows a session stack; Linux/Windows show last only) | Pairs with the never-lose guarantee |
+| 8 | Transcript history with re-copy (and the raw audio from item 3) | have (all three stack cards with per-card copy); build (raw-audio re-copy) | Pairs with the never-lose guarantee |
 | 9 | Model doctor: checksum after download instructions, explicit load-error messages, visible compute-device indicator (CPU/GPU) | build (errors partial) | Silent model-load failure reads as "app is broken"; device opacity is a recurring complaint |
 | 10 | Microphone picker with live level meter; prefer the built-in mic over Bluetooth headsets by default | build | Opening a Bluetooth mic drops it to the low-quality hands-free profile and can add seconds of latency; a hidden cause of "transcripts are garbage" |
 | 11 | Verify-before-paste: confirm the clipboard actually holds the transcript before synthesizing the paste chord, and restore non-text clipboard formats if restore is ever added | verify | Clipboard races under CPU load are the highest-commented bug class in a comparable tool |

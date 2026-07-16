@@ -106,7 +106,7 @@ zig build app -Doptimize=ReleaseFast
 :: zip zig-out\bin\boo-app.exe + LICENSE; the release workflow uses Compress-Archive
 ```
 
-Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-15` → arm64, `macos-15-intel` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile), the Linux Flatpak, and the Windows zip (`windows-latest`), then publishes a GitHub Release with `SHA256SUMS`.
+Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-15` → arm64, `macos-15-intel` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile), the Linux Flatpak, and **two Windows zips** (`windows-latest`, x86_64 native + aarch64 cross, each PE-machine-checked), then publishes a GitHub Release with `SHA256SUMS`.
 
 To cut a release, edit the version in **`build.zig.zon`** (the single source of truth, `bundle.sh` derives from it) and add a `<release>` entry to the metainfo changelog. `macos/project.yml` carries it for the Xcode dev build, and `windows/res/boo.rc` + `boo.manifest` carry it for the Windows resources; `scripts/check-version.sh` runs in CI and fails if any of these drift. Then:
 
