@@ -56,6 +56,14 @@
   </requires>
 
   <releases>
+    <release version="0.3.0" date="2026-07-16">
+      <description>
+        <p>The Windows release: Boo gains an experimental third platform. Nothing changes on Linux.</p>
+        <ul>
+          <li>Windows 10+ (x86_64): WASAPI audio capture, a native Win32 overlay and tray icon, the Ctrl+Shift+Space hotkey, and clipboard plus paste delivery. Compile- and test-verified in CI on real Windows runners; not yet verified by a human on real hardware, hence experimental.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-16">
       <description>
         <p>The speed release: transcription moved to the GPU, a faster engine, and streaming while you talk.</p>
