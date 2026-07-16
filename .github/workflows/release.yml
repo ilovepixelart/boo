@@ -9,8 +9,11 @@ on:
         description: 'Tag to release (e.g. v0.1.0)'
         required: true
 
+# Least privilege at the top: the build jobs only upload artifacts and need no
+# write. Only the publish job below re-grants contents: write to create the
+# GitHub Release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   macos-dmg:
@@ -37,7 +40,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -70,7 +73,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb # v6
         with:
           bundle: boo.flatpak
           manifest-path: linux/flatpak/com.boo.app.yaml
@@ -82,7 +85,11 @@ jobs:
           upload-artifact: false
 
       - name: Name the bundle by version
-        run: mv boo.flatpak "boo-${{ github.event.inputs.tag || github.ref_name }}-x86_64.flatpak"
+        # Interpolate the ref through env, not directly into the shell: a ref
+        # name is attacker-influenceable and could carry shell metacharacters.
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: mv boo.flatpak "boo-$TAG-x86_64.flatpak"
 
       - uses: actions/upload-artifact@v5
         with:
@@ -97,7 +104,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -126,6 +133,9 @@ jobs:
     # zip experimental; a failure there should not block the macOS release.
     if: always() && !cancelled()
     runs-on: ubuntu-24.04
+    # The only job that writes: creating the GitHub Release needs contents:write.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
