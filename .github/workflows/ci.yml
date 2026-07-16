@@ -111,7 +111,20 @@ jobs:
           shfmt -d -i 4 -ci bundle.sh scripts/*.sh linux/tests/*.sh
 
       - name: C (clang-format)
-        run: clang-format --dry-run --Werror linux/src/*.c linux/src/*.h include/*.h
+        run: |
+          clang-format --dry-run --Werror \
+            linux/src/*.c linux/src/*.h \
+            windows/src/*.c windows/src/*.h windows/tests/*.c \
+            include/*.h
+
+      - name: Windows inject plan (host test)
+        # The paste-chord planner is pure C with no windows.h, so the test
+        # that pins the exact Ctrl+V sequence runs right here on Linux.
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -I windows/src \
+            windows/tests/inject_plan_test.c windows/src/inject_plan.c \
+            -o /tmp/inject_plan_test
+          /tmp/inject_plan_test
 
       - name: Version consistency
         # build.zig.zon is the source of truth; catch any file that drifted.
@@ -119,8 +132,8 @@ jobs:
 
       - name: Python (ruff, Astral)
         run: |
-          ruff check linux/tests
-          ruff format --check linux/tests
+          ruff check linux/tests scripts
+          ruff format --check linux/tests scripts
 
       - name: YAML (workflows + dependabot + flatpak)
         # A malformed workflow or dependabot file fails silently, GitHub just
@@ -173,6 +186,57 @@ jobs:
         # This is what proves Boo's predicted Request path matches the one the
         # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
+
+  windows-cross:
+    name: Windows (cross-compile from Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cross-compile app (x86_64 + arm64)
+        # Zig bundles mingw-w64 and its own resource compiler, so the full
+        # Windows app, resources and manifest included, links from any host.
+        # This is the cheap guard that keeps the Windows target from silently
+        # rotting between runs of the native job.
+        run: |
+          zig build app -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
+          test -f zig-out/bin/boo-app.exe
+          rm -rf zig-out
+          zig build app -Dtarget=aarch64-windows-gnu -Doptimize=ReleaseFast
+          test -f zig-out/bin/boo-app.exe
+          echo "windows cross ok"
+
+  windows-native:
+    name: Windows (build + tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Unit tests (Zig core)
+        # First real execution of the Windows arms: the SRWLOCK mutex shim,
+        # the WASAPI backend's pure maths, and the whole C ABI contract
+        # (model-load failure, leak check, null-context sweep), none of which
+        # need an audio device.
+        run: |
+          zig build test
+          zig build test -Doptimize=ReleaseSafe
+
+      - name: Build app
+        run: zig build app -Doptimize=ReleaseFast
+
+      - name: Verify binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path zig-out/bin/boo-app.exe)) { exit 1 }
+          Write-Output "windows app ok"
 
   flatpak-metadata:
     name: Linux (flatpak metadata)

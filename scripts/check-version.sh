@@ -36,6 +36,15 @@ check "metainfo newest <release>" \
     "$(grep -m1 -oE 'release version="[0-9.]+"' linux/flatpak/com.boo.app.metainfo.xml |
         grep -oE '[0-9.]+')"
 
+# Windows resources carry the version twice (binary FILEVERSION and the string
+# block) plus once in the manifest; all three are static data, so check them.
+check "windows boo.rc FILEVERSION" \
+    "$(sed -n 's/^FILEVERSION \([0-9]*\),\([0-9]*\),\([0-9]*\),.*/\1.\2.\3/p' windows/res/boo.rc)"
+check "windows boo.rc FileVersion string" \
+    "$(sed -n 's/.*VALUE "FileVersion", "\([0-9.]*\)".*/\1/p' windows/res/boo.rc)"
+check "windows manifest assemblyIdentity" \
+    "$(sed -n 's/.*name="com.boo.app" version="\([0-9.]*\)\.0".*/\1/p' windows/res/boo.manifest)"
+
 if [ "$fail" -ne 0 ]; then
     echo "Version drift. build.zig.zon is the source of truth; update the files above to $VERSION."
     exit 1
