@@ -1,0 +1,4 @@
+# Force LF everywhere: Windows CI runners default to core.autocrlf=true, and a
+# CRLF checkout breaks `zig fmt --check`, clang-format, and Zig multiline
+# string literals. Repo-side attributes override the runner's git config.
+* text=auto eol=lf
