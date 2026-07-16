@@ -5,7 +5,8 @@
 | `Boo-<ver>-arm64.dmg` | macOS, Apple Silicon |
 | `Boo-<ver>-x86_64.dmg` | macOS, Intel |
 | `boo-<ver>-x86_64.flatpak` | Linux, x86_64, **preview, see below** |
-| `boo-<ver>-windows-x86_64.zip` | Windows 10+, x86_64, **experimental, see below** |
+| `boo-<ver>-windows-x86_64.zip` | Windows 10+, Intel/AMD, **experimental, see below** |
+| `boo-<ver>-windows-arm64.zip` | Windows 10+, ARM (Copilot+ PCs, Surface, Apple Silicon VMs), **experimental** |
 | `SHA256SUMS` | checksums for the above |
 
 **Verify your download** (these builds aren't notarized, so this is your integrity check):

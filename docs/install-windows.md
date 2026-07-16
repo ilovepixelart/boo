@@ -9,9 +9,16 @@ troubleshooting. Requires Windows 10+.
 
 ## Install
 
-Grab `boo-<version>-windows-x86_64.zip` from
-[Releases](https://github.com/ilovepixelart/boo/releases) and extract it
-anywhere. Then:
+Pick the zip for your CPU from
+[Releases](https://github.com/ilovepixelart/boo/releases):
+
+- `boo-<version>-windows-x86_64.zip` for a normal Intel/AMD PC.
+- `boo-<version>-windows-arm64.zip` for Windows on ARM (Copilot+ PCs, Surface
+  Pro X, and Windows VMs on Apple Silicon). The x86_64 build only runs there
+  under emulation, and it can crash with an illegal-instruction error;
+  `Get-CimInstance Win32_Processor | Select Architecture` returns `12` on ARM.
+
+Extract it anywhere. Then:
 
 1. Open the extracted folder.
 2. Run the file named **`boo-app.exe`**.

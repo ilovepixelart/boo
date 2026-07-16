@@ -97,8 +97,22 @@ jobs:
           path: '*.flatpak'
 
   windows-zip:
-    name: Windows zip (x86_64, experimental)
+    name: Windows zip (${{ matrix.arch }}, experimental)
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both cross-compiled by Zig on the same x86_64 runner: x86_64 is
+          # native, aarch64 is a cross build (as ci.yml already proves). ARM64
+          # is what Windows-on-ARM (Copilot+ PCs, Surface, and Apple Silicon
+          # VMs) needs, the x86_64 zip only runs there under emulation.
+          - arch: x86_64
+            target: x86_64-windows-gnu
+            machine: '0x8664'
+          - arch: arm64
+            target: aarch64-windows-gnu
+            machine: '0xAA64'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,7 +123,21 @@ jobs:
           version: 0.16.0
 
       - name: Build
-        run: zig build app -Doptimize=ReleaseFast
+        run: zig build app -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+
+      - name: Confirm architecture
+        # Guard against a silent wrong-arch build, the mistake that shipped an
+        # Intel-only 0.4.x: read the PE header's machine field and match it.
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes("zig-out/bin/boo-app.exe")
+          $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+          $hex = '0x{0:X4}' -f [BitConverter]::ToUInt16($bytes, $peOff + 4)
+          Write-Host "PE machine: $hex"
+          if ($hex -ne '${{ matrix.machine }}') {
+            Write-Host "::error::binary is not ${{ matrix.arch }} (got $hex)"
+            exit 1
+          }
 
       - name: Package
         shell: pwsh
@@ -119,11 +147,11 @@ jobs:
           New-Item -ItemType Directory pkg | Out-Null
           Copy-Item zig-out/bin/boo-app.exe pkg/
           Copy-Item LICENSE pkg/
-          Compress-Archive -Path pkg/* -DestinationPath "boo-$env:TAG-windows-x86_64.zip"
+          Compress-Archive -Path pkg/* -DestinationPath "boo-$env:TAG-windows-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v5
         with:
-          name: windows-zip
+          name: windows-zip-${{ matrix.arch }}
           path: '*.zip'
 
   release:
