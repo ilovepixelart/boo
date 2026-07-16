@@ -32,6 +32,10 @@ typedef struct {
     // thread's stop signal; the handle is joined before reuse or teardown.
     GThread *stream_thread; // NULL == no thread to join
     gint stream_running;    // atomic
+    // The batch transcription thread. Kept joinable (not detached) so closing
+    // the window mid-transcription joins it rather than leaving its completion
+    // idle to fire against freed state.
+    GThread *transcribe_thread; // NULL == no thread to join
 } WindowState;
 
 typedef struct {
@@ -49,6 +53,10 @@ static void window_state_free(gpointer data) {
         g_atomic_int_set(&state->stream_running, 0);
         g_thread_join(state->stream_thread);
     }
+    // Likewise the transcribe thread: closing the window during "Transcribing…"
+    // must not leave it finishing against freed state. boo_deinit already
+    // flushes the in-flight boo_transcribe, so this join is bounded.
+    if (state->transcribe_thread) g_thread_join(state->transcribe_thread);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     g_free(state);
@@ -168,7 +176,10 @@ static void begin_transcription(WindowState *state) {
     boo_stop_recording(state->ctx);
     gtk_button_set_label(state->record_button, "Transcribing…");
     gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
-    g_thread_unref(g_thread_new("boo-transcribe", transcribe_worker, state));
+    // Reap the prior take's thread (long finished by now) before replacing the
+    // handle, so a completed thread is never leaked.
+    if (state->transcribe_thread) g_thread_join(state->transcribe_thread);
+    state->transcribe_thread = g_thread_new("boo-transcribe", transcribe_worker, state);
 }
 
 // The core stops capturing by itself once a recording hits MAX_RECORDING_SECONDS
@@ -192,6 +203,11 @@ static void toggle_recording(WindowState *state) {
     if (state->ui_recording) {
         begin_transcription(state);
     } else {
+        // One take at a time. The button is disabled during transcription, but
+        // the global hotkey routes here directly; starting now would desync the
+        // UI, since the core ignores a start while a transcription is in flight.
+        if (boo_is_transcribing(state->ctx)) return;
+
         // Collect the previous take's tick thread; it exits within one
         // cadence of its stop signal, so this join is effectively instant.
         if (state->stream_thread) {
