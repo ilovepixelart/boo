@@ -91,7 +91,21 @@ Your desktop will ask once to allow the global shortcut, and once to allow remot
 
 > **Experimental.** Compiles and passes the core tests in CI, but has not yet been run on real Windows hardware. See [Status](#status).
 
-**1. Install.** Grab `boo-<version>-windows-x86_64.zip` from [Releases](https://github.com/ilovepixelart/boo/releases) and extract it anywhere. The exe is unsigned, so the first launch shows SmartScreen's "Windows protected your PC": click **More info → Run anyway**. That is the Windows analog of the macOS quarantine note above, and just as expected.
+**1. Install.** Grab `boo-<version>-windows-x86_64.zip` from [Releases](https://github.com/ilovepixelart/boo/releases) and extract it anywhere. Then:
+
+1. Open the extracted folder.
+2. Run the file named **`boo-app.exe`**.
+3. The exe is unsigned, so Windows shows SmartScreen's **"Windows protected your PC"**. The button you want is:
+   - **More info**
+   - **Run anyway**
+
+If you *don't* get that prompt but the app still won't start, Windows has silently blocked the file (Mark-of-the-Web). Unblock it once:
+
+1. Right-click **`boo-app.exe`** → **Properties**
+2. On the **General** tab, at the bottom, tick **Unblock** if the checkbox is present
+3. **OK**, then run it again
+
+This is the Windows analog of the macOS quarantine note above, and just as expected. The `SHA256SUMS` file on the release page lets you verify the download is intact.
 
 **2. Get a model.** curl ships with Windows 10 1803+:
 
