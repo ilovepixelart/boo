@@ -65,6 +65,9 @@ pub fn parse(bytes: []const u8) ParseError!Wav {
             sample_rate = std.mem.readInt(u32, payload[4..8], .little);
             bits_per_sample = std.mem.readInt(u16, payload[14..16], .little);
             if (bits_per_sample != 16) return error.UnsupportedFormat;
+            // Guards sampleCount()/durationSeconds() against a divide-by-zero
+            // from a crafted fmt chunk.
+            if (channels == 0) return error.UnsupportedFormat;
         } else if (std.mem.eql(u8, id, "data")) {
             data = payload;
         }
@@ -208,6 +211,15 @@ test "parse: duration math" {
     const buf = makeWav(&([_]i16{0} ** 1600)); // 0.1s at 16kHz
     const wav = try parse(&buf);
     try testing.expectApproxEqAbs(@as(f64, 0.1), wav.durationSeconds(), 0.0001);
+}
+
+test "parse: rejects zero channels rather than handing back a divide-by-zero" {
+    // sampleCount()/durationSeconds() divide by channels; a crafted fmt chunk
+    // with wNumChannels == 0 would make the hostile-input parser return a
+    // struct whose public methods trap. Reject it at the boundary instead.
+    var buf = makeWav(&.{ 1, 2, 3, 4 });
+    std.mem.writeInt(u16, buf[22..24], 0, .little); // wNumChannels = 0
+    try testing.expectError(error.UnsupportedFormat, parse(&buf));
 }
 
 test "parse: survives hostile bytes without crashing" {
