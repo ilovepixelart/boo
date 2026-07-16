@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 PROJ="$(cd "$(dirname "$0")" && pwd)"
 APP="$PROJ/zig-out/Boo.app"
