@@ -12,9 +12,12 @@ Local-first speech-to-text overlay for **macOS**, **Linux**, and (experimentally
     src/               │           ├── macos/    Swift + AppKit
                        │           ├── linux/    GTK4 + libadwaita
                        ▼           └── windows/  Win32 (C)
-              boo_init() · boo_start_recording()
-              boo_stop_recording() · boo_get_waveform()
-              boo_transcribe() · boo_deinit()
+              boo_init()
+              boo_start_recording()
+              boo_stop_recording()
+              boo_get_waveform()
+              boo_transcribe()
+              boo_deinit()
 ```
 
 ## Why
