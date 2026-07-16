@@ -78,10 +78,10 @@ modules:
     # `--system <p-dir>` layout older guides (and Ghostty) use, so it needs
     # working out against 0.16 rather than copying an older recipe.
     #
-    # For whoever picks it up: the whisper.cpp v1.6.2 tarball
-    #   https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.2.tar.gz
-    #   sha256 da7988072022acc3cfa61b370b3c51baad017f1900c3dc4e68cb276499f66894
-    # matches the build.zig.zon hash N-V-__8AAO47_ADweqz0iga6VKh3lY1QoFk3sDxjoHJrRJHI.
+    # For whoever picks it up: the whisper.cpp v1.9.1 tarball
+    #   https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.1.tar.gz
+    # is what build.zig.zon pins (hash N-V-__8AAAEmKwLLpQyHLBm_25WrTtfKVani5EWs5ZQTeY7_);
+    # keep this in step with build.zig.zon when bumping whisper.cpp.
     build-options:
       build-args:
         - --share=network
