@@ -1,5 +1,8 @@
-// Cairo-rendered waveform visualizer. Reads bars from boo_get_waveform() on
-// every frame tick (driven by GdkFrameClock) and queues a redraw.
+// Cairo-rendered waveform, mirroring macos/Sources/WaveformView.swift: 40
+// center-symmetric capsule bars, lerp-smoothed, three states (idle dim cyan /
+// recording red / transcribing yellow sine-breathing). Colors are the
+// reference default theme's tokens (docs/ui-spec.md); Cairo has real alpha,
+// so the per-bar alpha matches the reference exactly.
 
 #include "waveform_widget.h"
 
@@ -8,49 +11,89 @@
 
 typedef struct {
     BooContext *ctx;
+    float smoothed[64];
 } WaveformState;
+
+static void rounded_bar(cairo_t *cr, double x, double cy, double w, double h) {
+    if (h < 2.0) h = 2.0;
+    const double r = MIN(w / 2.0, h / 2.0);
+    const double top = cy - h / 2.0;
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + r, top + r, r, G_PI, 3 * G_PI / 2);
+    cairo_arc(cr, x + w - r, top + r, r, 3 * G_PI / 2, 2 * G_PI);
+    cairo_arc(cr, x + w - r, top + h - r, r, 0, G_PI / 2);
+    cairo_arc(cr, x + r, top + h - r, r, G_PI / 2, G_PI);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
 
 static void waveform_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                           gpointer user_data) {
-    (void)area;
     WaveformState *st = user_data;
 
     int n_bars = 0;
     const float *bars = boo_get_waveform(st->ctx, &n_bars);
-    if (!bars || n_bars == 0) return;
+    if (!bars || n_bars <= 0) return;
+    if (n_bars > (int)G_N_ELEMENTS(st->smoothed)) n_bars = G_N_ELEMENTS(st->smoothed);
 
-    // Background
-    cairo_set_source_rgba(cr, 0.07, 0.08, 0.10, 1.0);
-    cairo_paint(cr);
+    const gboolean recording = boo_is_recording(st->ctx);
+    const gboolean transcribing = boo_is_transcribing(st->ctx);
 
-    // Bars: 70% width / 30% gap
-    double total = (double)width / (double)n_bars;
-    double bar_w = total * 0.65;
-    double gap = total * 0.35;
-    double base_x = gap * 0.5;
+    // Reference smoothing: fast attack while recording, slow settle otherwise.
+    const float lerp = recording ? 0.25f : 0.1f;
+    for (int i = 0; i < n_bars; i++)
+        st->smoothed[i] += (bars[i] - st->smoothed[i]) * lerp;
 
-    cairo_set_source_rgba(cr, 0.42, 0.85, 0.95, 0.95);
+    // Default-theme tokens: idle #70C0B1, recording #D54E53, thinking #E7C547.
+    double r = 0x70 / 255.0, g = 0xC0 / 255.0, b = 0xB1 / 255.0;
+    if (recording) {
+        r = 0xD5 / 255.0, g = 0x4E / 255.0, b = 0x53 / 255.0;
+    } else if (transcribing) {
+        r = 0xE7 / 255.0, g = 0xC5 / 255.0, b = 0x47 / 255.0;
+    }
+
+    const double gap = 3.0;
+    const double bar_w = MAX((width - gap * (n_bars - 1)) / n_bars, 2.0);
+    const double cy = height / 2.0;
+    const double max_h = height * 0.75;
+    const float peak = boo_get_peak_rms(st->ctx);
+    // Microsecond frame time drives the transcribing sine.
+    GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(area));
+    const double phase =
+        clock ? (double)gdk_frame_clock_get_frame_time(clock) / 1e6 : 0.0;
 
     for (int i = 0; i < n_bars; i++) {
-        double v = bars[i] * 4.0; // amplify for visibility
-        if (v > 1.0) v = 1.0;
-        double bar_h = v * (double)height * 0.85;
-        if (bar_h < 2.0) bar_h = 2.0; // minimum visible bar
-        double x = base_x + (double)i * total;
-        double y = ((double)height - bar_h) * 0.5;
-        cairo_rectangle(cr, x, y, bar_w, bar_h);
+        const double x = i * (bar_w + gap);
+        const double center =
+            1.0 - fabs((double)i / n_bars - 0.5) * (transcribing ? 0.6 : 0.4);
+        double h;
+        double alpha;
+        if (recording) {
+            const double norm = peak > 0.001f ? MIN(st->smoothed[i] / peak, 1.0) : 0.0;
+            h = norm * max_h;
+            alpha = (0.3 + norm * 0.7) * center;
+        } else if (transcribing) {
+            const double wave = (sin(phase * 2.0 + i * 0.12) + 1.0) / 2.0;
+            h = wave * max_h * 0.25 + 3.0;
+            alpha = (0.2 + wave * 0.4) * center;
+        } else {
+            h = 3.0;
+            alpha = 0.2;
+        }
+        cairo_set_source_rgba(cr, r, g, b, alpha);
+        rounded_bar(cr, x, cy, bar_w, h);
     }
-    cairo_fill(cr);
 }
 
 static gboolean waveform_tick(GtkWidget *widget, GdkFrameClock *clock,
                               gpointer user_data) {
     (void)clock;
     WaveformState *st = user_data;
-    // Only repaint while there is motion to show: during recording, and while
-    // the peak is still decaying after a stop. When idle the bars are static,
-    // so a full-refresh-rate redraw every frame is pure battery drain.
-    if (boo_is_recording(st->ctx) || boo_get_peak_rms(st->ctx) > 0.01f) {
+    // Repaint while there is motion to show: recording, the transcribing
+    // animation, and the peak decay after a stop. Idle bars are static, so a
+    // full-refresh-rate redraw would be pure battery drain.
+    if (boo_is_recording(st->ctx) || boo_is_transcribing(st->ctx) ||
+        boo_get_peak_rms(st->ctx) > 0.01f) {
         gtk_widget_queue_draw(widget);
     }
     return G_SOURCE_CONTINUE;
