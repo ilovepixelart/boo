@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const Engine = @import("engine.zig").Engine;
 const AudioCapture = @import("audio.zig").AudioCapture;
 
-pub fn main(init: std.process.Init.Minimal) !void {
+pub fn main(init: std.process.Init) !void {
     std.debug.print("Boo 👻 v0.1.0\n", .{});
     std.debug.print("Platform: {s} / {s}\n", .{ @tagName(builtin.os.tag), @tagName(builtin.cpu.arch) });
 
@@ -11,9 +11,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var arg_iter = std.process.Args.Iterator.init(init.args);
-    _ = arg_iter.skip(); // program name
-    const model_path: [:0]const u8 = arg_iter.next() orelse "models/ggml-base.en.bin";
+    // toSlice rather than Args.Iterator.init: the plain iterator is
+    // POSIX-only (Windows argv arrives WTF-16 and needs an allocator to
+    // convert). init.arena is process-lifetime storage, freed on exit.
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const model_path: [:0]const u8 = if (args.len > 1) args[1] else "models/ggml-base.en.bin";
 
     // Load whisper model
     std.debug.print("Loading model: {s}\n", .{model_path});
