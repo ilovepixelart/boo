@@ -66,9 +66,16 @@ curl -L -o ~/.boo/models/ggml-base.en.bin \
 
 Boo also checks `./models/` and, when run from a source checkout, the repo's own `models/`. See [Choosing a model](#choosing-a-model) for the alternatives.
 
-**3. Launch it and grant permissions.** Boo asks for the microphone on first launch, and for Accessibility (used to paste into apps). See [Permissions](#permissions). If you skip these, Boo records but nothing lands anywhere.
+**3. Launch it and grant permissions.** Two prompts, at two different moments:
+
+- **On first launch: Microphone.** Click **Allow**. Without it Boo records nothing.
+- **On your first dictation into a normal app: Accessibility** ("Boo would like to control this computer"). Click **Allow**, then dictate again. Boo needs this only to press ⌘V for you, so it asks the first time it actually has to, not at launch. Dictating into Ghostty asks for **Automation** instead, and never needs Accessibility.
+
+Decline either and Boo still transcribes and copies to the clipboard; it just won't paste for you. See [Permissions](#permissions).
 
 **4. Dictate.** Focus any app, press **Ctrl+Shift+Space**, speak, press it again. The text appears where your cursor is.
+
+> **⚠️ After you update Boo, re-grant Accessibility.** Builds are ad-hoc signed (no paid Apple Developer ID), so every version has a *different code identity*, and macOS ties the Accessibility grant to that identity. After installing a new version the switch still **looks** enabled but no longer applies, and auto-paste silently stops with *"copied, grant Accessibility to auto-paste"*. **Toggling it off and on does not help**, it re-enables the old identity. Remove Boo with **−** in System Settings → Privacy & Security → Accessibility, then dictate once and **Allow** the fresh prompt. Microphone is unaffected.
 
 ### Linux (preview)
 
@@ -210,7 +217,11 @@ Boo asks for **Accessibility only when it first has to synthesize a ⌘V**, neve
 
 Grant them under **System Settings → Privacy & Security**. If you dismissed a prompt, add Boo manually there.
 
-> **If you build from source:** ad-hoc signed builds get a *new code identity every rebuild*, so macOS treats each build as a different app and quietly drops the permissions you granted the last one. Symptom: dictation that worked yesterday silently stops typing. Re-grant, or sign with a stable identity (`BOO_CODESIGN_IDENTITY=... ./bundle.sh`).
+> **⚠️ Accessibility does not survive an update.** Boo is ad-hoc signed, so *every build and every release* has a different code identity, and macOS pins the Accessibility grant to the identity it was granted to. Install a new version (or rebuild from source) and the switch still shows as enabled while no longer applying: dictation that worked yesterday silently stops pasting and the status line reads *"copied, grant Accessibility to auto-paste"*.
+>
+> **Toggling the switch off and on does not fix it** — that just re-enables the stale entry. Remove Boo with **−** from System Settings → Privacy & Security → Accessibility, then dictate once and **Allow** the fresh prompt. Equivalently, from a terminal: `tccutil reset Accessibility com.boo.app`, then relaunch Boo.
+>
+> Building from source? Sign with a stable identity once (`BOO_CODESIGN_IDENTITY="Your Identity" ./bundle.sh`) and the grant survives every rebuild. The real cure for released builds is a Developer ID signature, which would key the grant to a stable identity instead of the per-build one; that needs a paid Apple Developer account.
 
 **Linux**, all mediated by portals, so you'll see desktop dialogs rather than a settings pane:
 
@@ -258,6 +269,10 @@ Two Windows-specific caveats. **Elevated windows**: pasting into an admin termin
 **Boo records but the transcript is empty (Linux)**, most likely the known gap: audio capture is unverified on Linux (see [Status](#status)). Check Boo is picking up your default PipeWire source (`pactl info`, `wpctl status`). A bug report with your desktop, compositor and PipeWire version is genuinely useful.
 
 **Transcripts are garbage**, `base.en` is small and English-only. Try a bigger model (`small`, `medium`), and check your input device is the mic you think it is.
+
+**macOS: it says "copied, grant Accessibility to auto-paste" but Accessibility is already enabled.** The commonest report, and the switch is lying to you. The grant belongs to a *previous* version's code identity (Boo is ad-hoc signed, so each build/release differs), so it no longer applies. Toggling it off and on re-enables the stale entry and changes nothing. Remove Boo with **−** from System Settings → Privacy & Security → Accessibility, then dictate once and **Allow** the fresh prompt, or run `tccutil reset Accessibility com.boo.app` and relaunch. Your transcript is on the clipboard meanwhile, so ⌘V works by hand.
+
+**macOS: dictating into Ghostty works but nothing pastes anywhere else.** Same cause as above. Ghostty uses its AppleScript API (Automation), which needs no Accessibility; every other app needs the ⌘V path, which does. If one works and the other doesn't, it's the Accessibility grant, not the other app.
 
 **"Windows protected your PC"**: expected; the exe is unsigned, so SmartScreen warns on the first launch of each release. **More info → Run anyway**. The `SHA256SUMS` file on the release page is the integrity check that replaces a signature.
 
