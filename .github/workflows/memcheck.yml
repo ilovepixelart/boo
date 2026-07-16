@@ -11,6 +11,9 @@ on:
     - cron: "0 3 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   linux-memcheck:
     name: Linux (valgrind memcheck)
@@ -26,7 +29,7 @@ jobs:
             valgrind libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev \
             libpipewire-0.3-dev pkg-config
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 

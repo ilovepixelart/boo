@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege: CI only reads the repo. No job publishes anything, so the
+# token never needs write. Without this block the workflow inherits the repo
+# default token scope, which may be read/write.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   # Only supersede runs on a PR branch. On master, cancelling means a commit can
@@ -21,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -101,7 +107,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             shellcheck shfmt clang-format
-      - uses: astral-sh/ruff-action@v3
+      - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
 
       - name: Shell (shellcheck + shfmt)
         # A broken build/test harness fails quietly, an unquoted expansion or a
@@ -156,7 +162,7 @@ jobs:
             libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
             pkg-config xvfb dbus-x11 python3-gi
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -197,7 +203,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
           # Matrix jobs share a job name for caching purposes, so the target
@@ -220,7 +226,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -273,7 +279,7 @@ jobs:
       # that does not exist) sails through --show-manifest and only blows up
       # in a real build, after which the app would have shipped with no
       # access to what it asked for.
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb # v6
         with:
           bundle: boo.flatpak
           manifest-path: linux/flatpak/com.boo.app.yaml
