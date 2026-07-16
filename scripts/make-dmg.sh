@@ -44,14 +44,15 @@ echo "Built: $DMG ($(du -h "$DMG" | cut -f1))"
 # Sanity-check the image really mounts and carries an intact bundle, a DMG
 # that fails here would fail identically on a user's machine.
 MOUNT="$(mktemp -d)"
+# Cover the mounted image in the trap now that it exists: an unexpected exit
+# between attach and detach must not leave the DMG mounted and MOUNT behind.
+trap 'hdiutil detach "$MOUNT" -quiet 2>/dev/null || true; rm -rf "$STAGE" "$MOUNT"' EXIT
 hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT"
 if [ -x "$MOUNT/Boo.app/Contents/MacOS/Boo" ] && codesign -v "$MOUNT/Boo.app" 2>/dev/null; then
     echo "Verified: mounts, bundle intact, signature valid (ad-hoc)"
     hdiutil detach "$MOUNT" -quiet
 else
     hdiutil detach "$MOUNT" -quiet || true
-    rmdir "$MOUNT" 2>/dev/null || true
     echo "error: DMG verification failed" >&2
     exit 1
 fi
-rmdir "$MOUNT" 2>/dev/null || true

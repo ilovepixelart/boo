@@ -31,8 +31,11 @@ echo "→ zig build -Doptimize=ReleaseFast"
 zig build -Doptimize=ReleaseFast
 
 # Newest first: stale archives from previous whisper.cpp versions may still
-# sit in the cache alongside the one this build just produced.
-WHISPER_A=$(find .zig-cache/o -name "libwhisper.a" -size +1M -print0 | xargs -0 ls -t | head -1)
+# sit in the cache alongside the one this build just produced. `stat -f` (BSD)
+# emits "mtime path" so sort does the ordering; avoids the xargs-ls-head pipe,
+# whose SIGPIPE and multi-batch ordering both misbehave under pipefail.
+WHISPER_A=$(find .zig-cache/o -name "libwhisper.a" -size +1M -exec stat -f '%m %N' {} + |
+    sort -rn | head -1 | cut -d' ' -f2-)
 if [[ -z "$WHISPER_A" ]]; then
     echo "Could not locate Zig-built libwhisper.a in .zig-cache" >&2
     exit 1
