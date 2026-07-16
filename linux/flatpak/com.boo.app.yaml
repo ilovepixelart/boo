@@ -1,7 +1,7 @@
 # Flatpak manifest for Boo.
 #
 # Build locally:
-#   flatpak install --user flathub org.gnome.Platform//47 org.gnome.Sdk//47
+#   flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 #   flatpak-builder --user --install --force-clean build-dir \
 #     linux/flatpak/com.boo.app.yaml
 #   flatpak run com.boo.app
@@ -16,7 +16,7 @@
 
 app-id: com.boo.app
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 command: boo-app
 
