@@ -73,7 +73,10 @@ static WCHAR *find_model_in(const WCHAR *dir) {
 // LM Studio convention on Windows, rather than AppData).
 static bool primary_model_dir(WCHAR *buf, size_t len) {
     WCHAR home[MAX_PATH];
-    if (!GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH)) return false;
+    const DWORD n = GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+    // A return >= MAX_PATH means truncated: the buffer contents are
+    // documented as undefined then, not a usable path.
+    if (n == 0 || n >= MAX_PATH) return false;
     return swprintf(buf, len, L"%ls\\.boo\\models", home) >= 0;
 }
 
@@ -87,16 +90,20 @@ static char *to_utf8(const WCHAR *wide) {
 }
 
 char *boo_model_find(void) {
-    // $BOO_MODEL points at one file directly.
+    // $BOO_MODEL points at one file directly. A length at or past MAX_PATH
+    // means truncation, and truncated buffers are undefined, so skip those.
     WCHAR env[MAX_PATH];
-    if (GetEnvironmentVariableW(L"BOO_MODEL", env, MAX_PATH) && env[0]) {
+    const DWORD env_len = GetEnvironmentVariableW(L"BOO_MODEL", env, MAX_PATH);
+    if (env_len > 0 && env_len < MAX_PATH) {
         if (GetFileAttributesW(env) != INVALID_FILE_ATTRIBUTES) return to_utf8(env);
     }
 
     WCHAR primary[MAX_PATH];
     WCHAR local[MAX_PATH] = L"";
     WCHAR localappdata[MAX_PATH];
-    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localappdata, MAX_PATH))
+    const DWORD lad_len =
+        GetEnvironmentVariableW(L"LOCALAPPDATA", localappdata, MAX_PATH);
+    if (lad_len > 0 && lad_len < MAX_PATH)
         swprintf(local, MAX_PATH, L"%ls\\boo\\models", localappdata);
 
     const WCHAR *dirs[] = {

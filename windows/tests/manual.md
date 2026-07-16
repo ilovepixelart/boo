@@ -22,7 +22,9 @@ Clause ids refer to [docs/specs/windows-support.md](../../docs/specs/windows-sup
 - [ ] Device loss: unplug a USB mic mid-recording. The take ends by itself and
       transcribes what was captured; no hang, no crash.
 - [ ] Cap: leave a recording running 10 minutes. It stops itself, the status
-      says so, and the transcript appears.
+      says so, and the transcript appears. A very long transcript shows
+      truncated (ellipsis at the end) in the overlay while the clipboard
+      carries the full text.
 
 ## Frontend (`manual:frontend`)
 

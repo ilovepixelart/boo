@@ -107,8 +107,9 @@ static DWORD WINAPI transcribe_worker(LPVOID param) {
     const char *text = boo_transcribe(app->ctx);
     // The context owns `text` and frees it on the next recording; the UI
     // thread gets its own copy, released in the BOO_MSG_TRANSCRIBED handler.
+    // A failed post (window already destroyed) keeps ownership here.
     char *copy = text ? _strdup(text) : NULL;
-    PostMessageW(app->overlay, BOO_MSG_TRANSCRIBED, 0, (LPARAM)copy);
+    if (!PostMessageW(app->overlay, BOO_MSG_TRANSCRIBED, 0, (LPARAM)copy)) free(copy);
     return 0;
 }
 
@@ -157,6 +158,25 @@ void boo_overlay_toggle_recording(BooApp *app) {
     InvalidateRect(app->overlay, NULL, FALSE);
 }
 
+// Convert for display, truncating deliberately when the transcript exceeds
+// the buffer (a 10-minute take can). MultiByteToWideChar leaves the output
+// undefined on overflow, so retry with a byte prefix that must fit: N UTF-8
+// bytes never yield more than N UTF-16 units. The clipboard gets it all.
+static void set_transcript_display(BooApp *app, const char *utf8) {
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, app->transcript,
+                            ARRAYSIZE(app->transcript)) > 0)
+        return;
+
+    size_t len = ARRAYSIZE(app->transcript) - 2;
+    // Back off to a character boundary so the cut cannot split a sequence.
+    while (len > 0 && (utf8[len] & 0xC0) == 0x80) len--;
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, app->transcript,
+                                ARRAYSIZE(app->transcript) - 2);
+    if (n < 0) n = 0;
+    app->transcript[n] = L'…';
+    app->transcript[n + 1] = 0;
+}
+
 static void on_transcribed(BooApp *app, char *text) {
     app->transcribing = false;
     if (app->worker) {
@@ -165,10 +185,12 @@ static void on_transcribed(BooApp *app, char *text) {
     }
 
     if (text && *text) {
-        MultiByteToWideChar(CP_UTF8, 0, text, -1, app->transcript,
-                            ARRAYSIZE(app->transcript));
-        app->transcript[ARRAYSIZE(app->transcript) - 1] = 0;
+        set_transcript_display(app, text);
 
+        // paste_target may be a destroyed or even recycled HWND by now; safe
+        // because delivery only pastes when it still equals the CURRENT
+        // foreground window, so the worst case is Ctrl+V landing in the
+        // window the user is actually looking at.
         switch (boo_inject_deliver(app->overlay, app->paste_target, text)) {
         case BOO_DELIVER_PASTED:
             set_status(app, L"Copied to clipboard and pasted");
