@@ -46,8 +46,13 @@ static void waveform_draw(GtkDrawingArea *area, cairo_t *cr, int width, int heig
 static gboolean waveform_tick(GtkWidget *widget, GdkFrameClock *clock,
                               gpointer user_data) {
     (void)clock;
-    (void)user_data;
-    gtk_widget_queue_draw(widget);
+    WaveformState *st = user_data;
+    // Only repaint while there is motion to show: during recording, and while
+    // the peak is still decaying after a stop. When idle the bars are static,
+    // so a full-refresh-rate redraw every frame is pure battery drain.
+    if (boo_is_recording(st->ctx) || boo_get_peak_rms(st->ctx) > 0.01f) {
+        gtk_widget_queue_draw(widget);
+    }
     return G_SOURCE_CONTINUE;
 }
 
@@ -59,7 +64,7 @@ GtkWidget *boo_waveform_widget_new(BooContext *ctx) {
     g_object_set_data_full(G_OBJECT(area), "boo-waveform-state", st, g_free);
 
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), waveform_draw, st, NULL);
-    gtk_widget_add_tick_callback(area, waveform_tick, NULL, NULL);
+    gtk_widget_add_tick_callback(area, waveform_tick, st, NULL);
 
     return area;
 }
