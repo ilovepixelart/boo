@@ -395,16 +395,22 @@ pub const AudioCapture = struct {
     /// driven: events wake every ~10ms engine period for nothing).
     fn captureLoop(self: *AudioCapture) void {
         // COM rule: every thread that calls COM initializes it. MTA matches
-        // the init thread, so the interfaces are shared freely.
+        // the init thread, so the interfaces are shared freely. Uninitialize
+        // only balances a successful init (S_FALSE included, hence not just
+        // checking for RPC_E_CHANGED_MODE).
         const com_hr = CoInitializeEx(null, COINIT_MULTITHREADED);
-        defer if (com_hr != RPC_E_CHANGED_MODE) CoUninitialize();
+        defer if (succeeded(com_hr)) CoUninitialize();
 
         while (self.running.load(.acquire)) {
             if (!self.drainPackets()) {
                 // Device unplugged, reconfigured, or access revoked mid-take
                 // (e.g. AUDCLNT_E_DEVICE_INVALIDATED). Finish the take with
                 // what was captured; the frontend's poll notices recording
-                // ended and transcribes it, same as hitting the cap.
+                // ended and transcribes it, same as hitting the cap. The
+                // invalidated client stays around until stopDevice tears it
+                // down; recovery needs a fresh context (v1 limitation, see
+                // windows/tests/manual.md).
+                self.running.store(false, .release);
                 self.capture.end();
                 return;
             }

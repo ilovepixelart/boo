@@ -63,7 +63,9 @@ void boo_tray_show_menu(HWND hwnd, POINT anchor, bool recording) {
 
     // TrackPopupMenu contract: the window must be foreground or the menu will
     // not dismiss on an outside click, and a WM_NULL afterwards works around
-    // the matching shell quirk.
+    // the matching shell quirk. Side effect: this activates the overlay, so a
+    // recording stopped from this menu delivers clipboard-only (the paste
+    // target is no longer foreground), which is the intended safe behavior.
     SetForegroundWindow(hwnd);
     TrackPopupMenu(menu, TPM_RIGHTBUTTON, anchor.x, anchor.y, 0, hwnd, NULL);
     PostMessageW(hwnd, WM_NULL, 0, 0);
