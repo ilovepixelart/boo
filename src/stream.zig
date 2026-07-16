@@ -14,6 +14,7 @@
 // same on macOS and Linux.
 
 const std = @import("std");
+const common = @import("audio/common.zig");
 const engine_mod = @import("engine.zig");
 const whisper = engine_mod.whisper;
 const Engine = engine_mod.Engine;
@@ -104,10 +105,15 @@ pub const Chunker = struct {
     /// Finish the take: transcribe the remaining tail and return the full
     /// transcript (committed utterances plus tail). Caller owns the slice.
     /// `tail` is the take from `consumed` onward. A tail below `min_samples`
-    /// is skipped, so a too-short recording with nothing committed comes back
-    /// empty, matching the batch path's "too short" behavior.
+    /// or under the silence floor is skipped, so a too-short or silent
+    /// recording with nothing committed comes back empty, matching the batch
+    /// path. Unlike the ticks, the tail is not VAD-screened, so without the
+    /// silence gate a silent tail would reach whisper and hallucinate filler.
     pub fn finalize(self: *Chunker, tail: []const f32, min_samples: usize) ![]u8 {
-        if (tail.len >= min_samples) {
+        if (tail.len >= min_samples and
+            common.maxWindowRms(tail, common.RMS_WINDOW_SAMPLES) >=
+                common.SILENCE_RMS_FLOOR)
+        {
             const text = try self.engine.transcribe(self.allocator, tail);
             defer self.allocator.free(text);
             try self.appendCommitted(text);
