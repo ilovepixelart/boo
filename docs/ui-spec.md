@@ -53,13 +53,34 @@ Smoothed via lerp (0.25 recording / 0.1 idle). Three states:
 - **Recording**: peak-normalized heights, center bars brighter, `systemRed`.
 - **Transcribing**: gentle sine "breathing", `systemOrange`.
 
-### Transcript (`OverlayWindow.swift:425-488`)
-A vertical **history stack** of bubbles in a scroll view (8px spacing), newest
-appended. Each bubble: 10px radius, `white@6%` fill; top row has a **copy** icon
-(`doc.on.doc`, left) and **dismiss** icon (`xmark.circle`, right), both `dim`; a
-separator; then the text (13pt, `fg`). Copy flashes the icon cyan for 0.5s;
-dismiss fades out over 0.2s. During streaming a dimmed provisional bubble
-(`white@3%`, `dim` text) shows committed-so-far text, replaced on stop.
+### Transcript cards (`OverlayWindow.swift:396-539`)
+A vertical **history stack** of cards in a scroll view, chronological top to
+bottom (newest appended at the bottom), 8px between cards, each card full stack
+width. After adding, the scroll view **auto-scrolls to the newest** card.
+
+Card anatomy, exact metrics:
+
+| Part | Spec |
+|---|---|
+| Container | corner radius **10**, fill `white@6%` over the window bg |
+| Header row | height **20**, inset top 6 / sides 8 |
+| Copy button | `doc.on.doc` symbol, borderless, tint `dim`, header-left |
+| Dismiss button | `xmark.circle` symbol, borderless, tint `dim`, header-right |
+| Separator | hairline below the header, inset 4 top / 8 sides |
+| Text | system **13pt**, `fg`, wrapping; inset 6 top / 12 sides / 10 bottom |
+
+Interactions:
+- **Copy**: puts that card's full text on the clipboard; the copy icon flashes
+  `accent.confirm` (theme cyan) for **0.5s**, then returns to `dim`.
+- **Dismiss**: fades the card out over **0.2s**, removes it from the stack, and
+  relayouts (remaining cards close the gap).
+- Card text is selectable on macOS (labels); parity target: at minimum the copy
+  button must exist everywhere.
+
+Streaming: while recording, a **provisional live card** shows committed-so-far
+text, visually one step dimmer than history cards (`white@3%` fill, `dim` text,
+no header/buttons); it is removed when the final transcript card (or "no
+speech") replaces it on stop.
 
 ### Record button (`OverlayWindow.swift:135-149`)
 40x40, `#FF3B30`. **Idle = circle** (radius 20); **recording = rounded square**
