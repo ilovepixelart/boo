@@ -121,6 +121,14 @@ curl.exe -L -o "%USERPROFILE%\.boo\models\ggml-base.en.bin" ^
 
 ## Using Boo
 
+**The whole loop is three steps:**
+
+1. **Click into the text field where you want the words**, an editor, a chat box, a terminal, a browser input, so the cursor is blinking there. Boo types wherever your cursor is.
+2. Press **Ctrl+Shift+Space** and talk. A small overlay shows a live waveform so you can see it is listening; you do not switch away from your text field.
+3. Press **Ctrl+Shift+Space** again to stop. Boo transcribes on-device and the text lands right at your cursor, exactly where it was blinking, and is also copied to the clipboard.
+
+That is it, there is nothing to sign into and nothing leaves your machine. You can also click the **Record** button in Boo's window instead of the hotkey (Boo remembers the field you came from and still delivers there, never into its own window). Each transcript is kept in the window so you can copy it again later.
+
 On macOS, Boo lives in the menu bar (a waveform icon) plus a small overlay window. On Linux it's a single window. On Windows it's a tray icon plus a small always-on-top overlay that never takes focus. The settings dialog and theme picker are macOS-only for now.
 
 | Action | macOS | Linux | Windows |
