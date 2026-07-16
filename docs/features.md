@@ -50,6 +50,7 @@ Legend: **M** macOS, **L** Linux, **W** Windows.
 |---|---|---|---|---|
 | Overlay window with a filled body | Y | Y | Y | Window shows content, no empty/black body |
 | Live waveform while recording | Y | Y | Y | Speak; bars move |
+| Live elapsed-time display during recording (`4s`, `1:23`) | Y | - | - | Record; a timer counts up |
 | Waveform has 3 states (idle / recording / transcribing) with distinct colors | Y | - | - | Colors change across the take (L/W single state) |
 | Transcript **history cards** (stacked previous prompts) | Y | - | - | Several takes stack as cards (L/W show last only) |
 | Each card has **copy** and **close/dismiss** buttons (same icons everywhere) | Y | - | - | Card has a copy icon and an × |
@@ -64,9 +65,13 @@ Legend: **M** macOS, **L** Linux, **W** Windows.
 | Feature | M | L | W | How to test |
 |---|---|---|---|---|
 | Menu-bar / tray presence | Y (menu bar) | - | Y (tray) | Icon present; menu opens |
+| Live recording indicator in the menu bar / tray (state + elapsed) | Y | n/a | ~ | Icon shows recording state (M: red waveform + timer; W: tooltip only) |
+| Hotkey shown in the tray/menu item text | Y | n/a | - | Menu reads "Record (Ctrl+Shift+Space)" |
 | Window **close / hide** control | Y (traffic lights) | Y (header bar) | ~ (tray only) | A way to hide/close from the window itself |
 | Single-instance (second launch surfaces the first) | n/a | Y | Y | Launch twice; one window |
 | Settings window | Y | - | - | Cmd+, opens settings |
+| Window opacity control | Y | - | - | Settings > Opacity slider (0.1-1.0) changes window translucency |
+| Theme picker: search + per-theme swatch + palette preview | Y | - | - | Settings > search filters 486 themes, each with a color swatch |
 | Permissions handled with clear prompts/messages | Y (mic, Accessibility, Automation) | Y (portals) | Y (none needed; privacy toggle noted) | First-run permission flow |
 
 ## 6. Privacy and security
@@ -88,5 +93,8 @@ From the columns above, the cross-platform work, in impact order:
 5. **3-state waveform** parity.
 6. **Window close/hide control** on Windows (currently tray-only), matching the macOS traffic lights / Linux header bar affordance.
 7. **Universal "copied/pasted" confirmation** (already good on Windows).
+8. **Live elapsed-time display** during recording, and the hotkey shown in the tray/menu item text.
 
-Deferred (platform-bound, bigger): the 486-theme picker and Settings window beyond macOS; menu-bar vs tray differences; translucency on Linux/Windows.
+Deferred (platform-bound, bigger): the Settings window beyond macOS (opacity
+slider, auto-type toggle, 486-theme picker with search/swatch/palette preview);
+the menu-bar live recording indicator; translucency on Linux/Windows.
