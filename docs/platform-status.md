@@ -12,7 +12,7 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - The restore token persists, so the permission prompt appears **once**, not every launch.
 
 **Verified against real desktop portal backends, not just the mock:**
-- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent** (the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface"). Boo detects this and says so (see [Permissions](../README.md#permissions)).
+- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent** (the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface"). Boo detects this and says so (see [the Linux guide](install-linux.md#permissions)).
 - **KDE Plasma**: its `xdg-desktop-portal-kde` manifest **does** declare GlobalShortcuts, and its backend serviced a real `CreateSession` (returning a proper Request path), so the hotkey is a live capability there, unlike GNOME 46.
 
 **Not verified:**
