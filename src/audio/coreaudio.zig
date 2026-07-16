@@ -229,7 +229,12 @@ pub const AudioCapture = struct {
     ) callconv(.c) void {
         const self: *AudioCapture = @ptrCast(@alignCast(user_data));
         const samples: [*]const f32 = @ptrCast(@alignCast(buffer.mAudioData));
-        const count: usize = @intCast(num_packets);
+
+        // For constant-bit-rate LPCM the input callback may report 0 packet
+        // descriptions; recover the frame count from the byte size, exactly as
+        // Apple's AQRecorder sample does, so a buffer is never silently dropped.
+        var count: usize = @intCast(num_packets);
+        if (count == 0) count = buffer.mAudioDataByteSize / @sizeOf(f32);
 
         // Everything that happens to these samples, preroll, the recording cap,
         // the waveform, is shared with the PipeWire backend.
