@@ -56,6 +56,14 @@
   </requires>
 
   <releases>
+    <release version="0.4.2" date="2026-07-16">
+      <description>
+        <p>Adds a native ARM64 Windows build.</p>
+        <ul>
+          <li>Windows on ARM (Copilot+ PCs, Surface, and Windows VMs on Apple Silicon) now has its own zip, rather than only an Intel build that ran under emulation.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-07-16">
       <description>
         <p>Reliability fixes from the first automated UI test pass.</p>

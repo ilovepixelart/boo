@@ -7,7 +7,7 @@
 IDI_BOO ICON "boo.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,4,1,0
+FILEVERSION 0,4,2,0
 PRODUCTVERSION 0,4,0,0
 BEGIN
   BLOCK "StringFileInfo"
@@ -15,9 +15,9 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "FileDescription", "Boo speech-to-text overlay"
-      VALUE "FileVersion", "0.4.1"
+      VALUE "FileVersion", "0.4.2"
       VALUE "ProductName", "Boo"
-      VALUE "ProductVersion", "0.4.1"
+      VALUE "ProductVersion", "0.4.2"
       VALUE "OriginalFilename", "boo-app.exe"
       VALUE "LegalCopyright", "MIT License"
     END
