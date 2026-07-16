@@ -72,5 +72,13 @@ CODESIGN_IDENTITY="${BOO_CODESIGN_IDENTITY:--}"
 codesign -s "$CODESIGN_IDENTITY" --force --deep \
     --entitlements "$PROJ/macos/Boo.entitlements" "$APP"
 
+# Register the freshly built bundle with LaunchServices so Finder picks up its
+# icon immediately. Without this a rebuilt (and, when ad-hoc, re-identified)
+# bundle keeps showing the generic icon until the OS happens to re-register it.
+# `touch` bumps the mtime so the icon cache is treated as stale.
+touch "$APP"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" || true
+
 echo "Built: $APP"
 echo "Run: open '$APP'"
