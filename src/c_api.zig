@@ -264,6 +264,7 @@ test {
     _ = @import("wav.zig");
     _ = @import("stream.zig");
     _ = @import("engine.zig");
+    _ = @import("whisper.zig");
     // The WASAPI backend's format/downmix maths is pure and runs everywhere,
     // even though the backend itself is only selected on Windows.
     _ = @import("audio/wasapi.zig");
