@@ -56,6 +56,20 @@
   </requires>
 
   <releases>
+    <release version="0.2.0" date="2026-07-16">
+      <description>
+        <p>The speed release: transcription moved to the GPU, a faster engine, and streaming while you talk.</p>
+        <ul>
+          <li>whisper.cpp upgraded to v1.9.1, and inference now runs on the GPU via Metal on Apple Silicon; it had been CPU-only.</li>
+          <li>NVIDIA Parakeet is now a supported engine and the preferred model: near large-v3 accuracy at many times the speed. Drop the ggml conversion in your models directory and Boo picks it up.</li>
+          <li>Streaming transcription: with a Silero VAD model, phrases are transcribed at natural pauses while you are still talking, with live text in the overlay; stopping only waits for the final phrase. The VAD model (under 1 MB) downloads automatically on first run on both platforms.</li>
+          <li>With several models installed, Boo now picks the most capable one it recognizes instead of always base.en.</li>
+          <li>Text lands in the target app faster after you stop dictating (macOS paste path).</li>
+          <li>Building from source works on macOS 15 again.</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.1.4" date="2026-07-14">
       <description>
         <p>Correctness, security, and a project-wide quality pass.</p>
