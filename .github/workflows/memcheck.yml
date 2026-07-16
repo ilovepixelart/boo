@@ -37,16 +37,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.boo/models
-          key: bench-models-base-en-silero-v6.2.0
+          # SHA-256s in the key: a changed hash bypasses the stale entry.
+          key: bench-models-base-en-a03779c8-silero-v6.2.0-2aa269b7
 
       - name: Download bench models
+        # Fails on HTTP error or hash mismatch, so a corrupt model can't be
+        # cached and then feed the GGUF parser this job exists to memcheck.
         run: |
-          mkdir -p ~/.boo/models
-          [ -f ~/.boo/models/ggml-base.en.bin ] || curl -sL \
-            -o ~/.boo/models/ggml-base.en.bin \
+          ./scripts/fetch-model.sh ~/.boo/models/ggml-base.en.bin \
+            a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002 \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-          [ -f ~/.boo/models/ggml-silero-v6.2.0.bin ] || curl -sL \
-            -o ~/.boo/models/ggml-silero-v6.2.0.bin \
+          ./scripts/fetch-model.sh ~/.boo/models/ggml-silero-v6.2.0.bin \
+            2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987 \
             https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin
 
       - name: Build bench
