@@ -1,6 +1,7 @@
 // Audio constants, helpers, and a thin Mutex shim shared across all platform backends.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
 pub const WAVEFORM_BARS: usize = 40;
@@ -28,19 +29,40 @@ pub fn samplesUntilCap(captured: usize, incoming: usize) usize {
     return @min(MAX_RECORDING_SAMPLES - captured, incoming);
 }
 
-// pthread-backed mutex. `std.Thread.Mutex` was removed in Zig 0.16 in favor of
+// OS-primitive mutex. `std.Thread.Mutex` was removed in Zig 0.16 in favor of
 // `std.Io.Mutex`, which threads an Io context through every call site, too
-// invasive for our audio callback path. pthread works on macOS and Linux alike.
-pub const Mutex = struct {
-    handle: std.c.pthread_mutex_t = .{},
+// invasive for our audio callback path. pthread covers macOS and Linux; on
+// Windows std.c has no pthread types, so that arm uses SRWLOCK: one
+// zero-initialized pointer-sized word, no destroy call exists or is needed.
+pub const Mutex = switch (builtin.os.tag) {
+    .windows => struct {
+        handle: SRWLOCK = .{},
 
-    pub fn lock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_lock(&self.handle);
-    }
+        // Declared by hand rather than via std.os.windows.ntdll, which is not
+        // a stability-guaranteed API surface.
+        const SRWLOCK = extern struct { ptr: ?*anyopaque = null };
+        extern "ntdll" fn RtlAcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
+        extern "ntdll" fn RtlReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
 
-    pub fn unlock(self: *Mutex) void {
-        _ = std.c.pthread_mutex_unlock(&self.handle);
-    }
+        pub fn lock(self: *@This()) void {
+            RtlAcquireSRWLockExclusive(&self.handle);
+        }
+
+        pub fn unlock(self: *@This()) void {
+            RtlReleaseSRWLockExclusive(&self.handle);
+        }
+    },
+    else => struct {
+        handle: std.c.pthread_mutex_t = .{},
+
+        pub fn lock(self: *@This()) void {
+            _ = std.c.pthread_mutex_lock(&self.handle);
+        }
+
+        pub fn unlock(self: *@This()) void {
+            _ = std.c.pthread_mutex_unlock(&self.handle);
+        }
+    },
 };
 
 pub fn computeWaveform(samples: []const f32, out: *[WAVEFORM_BARS]f32) void {
@@ -405,6 +427,30 @@ test "Capture: copyFrom past the end is empty, not an error" {
     const tail = try cap.copyFrom(testing.allocator, 5000);
     defer testing.allocator.free(tail);
     try testing.expectEqual(@as(usize, 0), tail.len);
+}
+
+test "Mutex: provides mutual exclusion across threads" {
+    // Exercises whichever OS arm this platform selected (SRWLOCK on Windows,
+    // pthread elsewhere). A broken shim, a no-op lock or a bad extern, loses
+    // increments here rather than corrupting a user's recording buffer.
+    var m: Mutex = .{};
+    var counter: usize = 0; // guarded by m
+
+    const Worker = struct {
+        fn run(mu: *Mutex, n: *usize) void {
+            for (0..10_000) |_| {
+                mu.lock();
+                n.* += 1;
+                mu.unlock();
+            }
+        }
+    };
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| t.* = try std.Thread.spawn(.{}, Worker.run, .{ &m, &counter });
+    for (threads) |t| t.join();
+
+    try testing.expectEqual(@as(usize, 40_000), counter);
 }
 
 test "updatePeakRms: attacks instantly" {
