@@ -1,3 +1,4 @@
+import Carbon
 import Cocoa
 
 class FlippedView: NSView {
@@ -596,10 +597,11 @@ class OverlayWindow: NSWindow {
     }
 
     private func performPaste() {
-        // CGEvent only, no AppleScript, no extra permission dialogs
+        // CGEvent only, no AppleScript, no extra permission dialogs.
         let source = CGEventSource(stateID: .combinedSessionState)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
-            let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
+        let vKey = OverlayWindow.pasteKeyCode
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
+            let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
         else {
             return
         }
@@ -610,6 +612,38 @@ class OverlayWindow: NSWindow {
         usleep(20000)
         up.flags = .maskCommand
         up.post(tap: .cghidEventTap)
+    }
+
+    // The virtual key that types "v" on the active keyboard layout. Hardcoding
+    // 0x09 (QWERTY) meant ⌘V on Dvorak/AZERTY/Colemak pasted the wrong key or
+    // nothing, and the transcript was then lost when the clipboard was
+    // restored. Resolved once, lazily; QWERTY's 0x09 is the fallback.
+    private static let pasteKeyCode: CGKeyCode = resolveKeyCode(for: "v") ?? 0x09
+
+    private static func resolveKeyCode(for character: Character) -> CGKeyCode? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+            let layoutPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+        let layoutData = Unmanaged<CFData>.fromOpaque(layoutPtr).takeUnretainedValue() as Data
+
+        return layoutData.withUnsafeBytes { raw -> CGKeyCode? in
+            let keyLayout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress!
+            var deadKeyState: UInt32 = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            var length = 0
+            // Scan the keyboard's virtual keys for the one that, unmodified,
+            // produces the target character.
+            for code in 0..<128 as Range<CGKeyCode> {
+                let status = UCKeyTranslate(
+                    keyLayout, UInt16(code), UInt16(kUCKeyActionDown), 0,
+                    UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeyState, chars.count, &length, &chars)
+                if status == noErr, length == 1, Character(UnicodeScalar(chars[0])!) == character {
+                    return code
+                }
+            }
+            return nil
+        }
     }
 
     // MARK: - Display Link (only active during recording/transcribing)
