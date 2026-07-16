@@ -154,6 +154,10 @@ static void show_error(GtkApplication *app, const char *heading, const char *bod
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(heading, body));
     adw_alert_dialog_add_response(dialog, "quit", "Quit");
     g_signal_connect_swapped(dialog, "response", G_CALLBACK(g_application_quit), app);
+    // Parentless dialogs are not application windows, so without a hold the
+    // main loop sees zero windows and quits before the dialog ever appears.
+    // The response handler above quits, which terminates through the hold.
+    g_application_hold(G_APPLICATION(app));
     adw_dialog_present(ADW_DIALOG(dialog), NULL);
 }
 
