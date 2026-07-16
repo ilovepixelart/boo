@@ -7,7 +7,9 @@ This is the behavior-parity ground truth; the UI target is [ui-spec.md](ui-spec.
 and the macOS build is the reference for both.
 
 Legend: **M** macOS, **L** Linux, **W** Windows. Windows parity marks are
-compile-verified; runtime acceptance runs on real hardware against this table.
+compile-verified. Linux was exercised end to end under Xvfb (launch, record
+morph, cards, dictation through a virtual PipeWire mic); portals, tray, and
+real-mic acceptance still runs on real hardware against this table.
 
 ## 1. Capture and transcription
 
@@ -28,7 +30,7 @@ compile-verified; runtime acceptance runs on real hardware against this table.
 | Feature | M | L | W | How to test |
 |---|---|---|---|---|
 | Global hotkey **Ctrl+Shift+Space** toggles recording | Y | ~ | Y | Press it from another app; recording toggles (Linux needs GNOME 48+/KDE/Hyprland portal) |
-| Hotkey **persistently visible** in the UI | Y | - | Y | Idle window shows `ctrl+shift+space` at all times (W loses it after first transcript; L only on failure) |
+| Hotkey **persistently visible** in the UI | Y | Y | Y | Idle window shows `ctrl+shift+space` at all times (L says `click record to dictate` when no portal granted it) |
 | Record button in the window | Y | Y | Y | Click it; recording toggles |
 | Trigger from tray/menu | Y | n/a | Y | Menu-bar/tray "Record" item toggles |
 | Hotkey-conflict handling surfaced, not silent | Y | Y | Y | Bind the combo elsewhere first; UI says so, Record still works |
@@ -51,14 +53,14 @@ compile-verified; runtime acceptance runs on real hardware against this table.
 |---|---|---|---|---|
 | Overlay window with a filled body | Y | Y | Y | Window shows content, no empty/black body |
 | Live waveform while recording | Y | Y | Y | Speak; bars move |
-| Live elapsed-time display during recording (`4s`, `1:23`) | Y | - | Y | Record; a timer counts up |
-| Waveform has 3 states (idle / recording / transcribing) with distinct colors | Y | - | Y | Colors change across the take (L/W single state) |
-| Transcript **history cards** (stacked previous prompts) | Y | - | Y | Several takes stack as cards (L/W show last only) |
-| Each card has **copy** and **close/dismiss** buttons (same icons everywhere) | Y | - | Y | Card has a copy icon and an × |
-| Idle status/hotkey hint line | Y | - | Y | Idle shows the hint |
-| Shared brand accent (record red `#FF3B30`, default-theme state colors) | Y | ~ | Y | Accent is Boo's, not the OS blue/adwaita |
-| Circular record button (idle circle / recording rounded-square) | Y | - | Y | Button is a red disc, morphs on record (L/W are pills) |
-| Follows system light/dark | ~ | ~ | Y | Flip OS theme; window follows (M has 486 themes instead) |
+| Live elapsed-time display during recording (`4s`, `1:23`) | Y | Y | Y | Record; a timer counts up |
+| Waveform has 3 states (idle / recording / transcribing) with distinct colors | Y | Y | Y | Colors change across the take |
+| Transcript **history cards** (stacked previous prompts) | Y | Y | Y | Several takes stack as cards |
+| Each card has **copy** and **close/dismiss** buttons (same icons everywhere) | Y | Y | Y | Card has a copy icon and an × |
+| Idle status/hotkey hint line | Y | Y | Y | Idle shows the hint |
+| Shared brand accent (record red `#FF3B30`, default-theme state colors) | Y | Y | Y | Accent is Boo's, not the OS blue/adwaita |
+| Circular record button (idle circle / recording rounded-square) | Y | Y | Y | Button is a red disc, morphs on record |
+| Follows system light/dark | ~ | - | Y | Flip OS theme; window follows (M has 486 themes instead; L pins the dark default theme) |
 | 486 Ghostty color themes, searchable | Y | - | - | Settings > theme picker |
 
 ## 5. System integration
@@ -87,15 +89,13 @@ compile-verified; runtime acceptance runs on real hardware against this table.
 
 From the columns above, the cross-platform work, in impact order:
 
-1. **Transcript history cards with copy + close** on Linux and Windows (same icons as macOS: copy + ×). Currently last-only.
-2. **Persistent, visible hotkey hint** on Linux and Windows.
-3. **Shared brand accent** (`#FF3B30` + cyan/orange waveform states) overriding system blue/adwaita.
-4. **Circular record button** with the idle/recording morph, replacing the pills.
-5. **3-state waveform** parity.
-6. **Window close/hide control** on Windows (currently tray-only), matching the macOS traffic lights / Linux header bar affordance.
-7. **Universal "copied/pasted" confirmation** (already good on Windows).
-8. **Live elapsed-time display** during recording, and the hotkey shown in the tray/menu item text.
+1. **Follows system light/dark on Linux**: the overlay pins the dark default
+   theme's values; Windows already follows the system toggle.
+2. **Explicit "copied/pasted" confirmation on macOS** (Linux and Windows
+   already state the outcome; macOS only implies it in the bubble).
+3. **Windows tray live indicator** is elapsed-tooltip only; the macOS menu bar
+   draws a live waveform with a timer.
 
 Deferred (platform-bound, bigger): the Settings window beyond macOS (opacity
 slider, auto-type toggle, 486-theme picker with search/swatch/palette preview);
-the menu-bar live recording indicator; translucency on Linux/Windows.
+translucency on Linux/Windows.
