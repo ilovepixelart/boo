@@ -106,7 +106,7 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
 
     switch (gs->step) {
     case BOO_GS_CREATE_SESSION: {
-        g_autofree char *session_token = g_strdup_printf("boo_%08x", g_random_int());
+        g_autofree char *session_token = boo_portal_new_token();
         return g_variant_new_parsed(
             "({'handle_token': <%s>, 'session_handle_token': <%s>},)", handle_token,
             session_token);

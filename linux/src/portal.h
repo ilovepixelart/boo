@@ -61,3 +61,7 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
 
 /// Close a portal session. Safe with a NULL handle.
 void boo_portal_close_session(GDBusConnection *dbus, const char *session_handle);
+
+/// An unpredictable D-Bus object-path token component ([A-Za-z0-9_] only),
+/// from the OS CSPRNG. Used for both handle and session tokens. Caller frees.
+char *boo_portal_new_token(void);
