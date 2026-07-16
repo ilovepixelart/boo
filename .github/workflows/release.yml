@@ -88,11 +88,41 @@ jobs:
           name: flatpak
           path: '*.flatpak'
 
+  windows-zip:
+    name: Windows zip (x86_64, experimental)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build
+        run: zig build app -Doptimize=ReleaseFast
+
+      - name: Package
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item zig-out/bin/boo-app.exe pkg/
+          Copy-Item LICENSE pkg/
+          Compress-Archive -Path pkg/* -DestinationPath "boo-$env:TAG-windows-x86_64.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows-zip
+          path: '*.zip'
+
   release:
     name: Publish release
-    needs: [macos-dmg, linux-flatpak]
-    # Publish whatever built. The Linux bundle is a preview; a failure there
-    # should not block the macOS release.
+    needs: [macos-dmg, linux-flatpak, windows-zip]
+    # Publish whatever built. The Linux bundle is a preview and the Windows
+    # zip experimental; a failure there should not block the macOS release.
     if: always() && !cancelled()
     runs-on: ubuntu-24.04
     steps:
