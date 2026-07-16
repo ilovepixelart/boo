@@ -6,7 +6,9 @@ Please report security issues privately via [GitHub Security Advisories](https:/
 
 ## Threat model
 
-Boo's central promise is that **your audio never leaves the machine.** It has no network code, no telemetry, no analytics, no update check, no model download from within the app. The transcript is produced entirely on-device by `whisper.cpp`. You can verify this: the shipped binary links no networking symbols, and `grep` for `socket`/`http`/`URLSession` across the source finds only the text of the "how to download a model" help messages.
+Boo's central promise is that **your audio and transcripts never leave the machine.** No telemetry, no analytics, no update check, and nothing Boo records or produces is ever uploaded. The transcript is produced entirely on-device by `whisper.cpp`.
+
+Boo makes exactly one kind of outbound request: on first run it downloads the optional Silero VAD model (~1 MB, enables streaming transcription) from Hugging Face over TLS, and verifies it against a **pinned SHA-256** before use. That download is inbound-only, a model file, never your audio or text; declining it (offline, or the Flatpak sandbox, which has no network socket) just keeps Boo in batch mode. There is no other network path: the speech models are downloaded by you, out of band.
 
 The interesting surface is the opposite direction: Boo **injects text into other applications**, which inherently means holding capabilities (keyboard synthesis, terminal automation) that could be abused. The review below is about not leaking or misusing those.
 

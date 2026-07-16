@@ -256,7 +256,7 @@ Per-platform build guides, packaging, the release checklist, the full test-suite
 
 ## Security
 
-Boo has no network code, your audio never leaves the machine, and there's nothing to verify that against because there's nothing there. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
+Your audio and transcripts never leave the machine: nothing Boo records or produces is ever uploaded. Boo makes exactly one kind of outbound request, downloading the optional Silero VAD model from Hugging Face on first run (verified against a pinned SHA-256), and never sends anything. Transcription is fully local. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
 
 ## License
 
