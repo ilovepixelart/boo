@@ -16,7 +16,7 @@ compile-verified + logged in the platform UAT.
 | 1 | **Transcript history cards** (stack, copy + x per card) | **M**. `GtkListBox`/`GtkBox` in the existing scroller; each card a `GtkFrame` with a label + two `GtkButton`s (`edit-copy-symbolic`, `window-close-symbolic`). Widgets do the work. | **L**. No card widgets. Either child controls (STATIC + two BUTTONs) per card in a scroll area, or custom GDI cards + click hit-testing + manual scroll. Most work of any item. | W: dynamic child-control lifecycle + scrolling is fiddly; keep a bounded history |
 | 2 | **Persistent hotkey hint** | **S**. A dim `GtkLabel` pinned above the button, always set. | **S**. Dedicated status line already drawn; default it to the hotkey. | none |
 | 3 | **Brand accent** (`#FF3B30` + cyan/orange states) | **S**. Cairo bar colors + button CSS. | **S**. GDI colors + record fill. | none |
-| 4 | **Circular record button** (circle <-> rounded square) | **S-M**. `GtkDrawingArea` or a CSS `border-radius` class swap on state. | **S**. Already custom-drawn; `Ellipse` idle / `RoundRect` recording. | none |
+| 4 | **Circular record button + morph** (see below) | **S-M**. `GtkDrawingArea` drawing a rounded rect with an animated radius, or a CSS `border-radius` class with `transition: 150ms`. | **S**. Already custom-drawn; lerp the radius on the existing 33ms timer. | none |
 | 5 | **3-state waveform** (idle/recording/transcribing) | **M**. Cairo already draws bars; add state color + the transcribing sine. | **M**. GDI `waveform.c`; add state color + sine. | low |
 | 6 | **Window close/hide control** | **n/a**. Adwaita header bar already has a close button. | **M**. Borderless popup has none: draw an `x` (and maybe a hide dot) top-right, hit-test to `WM_CLOSE`->hide. The traffic-light analog. | W: must not steal focus (paint + hit-test only, no real child) |
 | 7 | **"Copied/pasted" confirmation** | **S**. Already an `AdwToast`; align wording. | **S**. Already a status line; align wording. | done-ish |
@@ -27,6 +27,32 @@ compile-verified + logged in the platform UAT.
 | 12 | **Settings window** (opacity + auto-type + theme) | **L**. `AdwPreferencesWindow` + `GtkScale` + `GtkSwitch` + theme list. Widgets exist; it's the plumbing + persistence that's large. | **L**. A whole new Win32 dialog (trackbar, checkbox, listbox). | both: net-new window + settings persistence |
 | 13 | **486 Ghostty themes** (search + swatch + palette) | **L**. The theme parser lives in Swift (`Theme.swift`); port it to C once (shared by both frontends), then a list UI. | **L**. Same parser port + a Win32 list. | shared: port the parser to the C core so it isn't written twice |
 | 14 | **Translucency** (frosted overlay) | **M**. GTK4 transparent window; compositor-dependent. | **M**. `WS_EX_LAYERED` + DWM; workable. | Linux compositor variance |
+
+## Record button, exact spec and morph
+
+From `OverlayWindow.swift:135-149,329-353` (macOS ground truth):
+
+| Property | Value |
+|---|---|
+| Size | 40 x 40 pt |
+| Fill | `#FF3B30` in **both** states (shape carries state, not color) |
+| Idle | circle: corner radius **20** (half the size) |
+| Recording | rounded square: corner radius **6** |
+| Transition | animate the corner radius 20 <-> 6 over **0.15 s** |
+| Label | none (the status line carries "recording..." / elapsed) |
+
+Morph feasibility:
+- **Linux**: a `GtkDrawingArea` re-drawing a rounded rect whose radius is eased
+  from 20 to 6 over 150ms on the frame clock (the waveform already ticks), or
+  pure CSS `border-radius` + `transition: border-radius 150ms` toggled by a
+  state style class. Either is **S-M**; CSS is the least code.
+- **Windows**: already custom-drawn; keep a `float radius` in `BooApp`, ease it
+  toward the target (20 idle / 6 recording) each `WM_TIMER` tick, and pass it to
+  `RoundRect`. The 33ms waveform timer gives ~5 frames across 150ms. **S**, and
+  the smoothest option since the paint loop already exists.
+
+Both are compile-verifiable; the animation smoothness itself is a real-hardware
+UAT item.
 
 ## Recommended sequencing
 
