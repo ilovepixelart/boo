@@ -4,8 +4,15 @@
 // "active window tracking" ignores the style, per Raymond Chen), and manual
 // dragging via SetCapture + SWP_NOACTIVATE (an HTCAPTION drag activates).
 //
+// Visual language mirrors the macOS reference (docs/ui-spec.md): 400x500 dark
+// overlay, 3-state waveform, a stack of transcript cards with copy/dismiss,
+// a persistent ctrl+shift+space hint, and the 40px record disc that morphs
+// from circle (radius 20) to rounded square (radius 6) while recording.
+//
 // Transcription runs on a worker thread (boo_transcribe is synchronous) and
-// posts the result back to this window as BOO_MSG_TRANSCRIBED.
+// posts the result back as BOO_MSG_TRANSCRIBED; a second background thread
+// polls boo_stream_tick while recording and posts committed text as
+// BOO_MSG_LIVE (the provisional dim card).
 
 #include "overlay.h"
 
@@ -17,6 +24,7 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <windowsx.h>
 
@@ -28,38 +36,91 @@
 #define DWMWCP_ROUND 2
 #endif
 
-// Base layout in 96-dpi pixels.
-#define BASE_W   380
-#define BASE_H   230
-#define MARGIN   16
-#define WAVE_H   64
-#define STATUS_H 18
-#define BUTTON_W 120
-#define BUTTON_H 32
+// Base layout in 96-dpi pixels; geometry from the macOS reference.
+#define BASE_W      400
+#define BASE_H      500
+#define MARGIN      12
+#define WAVE_TOP    20
+#define WAVE_H      48
+#define STATUS_H    16
+#define BUTTON_SIZE 40
+#define CLOSE_SIZE  22
+#define CARD_RADIUS 10
+#define CARD_GAP    8
+#define CARD_PAD_X  12
+#define HEADER_H    20
+#define ICON_SIZE   12
+// Per-card display cap; the clipboard always carries the full text.
+#define CARD_MAX_UNITS 4096
 
 typedef struct {
-    COLORREF bg, text, subtext, accent, danger, button_text;
+    COLORREF bg, text, subtext, record, wave_idle, wave_rec, wave_think, card, card_live;
 } Palette;
 
 // GDI/interaction state. One overlay per process (single-instance mutex), so
 // module statics are the whole story.
 static HFONT font_text;
-static HFONT font_status;
+static HFONT font_mono;
 static bool dragging;
 static bool button_pressed;
 static POINT drag_cursor; // cursor position at drag start, screen coords
 static RECT drag_window;  // window rect at drag start
+// Record disc corner radius, eased toward its state target each paint tick to
+// animate the circle <-> rounded-square morph (reference: 20 <-> 6 over 150ms).
+static float button_radius = 20.0f;
+// Card hit regions, rebuilt on every paint; index pairs with drawn_card[].
+static RECT copy_hit[BOO_HISTORY_MAX];
+static RECT close_hit[BOO_HISTORY_MAX];
+static int drawn_card[BOO_HISTORY_MAX];
+static int drawn_count;
+// Copy feedback: which card's copy icon flashes, until this tick count.
+static int flash_card = -1;
+static ULONGLONG flash_until;
+// Close (hide) glyph hit region, top-right.
+static RECT close_box;
 
 static int px(int base, UINT dpi) {
     return MulDiv(base, (int)dpi, 96);
 }
 
+static COLORREF mix(COLORREF fg, COLORREF bg, float alpha) {
+    const int r = (int)(GetRValue(fg) * alpha + GetRValue(bg) * (1.0f - alpha));
+    const int g = (int)(GetGValue(fg) * alpha + GetGValue(bg) * (1.0f - alpha));
+    const int b = (int)(GetBValue(fg) * alpha + GetBValue(bg) * (1.0f - alpha));
+    return RGB(r, g, b);
+}
+
+// Tokens from the macOS reference's DEFAULT theme, "Ghostty Default Style
+// Dark" (docs/ui-spec.md): until Windows gains theme support these exact
+// values make it pixel-equivalent to a default-themed macOS build. The record
+// disc's #FF3B30 is the one color hardcoded on every platform. Card fills are
+// the reference's white@6%/white@3% pre-blended, since GDI has no alpha.
+// Light mode is the same accents over light-equivalent surfaces (the default
+// theme is dark; light follows the system toggle).
 static Palette palette(bool dark) {
-    if (dark)
-        return (Palette){RGB(32, 32, 32),   RGB(240, 240, 240), RGB(160, 160, 160),
-                         RGB(76, 194, 255), RGB(255, 99, 71),   RGB(16, 16, 16)};
-    return (Palette){RGB(246, 246, 246), RGB(20, 20, 20),  RGB(96, 96, 96),
-                     RGB(0, 103, 192),   RGB(196, 43, 28), RGB(255, 255, 255)};
+    const COLORREF record = RGB(0xFF, 0x3B, 0x30);
+    if (dark) {
+        const COLORREF bg = RGB(0x28, 0x2C, 0x34); // theme background
+        return (Palette){bg,
+                         RGB(0xFF, 0xFF, 0xFF), // theme foreground
+                         RGB(0x66, 0x66, 0x66), // palette[8], dim
+                         record,
+                         RGB(0x70, 0xC0, 0xB1), // palette[14], idle
+                         RGB(0xD5, 0x4E, 0x53), // palette[9], recording
+                         RGB(0xE7, 0xC5, 0x47), // palette[11], thinking
+                         mix(RGB(255, 255, 255), bg, 0.06f),
+                         mix(RGB(255, 255, 255), bg, 0.03f)};
+    }
+    const COLORREF bg = RGB(0xF6, 0xF6, 0xF6);
+    return (Palette){bg,
+                     RGB(0x14, 0x14, 0x14),
+                     RGB(0x6E, 0x6E, 0x6E),
+                     record,
+                     RGB(0x4E, 0x8F, 0x83),
+                     RGB(0xC2, 0x3B, 0x40),
+                     RGB(0xB4, 0x8A, 0x00),
+                     mix(RGB(0, 0, 0), bg, 0.06f),
+                     mix(RGB(0, 0, 0), bg, 0.03f)};
 }
 
 // Follows the system Apps theme. The documented WinRT route (UISettings) is
@@ -76,23 +137,23 @@ static bool system_dark(void) {
 
 static void make_fonts(UINT dpi) {
     if (font_text) DeleteObject(font_text);
-    if (font_status) DeleteObject(font_status);
+    if (font_mono) DeleteObject(font_mono);
     font_text = CreateFontW(-px(15, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    font_status = CreateFontW(-px(12, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    // The status/hint line is monospace in the reference.
+    font_mono = CreateFontW(-px(12, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
 }
 
 static RECT button_rect(HWND hwnd, UINT dpi) {
     RECT rc;
     GetClientRect(hwnd, &rc);
-    const int w = px(BUTTON_W, dpi);
-    const int h = px(BUTTON_H, dpi);
-    const int x = (rc.right - w) / 2;
-    const int y = rc.bottom - px(MARGIN, dpi) - h;
-    return (RECT){x, y, x + w, y + h};
+    const int s = px(BUTTON_SIZE, dpi);
+    const int x = (rc.right - s) / 2;
+    const int y = rc.bottom - px(MARGIN, dpi) - s;
+    return (RECT){x, y, x + s, y + s};
 }
 
 static void set_status(BooApp *app, const WCHAR *text) {
@@ -100,33 +161,117 @@ static void set_status(BooApp *app, const WCHAR *text) {
     app->status[ARRAYSIZE(app->status) - 1] = 0;
 }
 
-// ── recording lifecycle (mirrors linux/src/overlay_window.c) ──
+// The persistent hint the status line rests on when nothing is happening
+// (reference: the idle status literally reads the hotkey).
+static void set_status_idle(BooApp *app) {
+    set_status(app, app->hotkey_ok ? L"ctrl+shift+space" : L"click record to dictate");
+}
+
+void boo_overlay_status_idle(BooApp *app) {
+    set_status_idle(app);
+    InvalidateRect(app->overlay, NULL, FALSE);
+}
+
+// ── transcript history ──
+
+// Truncating wide copy of a UTF-8 transcript for display; the clipboard gets
+// the full text elsewhere. MultiByteToWideChar leaves the output undefined on
+// overflow, so an over-long text is converted from a boundary-aligned prefix.
+static WCHAR *card_dup(const char *utf8) {
+    WCHAR *out = malloc(CARD_MAX_UNITS * sizeof(WCHAR));
+    if (!out) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, out, CARD_MAX_UNITS) > 0) return out;
+
+    size_t len = CARD_MAX_UNITS - 2;
+    while (len > 0 && (utf8[len] & 0xC0) == 0x80) len--;
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, out, CARD_MAX_UNITS - 2);
+    if (n < 0) n = 0;
+    out[n] = L'…';
+    out[n + 1] = 0;
+    return out;
+}
+
+static void history_push(BooApp *app, const char *utf8) {
+    WCHAR *w = card_dup(utf8);
+    if (!w) return;
+    if (app->card_count == BOO_HISTORY_MAX) {
+        free(app->cards[0]);
+        memmove(&app->cards[0], &app->cards[1],
+                (BOO_HISTORY_MAX - 1) * sizeof(app->cards[0]));
+        app->card_count--;
+    }
+    app->cards[app->card_count++] = w;
+}
+
+static void history_remove(BooApp *app, int index) {
+    if (index < 0 || index >= app->card_count) return;
+    free(app->cards[index]);
+    memmove(&app->cards[index], &app->cards[index + 1],
+            (size_t)(app->card_count - index - 1) * sizeof(app->cards[0]));
+    app->card_count--;
+}
+
+static void live_set(BooApp *app, WCHAR *owned) {
+    free(app->live_text);
+    app->live_text = owned;
+}
+
+// ── recording lifecycle (mirrors the reference and linux/src/overlay_window.c) ──
 
 static DWORD WINAPI transcribe_worker(LPVOID param) {
     BooApp *app = param;
     const char *text = boo_transcribe(app->ctx);
-    // The context owns `text` and frees it on the next recording; the UI
-    // thread gets its own copy, released in the BOO_MSG_TRANSCRIBED handler.
-    // A failed post (window already destroyed) keeps ownership here.
+    // The context owns `text`; the UI thread gets its own copy, released in
+    // the BOO_MSG_TRANSCRIBED handler. A failed post keeps ownership here.
     char *copy = text ? _strdup(text) : NULL;
     if (!PostMessageW(app->overlay, BOO_MSG_TRANSCRIBED, 0, (LPARAM)copy)) free(copy);
     return 0;
 }
 
+// 250ms cadence, one background thread per take (the C API contract): a tick
+// is a cheap VAD scan until an utterance ends, then blocks for its inference.
+static DWORD WINAPI stream_tick_worker(LPVOID param) {
+    BooApp *app = param;
+    while (InterlockedCompareExchange(&app->stream_running, 0, 0)) {
+        if (boo_stream_tick(app->ctx)) {
+            const char *live = boo_get_live_transcript(app->ctx);
+            if (live) {
+                WCHAR *w = card_dup(live);
+                if (w && !PostMessageW(app->overlay, BOO_MSG_LIVE, 0, (LPARAM)w)) free(w);
+            }
+        }
+        Sleep(250);
+    }
+    return 0;
+}
+
+static void reap_stream_thread(BooApp *app) {
+    if (!app->stream_thread) return;
+    WaitForSingleObject(app->stream_thread, INFINITE);
+    CloseHandle(app->stream_thread);
+    app->stream_thread = NULL;
+}
+
 static void begin_transcription(BooApp *app) {
     app->ui_recording = false;
-    KillTimer(app->overlay, BOO_TIMER_WAVEFORM);
     KillTimer(app->overlay, BOO_TIMER_AUTO_STOP);
+    // The waveform timer keeps running: it drives the transcribing animation
+    // and the button's square->circle morph; BOO_MSG_TRANSCRIBED stops it.
+
+    // Signal the tick thread to wind down without joining here: a tick mid-
+    // inference would stall the UI thread. The core serializes tick against
+    // boo_transcribe; the handle is reaped before the next take or at exit.
+    InterlockedExchange(&app->stream_running, 0);
 
     boo_stop_recording(app->ctx);
     boo_tray_set_recording(app->overlay, false);
 
     app->transcribing = true;
-    set_status(app, L"Transcribing…");
+    set_status(app, L"thinking...");
     app->worker = CreateThread(NULL, 0, transcribe_worker, app, 0, NULL);
     if (!app->worker) {
         app->transcribing = false;
-        set_status(app, L"Could not start transcription");
+        set_status(app, L"could not start transcription");
     }
     InvalidateRect(app->overlay, NULL, FALSE);
 }
@@ -147,9 +292,13 @@ void boo_overlay_toggle_recording(BooApp *app) {
     boo_warm_up(app->ctx);
     boo_start_recording(app->ctx);
     app->ui_recording = true;
-    app->transcript[0] = 0;
-    set_status(app, L"");
+    live_set(app, NULL);
+    set_status(app, L"recording...");
     boo_tray_set_recording(app->overlay, true);
+
+    reap_stream_thread(app);
+    InterlockedExchange(&app->stream_running, 1);
+    app->stream_thread = CreateThread(NULL, 0, stream_tick_worker, app, 0, NULL);
 
     SetTimer(app->overlay, BOO_TIMER_WAVEFORM, 33, NULL);
     // The core stops capturing by itself at the recording cap; it can't
@@ -158,34 +307,17 @@ void boo_overlay_toggle_recording(BooApp *app) {
     InvalidateRect(app->overlay, NULL, FALSE);
 }
 
-// Convert for display, truncating deliberately when the transcript exceeds
-// the buffer (a 10-minute take can). MultiByteToWideChar leaves the output
-// undefined on overflow, so retry with a byte prefix that must fit: N UTF-8
-// bytes never yield more than N UTF-16 units. The clipboard gets it all.
-static void set_transcript_display(BooApp *app, const char *utf8) {
-    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, app->transcript,
-                            ARRAYSIZE(app->transcript)) > 0)
-        return;
-
-    size_t len = ARRAYSIZE(app->transcript) - 2;
-    // Back off to a character boundary so the cut cannot split a sequence.
-    while (len > 0 && (utf8[len] & 0xC0) == 0x80) len--;
-    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, app->transcript,
-                                ARRAYSIZE(app->transcript) - 2);
-    if (n < 0) n = 0;
-    app->transcript[n] = L'…';
-    app->transcript[n + 1] = 0;
-}
-
 static void on_transcribed(BooApp *app, char *text) {
     app->transcribing = false;
     if (app->worker) {
         CloseHandle(app->worker);
         app->worker = NULL;
     }
+    KillTimer(app->overlay, BOO_TIMER_WAVEFORM);
+    live_set(app, NULL);
 
     if (text && *text) {
-        set_transcript_display(app, text);
+        history_push(app, text);
 
         // paste_target may be a destroyed or even recycled HWND by now; safe
         // because delivery only pastes when it still equals the CURRENT
@@ -193,54 +325,192 @@ static void on_transcribed(BooApp *app, char *text) {
         // window the user is actually looking at.
         switch (boo_inject_deliver(app->overlay, app->paste_target, text)) {
         case BOO_DELIVER_PASTED:
-            set_status(app, L"Copied to clipboard and pasted");
+            set_status(app, L"copied to clipboard and pasted");
             break;
         case BOO_DELIVER_CLIPBOARD:
             // Also the elevated-window outcome: UIPI silently discards the
             // paste, so tell the user what still works.
-            set_status(app, L"Copied to clipboard, press Ctrl+V to paste");
+            set_status(app, L"copied, press Ctrl+V to paste");
             break;
         case BOO_DELIVER_FAILED:
-            set_status(app, L"Could not access the clipboard");
+            set_status(app, L"could not access the clipboard");
             break;
         }
+        // Let the confirmation read, then rest on the hint (reference: the
+        // idle status is the hotkey).
+        SetTimer(app->overlay, BOO_TIMER_STATUS, 2500, NULL);
     } else {
-        set_status(app, L"(no speech detected)");
+        set_status(app, L"no speech detected");
+        SetTimer(app->overlay, BOO_TIMER_STATUS, 2500, NULL);
     }
     free(text);
+    InvalidateRect(app->overlay, NULL, FALSE);
+}
+
+static void on_live_text(BooApp *app, WCHAR *owned) {
+    // A straggler tick can land after stop; the final card supersedes it.
+    if (!app->ui_recording) {
+        free(owned);
+        return;
+    }
+    live_set(app, owned);
     InvalidateRect(app->overlay, NULL, FALSE);
 }
 
 static void on_auto_stop_poll(BooApp *app) {
     if (!app->ui_recording) return;
     if (boo_is_recording(app->ctx)) return;
-    set_status(app, L"Maximum recording length reached");
+    set_status(app, L"max length reached");
     begin_transcription(app);
+}
+
+// Elapsed seconds into the status line while recording, like the reference.
+static void on_waveform_tick(BooApp *app) {
+    if (app->ui_recording) {
+        const int secs = boo_get_audio_samples(app->ctx) / 16000;
+        if (secs > 0) {
+            WCHAR buf[16];
+            swprintf(buf, ARRAYSIZE(buf), L"%ds", secs);
+            set_status(app, buf);
+            boo_tray_set_elapsed(app->overlay, secs);
+        }
+    }
+    InvalidateRect(app->overlay, NULL, FALSE);
 }
 
 // ── painting ──
 
-static const WCHAR *button_label(const BooApp *app) {
-    if (app->transcribing) return L"Transcribing…";
-    return app->ui_recording ? L"Stop" : L"Record";
+static void paint_icon_copy(HDC dc, RECT rc, COLORREF color) {
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ old_pen = SelectObject(dc, pen);
+    HGDIOBJ old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    // Two overlapping rounded rectangles, the doc.on.doc shape.
+    RoundRect(dc, rc.left + w / 4, rc.top, rc.right, rc.bottom - h / 4, 3, 3);
+    RoundRect(dc, rc.left, rc.top + h / 4, rc.right - w / 4, rc.bottom, 3, 3);
+    SelectObject(dc, old_brush);
+    SelectObject(dc, old_pen);
+    DeleteObject(pen);
 }
 
-static void paint_button(const BooApp *app, HDC dc, RECT rc, const Palette *pal) {
-    const COLORREF fill = app->ui_recording ? pal->danger : pal->accent;
-    HBRUSH brush = CreateSolidBrush(fill);
-    HPEN pen = CreatePen(PS_SOLID, 1, fill);
+static void paint_icon_close(HDC dc, RECT rc, COLORREF color, bool circled) {
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ old_pen = SelectObject(dc, pen);
+    HGDIOBJ old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    if (circled) Ellipse(dc, rc.left, rc.top, rc.right, rc.bottom);
+    const int inset = (rc.right - rc.left) * 3 / 10;
+    MoveToEx(dc, rc.left + inset, rc.top + inset, NULL);
+    LineTo(dc, rc.right - inset, rc.bottom - inset);
+    MoveToEx(dc, rc.right - inset, rc.top + inset, NULL);
+    LineTo(dc, rc.left + inset, rc.bottom - inset);
+    SelectObject(dc, old_brush);
+    SelectObject(dc, old_pen);
+    DeleteObject(pen);
+}
+
+static void fill_round(HDC dc, RECT rc, int radius, COLORREF color) {
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
     HGDIOBJ old_brush = SelectObject(dc, brush);
     HGDIOBJ old_pen = SelectObject(dc, pen);
-    const int radius = (rc.bottom - rc.top); // pill: full-height rounding
-    RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+    RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, radius * 2, radius * 2);
     SelectObject(dc, old_brush);
     SelectObject(dc, old_pen);
     DeleteObject(brush);
     DeleteObject(pen);
+}
 
-    SetTextColor(dc, app->transcribing ? pal->subtext : pal->button_text);
-    DrawTextW(dc, button_label(app), -1, &rc,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+// One transcript card; returns its height. When `measure_only`, nothing is
+// drawn (used to stack cards bottom-up). `hit` may be -1 for the live card.
+static int paint_card(HDC dc, const Palette *pal, UINT dpi, int top, int left, int right,
+                      const WCHAR *text, bool live, int hit, bool measure_only) {
+    const int pad_x = px(CARD_PAD_X, dpi);
+    const int header_h = live ? 0 : px(HEADER_H, dpi);
+    RECT text_rc = {left + pad_x, 0, right - pad_x, 0};
+    RECT measure = text_rc;
+    HGDIOBJ old_font = SelectObject(dc, font_text);
+    DrawTextW(dc, text, -1, &measure, DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+    const int text_h = measure.bottom - measure.top;
+    const int card_h =
+        header_h + (live ? px(8, dpi) : px(11, dpi)) + text_h + px(10, dpi);
+    if (measure_only) {
+        SelectObject(dc, old_font);
+        return card_h;
+    }
+
+    RECT card = {left, top, right, top + card_h};
+    fill_round(dc, card, px(CARD_RADIUS, dpi), live ? pal->card_live : pal->card);
+
+    if (!live && hit >= 0 && drawn_count < BOO_HISTORY_MAX) {
+        const int icon = px(ICON_SIZE, dpi);
+        const int inset = px(8, dpi);
+        RECT copy_rc = {left + inset, top + px(5, dpi), left + inset + icon,
+                        top + px(5, dpi) + icon};
+        RECT close_rc = {right - inset - icon, top + px(5, dpi), right - inset,
+                         top + px(5, dpi) + icon};
+        const bool flashing = hit == flash_card && GetTickCount64() < flash_until;
+        paint_icon_copy(dc, copy_rc, flashing ? RGB(131, 190, 177) : pal->subtext);
+        paint_icon_close(dc, close_rc, pal->subtext, true);
+        // Generous hit areas around the small glyphs.
+        InflateRect(&copy_rc, px(6, dpi), px(6, dpi));
+        InflateRect(&close_rc, px(6, dpi), px(6, dpi));
+        copy_hit[drawn_count] = copy_rc;
+        close_hit[drawn_count] = close_rc;
+        drawn_card[drawn_count] = hit;
+        drawn_count++;
+
+        // Hairline separator under the header.
+        RECT sep = {left + inset, top + header_h + px(2, dpi), right - inset,
+                    top + header_h + px(3, dpi)};
+        HBRUSH sep_brush = CreateSolidBrush(mix(pal->subtext, pal->card, 0.35f));
+        FillRect(dc, &sep, sep_brush);
+        DeleteObject(sep_brush);
+    }
+
+    text_rc.top = top + header_h + (live ? px(8, dpi) : px(11, dpi));
+    text_rc.bottom = text_rc.top + text_h;
+    SetTextColor(dc, live ? pal->subtext : pal->text);
+    DrawTextW(dc, text, -1, &text_rc, DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old_font);
+    return card_h;
+}
+
+// Stack cards chronologically with the newest ending just above `bottom`,
+// mirroring the reference's scroll-to-newest: newest cards win the space,
+// older ones fall off the top when the area is full.
+static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT area) {
+    drawn_count = 0;
+    const int gap = px(CARD_GAP, dpi);
+
+    int heights[BOO_HISTORY_MAX + 1];
+    int total = app->card_count + (app->live_text ? 1 : 0);
+    int idx = 0;
+    for (int i = 0; i < app->card_count; i++)
+        heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right, app->cards[i],
+                                    false, i, true);
+    if (app->live_text)
+        heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right,
+                                    app->live_text, true, -1, true);
+
+    // Find the first card that still fits when stacking up from the bottom.
+    int first = total;
+    int used = 0;
+    for (int i = total - 1; i >= 0; i--) {
+        const int need = heights[i] + (used > 0 ? gap : 0);
+        if (used + need > area.bottom - area.top) break;
+        used += need;
+        first = i;
+    }
+
+    int y = area.bottom - used;
+    for (int i = first; i < total; i++) {
+        const bool live = app->live_text && i == total - 1;
+        const WCHAR *text = live ? app->live_text : app->cards[i];
+        y += paint_card(dc, pal, dpi, y, area.left, area.right, text, live, live ? -1 : i,
+                        false) +
+             gap;
+    }
 }
 
 static void paint(BooApp *app, HWND hwnd) {
@@ -263,39 +533,52 @@ static void paint(BooApp *app, HWND hwnd) {
     DeleteObject(bg);
     SetBkMode(dc, TRANSPARENT);
 
-    RECT wave = {margin, margin, rc.right - margin, margin + px(WAVE_H, dpi)};
+    // Close (hide) glyph, top-right: the traffic-light analog on a borderless
+    // window. Paint-only, no child control, so it can never take focus.
+    const int close_s = px(CLOSE_SIZE, dpi);
+    close_box = (RECT){rc.right - margin - close_s, px(8, dpi), rc.right - margin,
+                       px(8, dpi) + close_s};
+    RECT close_glyph = close_box;
+    InflateRect(&close_glyph, -px(5, dpi), -px(5, dpi));
+    paint_icon_close(dc, close_glyph, pal.subtext, false);
+
+    // Waveform: idle dim cyan, recording red, transcribing orange breathing.
+    RECT wave = {margin, px(WAVE_TOP, dpi), rc.right - margin,
+                 px(WAVE_TOP, dpi) + px(WAVE_H, dpi)};
     int bars = 0;
     const float *waveform = boo_get_waveform(app->ctx, &bars);
-    boo_waveform_paint(dc, wave, waveform, bars, boo_get_peak_rms(app->ctx),
-                       app->ui_recording ? pal.accent : pal.subtext);
-
-    const RECT button = button_rect(hwnd, dpi);
-    RECT status = {margin, button.top - px(STATUS_H + 8, dpi), rc.right - margin,
-                   button.top - px(8, dpi)};
-    RECT text = {margin, wave.bottom + px(8, dpi), rc.right - margin,
-                 status.top - px(4, dpi)};
-
-    HGDIOBJ old_font = SelectObject(dc, font_text);
-    SetTextColor(dc, pal.text);
-    if (app->transcript[0]) {
-        DrawTextW(dc, app->transcript, -1, &text,
-                  DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
-    } else if (!app->ui_recording && !app->transcribing) {
-        SetTextColor(dc, pal.subtext);
-        DrawTextW(dc,
-                  app->hotkey_ok ? L"Press Ctrl+Shift+Space to dictate,\nor click Record."
-                                 : L"Click Record to dictate.",
-                  -1, &text, DT_WORDBREAK | DT_NOPREFIX);
+    BooWaveState wstate = BOO_WAVE_IDLE;
+    COLORREF wcolor = pal.wave_idle;
+    if (app->ui_recording) {
+        wstate = BOO_WAVE_RECORDING;
+        wcolor = pal.wave_rec;
+    } else if (app->transcribing) {
+        wstate = BOO_WAVE_TRANSCRIBING;
+        wcolor = pal.wave_think;
     }
+    boo_waveform_paint(dc, wave, waveform, bars, boo_get_peak_rms(app->ctx), wstate,
+                       wcolor, pal.bg, (float)(GetTickCount64() % 100000) / 1000.0f);
 
-    SelectObject(dc, font_status);
+    // Record disc: ease the corner radius toward its state target; ~0.4/tick
+    // at 33ms settles in about 150ms, the reference's animation length.
+    const RECT button = button_rect(hwnd, dpi);
+    const float target = app->ui_recording ? 6.0f : 20.0f;
+    button_radius += (target - button_radius) * 0.4f;
+    fill_round(dc, button, px((int)(button_radius + 0.5f), dpi), pal.record);
+
+    // Status line above the button: hint / recording / elapsed / thinking.
+    RECT status = {margin, button.top - px(STATUS_H + 8, dpi), rc.right - margin,
+                   button.top - px(6, dpi)};
+    HGDIOBJ old_font = SelectObject(dc, font_mono);
     SetTextColor(dc, pal.subtext);
     DrawTextW(dc, app->status, -1, &status,
-              DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-    SelectObject(dc, font_text);
-    paint_button(app, dc, button, &pal);
+              DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     SelectObject(dc, old_font);
+
+    // Transcript cards fill the middle.
+    RECT cards = {margin, wave.bottom + px(CARD_GAP, dpi), rc.right - margin,
+                  status.top - px(CARD_GAP, dpi)};
+    paint_cards(dc, app, &pal, dpi, cards);
 
     BitBlt(win_dc, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
     SelectObject(dc, old_bmp);
@@ -306,10 +589,65 @@ static void paint(BooApp *app, HWND hwnd) {
 
 // ── input ──
 
+static void copy_card_to_clipboard(BooApp *app, int index) {
+    if (index < 0 || index >= app->card_count) return;
+    const WCHAR *text = app->cards[index];
+    const SIZE_T bytes = (wcslen(text) + 1) * sizeof(WCHAR);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!mem) return;
+    WCHAR *dst = GlobalLock(mem);
+    if (!dst) {
+        GlobalFree(mem);
+        return;
+    }
+    memcpy(dst, text, bytes);
+    GlobalUnlock(mem);
+    if (!OpenClipboard(app->overlay)) {
+        GlobalFree(mem);
+        return;
+    }
+    EmptyClipboard();
+    if (!SetClipboardData(CF_UNICODETEXT, mem)) GlobalFree(mem);
+    CloseClipboard();
+
+    // Flash the copy icon, the reference's 0.5s confirmation.
+    flash_card = index;
+    flash_until = GetTickCount64() + 500;
+    InvalidateRect(app->overlay, NULL, FALSE);
+    SetTimer(app->overlay, BOO_TIMER_STATUS, 600, NULL); // repaint to unflash
+}
+
+// Returns true when the click landed on an interactive element.
+static bool handle_click(BooApp *app, HWND hwnd, POINT pt) {
+    if (PtInRect(&close_box, pt)) {
+        SendMessageW(hwnd, WM_CLOSE, 0, 0);
+        return true;
+    }
+    for (int i = 0; i < drawn_count; i++) {
+        if (PtInRect(&copy_hit[i], pt)) {
+            copy_card_to_clipboard(app, drawn_card[i]);
+            return true;
+        }
+        if (PtInRect(&close_hit[i], pt)) {
+            history_remove(app, drawn_card[i]);
+            InvalidateRect(hwnd, NULL, FALSE);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool over_interactive(HWND hwnd, POINT pt) {
+    const RECT button = button_rect(hwnd, GetDpiForWindow(hwnd));
+    if (PtInRect(&button, pt) || PtInRect(&close_box, pt)) return true;
+    for (int i = 0; i < drawn_count; i++)
+        if (PtInRect(&copy_hit[i], pt) || PtInRect(&close_hit[i], pt)) return true;
+    return false;
+}
+
 static void on_mouse_down(BooApp *app, HWND hwnd, LPARAM lparam) {
     const POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-    const RECT button = button_rect(hwnd, GetDpiForWindow(hwnd));
-    if (PtInRect(&button, pt)) {
+    if (over_interactive(hwnd, pt)) {
         button_pressed = true;
         SetCapture(hwnd);
         return;
@@ -338,6 +676,7 @@ static void on_mouse_up(BooApp *app, HWND hwnd, LPARAM lparam) {
     if (!button_pressed) return;
     button_pressed = false;
     const POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    if (handle_click(app, hwnd, pt)) return;
     const RECT button = button_rect(hwnd, GetDpiForWindow(hwnd));
     if (PtInRect(&button, pt)) boo_overlay_toggle_recording(app);
 }
@@ -395,13 +734,21 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case BOO_MSG_TRANSCRIBED:
         on_transcribed(app, (char *)lparam);
         return 0;
+    case BOO_MSG_LIVE:
+        on_live_text(app, (WCHAR *)lparam);
+        return 0;
     case WM_COMMAND:
         if (LOWORD(wparam) == BOO_CMD_TOGGLE_RECORD) boo_overlay_toggle_recording(app);
         if (LOWORD(wparam) == BOO_CMD_QUIT) DestroyWindow(hwnd);
         return 0;
     case WM_TIMER:
-        if (wparam == BOO_TIMER_WAVEFORM) InvalidateRect(hwnd, NULL, FALSE);
+        if (wparam == BOO_TIMER_WAVEFORM) on_waveform_tick(app);
         if (wparam == BOO_TIMER_AUTO_STOP) on_auto_stop_poll(app);
+        if (wparam == BOO_TIMER_STATUS) {
+            KillTimer(hwnd, BOO_TIMER_STATUS);
+            if (!app->ui_recording && !app->transcribing) set_status_idle(app);
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
         return 0;
     case WM_PAINT:
         paint(app, hwnd);
@@ -423,11 +770,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         return 0;
     }
     case WM_CLOSE:
-        ShowWindow(hwnd, SW_HIDE); // tray apps hide; Quit lives in the menu
+        ShowWindow(hwnd, SW_HIDE); // tray apps hide; Quit lives in the tray menu
         return 0;
     case WM_DESTROY:
         KillTimer(hwnd, BOO_TIMER_WAVEFORM);
         KillTimer(hwnd, BOO_TIMER_AUTO_STOP);
+        KillTimer(hwnd, BOO_TIMER_STATUS);
+        InterlockedExchange(&app->stream_running, 0);
         boo_hotkey_unregister(hwnd);
         boo_tray_remove(hwnd);
         PostQuitMessage(0);
@@ -456,6 +805,7 @@ HWND boo_overlay_create(BooApp *app) {
     if (!hwnd) return NULL;
     app->overlay = hwnd;
     app->dark = system_dark();
+    set_status_idle(app);
 
     const UINT dpi = GetDpiForWindow(hwnd);
     make_fonts(dpi);
@@ -466,13 +816,13 @@ HWND boo_overlay_create(BooApp *app) {
     const DWORD corner = DWMWCP_ROUND;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
-    // Bottom-right of the primary work area, like a notification.
+    // Top-right of the primary work area, like the reference.
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int w = px(BASE_W, dpi);
     const int h = px(BASE_H, dpi);
-    SetWindowPos(hwnd, NULL, work.right - w - px(24, dpi), work.bottom - h - px(24, dpi),
-                 w, h, SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(hwnd, NULL, work.right - w - px(20, dpi), work.top + px(50, dpi), w, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER);
 
     return hwnd;
 }

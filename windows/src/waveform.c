@@ -1,41 +1,77 @@
-// Waveform bars in plain GDI. Forty solid rectangles at ~30fps is microseconds
-// of CPU; Direct2D would add COM, device management and device-lost handling
-// for no visible difference at this scale.
+// Waveform bars in plain GDI, mirroring macos/Sources/WaveformView.swift:
+// center-symmetric rounded bars, lerp-smoothed, three states. The reference
+// varies per-bar alpha; GDI has no alpha for fills, so each bar's color is
+// blended toward the window background by the same factor, which reads the
+// same over a solid backdrop.
 
 #include "waveform.h"
 
+#include <math.h>
+
+// Smoothing state. One overlay per process, so module statics suffice.
+static float smoothed[64];
+
+static COLORREF blend(COLORREF fg, COLORREF bg, float alpha) {
+    if (alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    const int r = (int)(GetRValue(fg) * alpha + GetRValue(bg) * (1.0f - alpha));
+    const int g = (int)(GetGValue(fg) * alpha + GetGValue(bg) * (1.0f - alpha));
+    const int b = (int)(GetBValue(fg) * alpha + GetBValue(bg) * (1.0f - alpha));
+    return RGB(r, g, b);
+}
+
+static void bar(HDC dc, int x, int center_y, int w, int h, COLORREF color) {
+    if (h < 2) h = 2;
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ old_brush = SelectObject(dc, brush);
+    HGDIOBJ old_pen = SelectObject(dc, pen);
+    // Rounded ends, like the reference's capsule bars.
+    const int round = w < h ? w : h;
+    RoundRect(dc, x, center_y - h / 2, x + w, center_y - h / 2 + h, round, round);
+    SelectObject(dc, old_brush);
+    SelectObject(dc, old_pen);
+    DeleteObject(brush);
+    DeleteObject(pen);
+}
+
 void boo_waveform_paint(HDC dc, RECT rc, const float *bars, int n, float peak,
-                        COLORREF color) {
+                        BooWaveState state, COLORREF color, COLORREF bg, float phase) {
     if (n <= 0) return;
+    if (n > (int)(sizeof(smoothed) / sizeof(smoothed[0])))
+        n = (int)(sizeof(smoothed) / sizeof(smoothed[0]));
+
+    // Reference smoothing: fast attack while recording, slow settle otherwise.
+    const float lerp = state == BOO_WAVE_RECORDING ? 0.25f : 0.1f;
+    for (int i = 0; i < n; i++) smoothed[i] += (bars[i] - smoothed[i]) * lerp;
 
     const int width = rc.right - rc.left;
     const int height = rc.bottom - rc.top;
-    const int gap = 2;
+    const int gap = 3;
     const int bar_w = (width - gap * (n - 1)) / n;
-    if (bar_w < 1) return;
+    if (bar_w < 2) return;
+    const int center_y = rc.top + height / 2;
+    const float max_h = (float)height * 0.75f;
 
-    HBRUSH brush = CreateSolidBrush(color);
     for (int i = 0; i < n; i++) {
-        float v = bars[i];
-        if (v < 0.0f) v = 0.0f;
-        if (v > 1.0f) v = 1.0f;
-        int bar_h = (int)(v * (float)height);
-        if (bar_h < 2) bar_h = 2; // idle bars stay visible as a baseline
-        RECT bar = {
-            .left = rc.left + i * (bar_w + gap),
-            .top = rc.bottom - bar_h,
-            .right = rc.left + i * (bar_w + gap) + bar_w,
-            .bottom = rc.bottom,
-        };
-        FillRect(dc, &bar, brush);
+        const int x = rc.left + i * (bar_w + gap);
+        // Center bars slightly brighter, like the reference.
+        const float center = 1.0f - fabsf((float)i / (float)n - 0.5f) *
+                                        (state == BOO_WAVE_TRANSCRIBING ? 0.6f : 0.4f);
+        float h;
+        float alpha;
+        if (state == BOO_WAVE_RECORDING) {
+            const float norm = peak > 0.001f ? fminf(smoothed[i] / peak, 1.0f) : 0.0f;
+            h = norm * max_h;
+            alpha = (0.3f + norm * 0.7f) * center;
+        } else if (state == BOO_WAVE_TRANSCRIBING) {
+            const float wave = (sinf(phase * 2.0f + (float)i * 0.12f) + 1.0f) / 2.0f;
+            h = wave * max_h * 0.25f + 3.0f;
+            alpha = (0.2f + wave * 0.4f) * center;
+        } else {
+            h = 3.0f;
+            alpha = 0.2f;
+        }
+        bar(dc, x, center_y, bar_w, (int)h, blend(color, bg, alpha));
     }
-
-    // Peak level line, instant attack / slow decay, computed by the core.
-    if (peak > 0.01f) {
-        if (peak > 1.0f) peak = 1.0f;
-        int y = rc.bottom - (int)(peak * (float)height);
-        RECT line = {.left = rc.left, .top = y, .right = rc.right, .bottom = y + 1};
-        FillRect(dc, &line, brush);
-    }
-    DeleteObject(brush);
 }
