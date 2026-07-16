@@ -56,6 +56,18 @@
   </requires>
 
   <releases>
+    <release version="0.4.0" date="2026-07-16">
+      <description>
+        <p>The consistency release: Linux now looks and behaves like the macOS build, plus a broad reliability and security pass.</p>
+        <ul>
+          <li>The overlay adopts the macOS design language: a stack of transcript cards with per-card copy and dismiss, the round record button that becomes a square while recording, a waveform that colours itself for idle, recording and transcribing, and a status line that always shows the hotkey and counts the seconds while you talk.</li>
+          <li>Whisper no longer invents text out of silence: non-speech annotations such as [BLANK_AUDIO] are dropped, and low-confidence segments are filtered.</li>
+          <li>Starting a new recording while the previous one is still transcribing is now handled safely instead of racing.</li>
+          <li>The optional VAD model download is verified against a pinned checksum before use, and portal tokens now come from the system random source.</li>
+          <li>The waveform stops redrawing when idle, so an open window no longer costs battery.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-07-16">
       <description>
         <p>The Windows release: Boo gains an experimental third platform. Nothing changes on Linux.</p>
