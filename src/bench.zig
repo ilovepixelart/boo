@@ -95,7 +95,7 @@ const Timer = struct {
     }
 };
 
-pub fn main(init: std.process.Init.Minimal) !void {
+pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.c_allocator;
 
     var model_arg: ?[:0]const u8 = null;
@@ -114,7 +114,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // no warm-up, no warm runs, no stream batch comparison.
     var quick = false;
 
-    var args = std.process.Args.Iterator.init(init.args);
+    // iterateAllocator rather than Args.Iterator.init: the plain iterator is
+    // POSIX-only (Windows argv arrives WTF-16 and needs an allocator to
+    // convert). Deinit at end of main, after the parsed slices' last use.
+    var args = try init.minimal.args.iterateAllocator(allocator);
+    defer args.deinit();
     _ = args.skip();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--cpu")) {
