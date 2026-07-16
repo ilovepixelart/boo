@@ -14,12 +14,18 @@
 typedef struct {
     BooContext *ctx;
     GtkWindow *window;
-    GtkLabel *transcript_label;
+    GtkBox *card_stack; // transcript history, chronological, newest last
+    GtkScrolledWindow *scroller;
+    GtkWidget *live_card; // provisional streaming card, NULL when absent
+    GtkLabel *live_label; // its text label
+    GtkLabel *hint_label; // status line: hotkey hint / elapsed / thinking...
     GtkButton *record_button;
     GtkWidget *waveform;
     AdwToastOverlay *toast_overlay;
     BooGlobalShortcut *shortcut;
     BooTextInject *inject;
+    guint hint_reset; // 0 == no pending reset to the idle hint
+    gboolean hotkey_ok;
 
     // The UI's own view of whether we're recording. Deliberately not
     // boo_is_recording(): the core clears that when it hits the recording cap.
@@ -45,9 +51,10 @@ typedef struct {
 
 static void window_state_free(gpointer data) {
     WindowState *state = data;
-    // Cancel the auto-stop poll first: closing the window mid-recording would
-    // otherwise leave a timer firing against freed state.
+    // Cancel the timers first: closing the window mid-recording would
+    // otherwise leave them firing against freed state.
     if (state->auto_stop_poll != 0) g_source_remove(state->auto_stop_poll);
+    if (state->hint_reset != 0) g_source_remove(state->hint_reset);
     // The tick thread reads this state; it must be gone before the free.
     if (state->stream_thread) {
         g_atomic_int_set(&state->stream_running, 0);
@@ -74,29 +81,138 @@ static void copy_to_clipboard(WindowState *st, const char *text) {
     gdk_clipboard_set_text(clipboard, text);
 }
 
+// ── status line (the reference's persistent hotkey hint) ──
+
+static void set_hint(WindowState *st, const char *text) {
+    gtk_label_set_text(st->hint_label, text);
+}
+
+static void set_hint_idle(WindowState *st) {
+    set_hint(st, st->hotkey_ok ? "ctrl+shift+space" : "click record to dictate");
+}
+
+static gboolean hint_reset_cb(gpointer data) {
+    WindowState *st = data;
+    st->hint_reset = 0;
+    if (!st->ui_recording) set_hint_idle(st);
+    return G_SOURCE_REMOVE;
+}
+
+// Show a transient status, then settle back on the idle hint.
+static void set_hint_transient(WindowState *st, const char *text) {
+    set_hint(st, text);
+    if (st->hint_reset != 0) g_source_remove(st->hint_reset);
+    st->hint_reset = g_timeout_add(2500, hint_reset_cb, st);
+}
+
 static void set_button_idle(WindowState *st) {
-    gtk_button_set_label(st->record_button, "Record");
     gtk_widget_set_sensitive(GTK_WIDGET(st->record_button), TRUE);
-    gtk_widget_remove_css_class(GTK_WIDGET(st->record_button), "destructive-action");
-    gtk_widget_add_css_class(GTK_WIDGET(st->record_button), "suggested-action");
+    gtk_widget_remove_css_class(GTK_WIDGET(st->record_button), "boo-recording");
 }
 
 static void set_button_recording(WindowState *st) {
-    gtk_button_set_label(st->record_button, "Stop");
-    gtk_widget_remove_css_class(GTK_WIDGET(st->record_button), "suggested-action");
-    gtk_widget_add_css_class(GTK_WIDGET(st->record_button), "destructive-action");
+    gtk_widget_add_css_class(GTK_WIDGET(st->record_button), "boo-recording");
 }
 
-// Show committed-so-far text, dimmed, while still recording. Ordering with
-// the final transcript is safe: both this and transcribe_done run on the main
-// loop, and begin_transcription clears ui_recording there first, so a stale
-// live update queued behind the final text drops itself instead of
-// overwriting it.
+// ── transcript cards (reference anatomy: docs/ui-spec.md) ──
+
+static gboolean unflash_copy(gpointer data) {
+    gtk_widget_remove_css_class(GTK_WIDGET(data), "boo-flash");
+    return G_SOURCE_REMOVE;
+}
+
+static void on_card_copy(GtkButton *btn, gpointer user_data) {
+    WindowState *st = user_data;
+    GtkWidget *card = g_object_get_data(G_OBJECT(btn), "boo-card");
+    const char *text = g_object_get_data(G_OBJECT(card), "boo-text");
+    if (text) copy_to_clipboard(st, text);
+    // The reference flashes the copy icon cyan for half a second.
+    gtk_widget_add_css_class(GTK_WIDGET(btn), "boo-flash");
+    g_timeout_add_full(G_PRIORITY_DEFAULT, 500, unflash_copy, g_object_ref(btn),
+                       g_object_unref);
+}
+
+static void on_card_dismiss(GtkButton *btn, gpointer user_data) {
+    WindowState *st = user_data;
+    GtkWidget *card = g_object_get_data(G_OBJECT(btn), "boo-card");
+    gtk_box_remove(st->card_stack, card);
+}
+
+// Keep the newest card visible after layout settles, the reference's
+// scroll-to-newest.
+static gboolean scroll_to_newest(gpointer data) {
+    WindowState *st = data;
+    GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(st->scroller);
+    gtk_adjustment_set_value(vadj, gtk_adjustment_get_upper(vadj) -
+                                       gtk_adjustment_get_page_size(vadj));
+    return G_SOURCE_REMOVE;
+}
+
+// A transcript card: header (copy … dismiss), separator, wrapped text.
+// `live` cards are the dimmer provisional streaming variant with no header.
+static GtkWidget *card_new(WindowState *st, const char *text, gboolean live) {
+    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_add_css_class(card, live ? "boo-card-live" : "boo-card");
+
+    if (!live) {
+        g_object_set_data_full(G_OBJECT(card), "boo-text", g_strdup(text), g_free);
+
+        GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        GtkWidget *copy = gtk_button_new_from_icon_name("edit-copy-symbolic");
+        gtk_widget_add_css_class(copy, "flat");
+        gtk_widget_add_css_class(copy, "boo-card-btn");
+        g_object_set_data(G_OBJECT(copy), "boo-card", card);
+        g_signal_connect(copy, "clicked", G_CALLBACK(on_card_copy), st);
+        gtk_box_append(GTK_BOX(header), copy);
+
+        GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_set_hexpand(spacer, TRUE);
+        gtk_box_append(GTK_BOX(header), spacer);
+
+        GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+        gtk_widget_add_css_class(close, "flat");
+        gtk_widget_add_css_class(close, "boo-card-btn");
+        g_object_set_data(G_OBJECT(close), "boo-card", card);
+        g_signal_connect(close, "clicked", G_CALLBACK(on_card_dismiss), st);
+        gtk_box_append(GTK_BOX(header), close);
+
+        gtk_box_append(GTK_BOX(card), header);
+        gtk_box_append(GTK_BOX(card), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    }
+
+    GtkWidget *label = gtk_label_new(text);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_label_set_selectable(GTK_LABEL(label), !live);
+    gtk_box_append(GTK_BOX(card), label);
+    if (live) g_object_set_data(G_OBJECT(card), "boo-live-label", label);
+
+    return card;
+}
+
+static void live_card_remove(WindowState *st) {
+    if (!st->live_card) return;
+    gtk_box_remove(st->card_stack, st->live_card);
+    st->live_card = NULL;
+    st->live_label = NULL;
+}
+
+// Show committed-so-far text in the dim provisional card while recording.
+// Ordering with the final transcript is safe: both this and transcribe_done
+// run on the main loop, and begin_transcription clears ui_recording there
+// first, so a stale live update queued behind the final text drops itself.
 static gboolean live_text_update(gpointer user_data) {
     TranscribeResult *res = user_data;
-    if (res->state->ui_recording && res->text && *res->text) {
-        gtk_widget_add_css_class(GTK_WIDGET(res->state->transcript_label), "dim-label");
-        gtk_label_set_text(res->state->transcript_label, res->text);
+    WindowState *st = res->state;
+    if (st->ui_recording && res->text && *res->text) {
+        if (!st->live_card) {
+            st->live_card = card_new(st, "", TRUE);
+            st->live_label =
+                GTK_LABEL(g_object_get_data(G_OBJECT(st->live_card), "boo-live-label"));
+            gtk_box_append(st->card_stack, st->live_card);
+        }
+        gtk_label_set_text(st->live_label, res->text);
+        g_idle_add(scroll_to_newest, st);
     }
     g_free(res->text);
     g_free(res);
@@ -127,11 +243,15 @@ static gboolean transcribe_done(gpointer user_data) {
     TranscribeResult *res = user_data;
     WindowState *state = res->state;
 
-    gtk_widget_remove_css_class(GTK_WIDGET(state->transcript_label), "dim-label");
+    // The provisional live card is superseded by the final transcript card
+    // (or by "no speech") either way.
+    live_card_remove(state);
     if (res->text && *res->text) {
-        gtk_label_set_text(state->transcript_label, res->text);
+        gtk_box_append(state->card_stack, card_new(state, res->text, FALSE));
+        g_idle_add(scroll_to_newest, state);
         copy_to_clipboard(state, res->text);
         show_toast(state, "Copied to clipboard");
+        set_hint_idle(state);
         // When dictation was triggered by the global hotkey, focus stayed in
         // the target app, auto-paste there. When our own window is focused
         // (Record button click), pasting would land back in Boo; skip it.
@@ -139,7 +259,7 @@ static gboolean transcribe_done(gpointer user_data) {
             boo_text_inject_paste(state->inject);
         }
     } else {
-        gtk_label_set_text(state->transcript_label, "(no speech detected)");
+        set_hint_transient(state, "no speech detected");
     }
     set_button_idle(state);
 
@@ -174,7 +294,8 @@ static void begin_transcription(WindowState *state) {
     g_atomic_int_set(&state->stream_running, 0);
 
     boo_stop_recording(state->ctx);
-    gtk_button_set_label(state->record_button, "Transcribing…");
+    set_hint(state, "thinking...");
+    set_button_idle(state);
     gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
     // Reap the prior take's thread (long finished by now) before replacing the
     // handle, so a completed thread is never leaked.
@@ -188,7 +309,16 @@ static void begin_transcription(WindowState *state) {
 static gboolean check_auto_stop(gpointer data) {
     WindowState *state = data;
     if (!state->ui_recording) return G_SOURCE_REMOVE;
-    if (boo_is_recording(state->ctx)) return G_SOURCE_CONTINUE;
+    if (boo_is_recording(state->ctx)) {
+        // Live elapsed time in the status line, like the reference.
+        const int secs = boo_get_audio_samples(state->ctx) / 16000;
+        if (secs > 0) {
+            char buf[16];
+            g_snprintf(buf, sizeof(buf), "%ds", secs);
+            set_hint(state, buf);
+        }
+        return G_SOURCE_CONTINUE;
+    }
 
     show_toast(state, "Maximum recording length reached");
     state->auto_stop_poll = 0; // about to be removed; don't remove twice
@@ -217,7 +347,8 @@ static void toggle_recording(WindowState *state) {
 
         boo_warm_up(state->ctx);
         boo_start_recording(state->ctx);
-        gtk_label_set_text(state->transcript_label, "");
+        live_card_remove(state);
+        set_hint(state, "recording...");
         set_button_recording(state);
 
         state->ui_recording = TRUE;
@@ -250,19 +381,48 @@ static void on_shortcut_unavailable(const char *reason, gpointer user_data) {
         g_strdup_printf("Hotkey unavailable: %s. Use the Record button.", reason);
     show_toast(state, msg);
 
-    gtk_label_set_text(state->transcript_label,
-                       "Ctrl+Shift+Space is not available on this desktop.\n"
-                       "Press Record instead.");
+    // The idle status line advertises the hotkey; stop promising one.
+    state->hotkey_ok = FALSE;
+    if (!state->ui_recording) set_hint_idle(state);
 }
+
+// Design tokens from the macOS reference's default theme (docs/ui-spec.md):
+// until Linux gains theme support these exact values make it match a
+// default-themed macOS build. #FF3B30 is the one cross-platform hardcode.
+// The record disc's border-radius transition IS the circle-to-rounded-square
+// morph (20px idle, 6px recording, 150ms), driven by the .boo-recording class.
+static const char *BOO_CSS =
+    "window.boo, window.boo headerbar { background: #282c34; color: #eaeaea; }\n"
+    ".boo-card { background: alpha(#ffffff, 0.06); border-radius: 10px;"
+    "  padding: 8px 12px; color: #ffffff; }\n"
+    ".boo-card-live { background: alpha(#ffffff, 0.03); border-radius: 10px;"
+    "  padding: 8px 12px; color: #666666; }\n"
+    ".boo-card-btn { color: #666666; min-width: 0; min-height: 0; padding: 2px; }\n"
+    ".boo-card-btn.boo-flash { color: #70c0b1; }\n"
+    ".boo-hint { color: #666666; font-family: monospace; font-size: 11pt; }\n"
+    "button.boo-record { background: #ff3b30; min-width: 40px; min-height: 40px;"
+    "  padding: 0; border-radius: 20px; transition: border-radius 150ms ease;"
+    "  background-image: none; border: none; box-shadow: none; }\n"
+    "button.boo-record.boo-recording { border-radius: 6px; }\n";
 
 GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     GtkWidget *window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Boo");
-    gtk_window_set_default_size(GTK_WINDOW(window), 480, 240);
+    // The reference geometry.
+    gtk_window_set_default_size(GTK_WINDOW(window), 400, 500);
+    gtk_widget_add_css_class(window, "boo");
+
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(css, BOO_CSS);
+    gtk_style_context_add_provider_for_display(gtk_widget_get_display(window),
+                                               GTK_STYLE_PROVIDER(css),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(css);
 
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
     state->window = GTK_WINDOW(window);
+    state->hotkey_ok = TRUE; // downgraded by on_shortcut_unavailable
     g_object_set_data_full(G_OBJECT(window), "boo-state", state, window_state_free);
 
     AdwHeaderBar *header = ADW_HEADER_BAR(adw_header_bar_new());
@@ -271,30 +431,39 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     gtk_box_append(GTK_BOX(content), GTK_WIDGET(header));
 
     GtkWidget *body = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_top(body, 16);
-    gtk_widget_set_margin_bottom(body, 16);
-    gtk_widget_set_margin_start(body, 16);
-    gtk_widget_set_margin_end(body, 16);
+    gtk_widget_set_margin_top(body, 12);
+    gtk_widget_set_margin_bottom(body, 12);
+    gtk_widget_set_margin_start(body, 12);
+    gtk_widget_set_margin_end(body, 12);
 
     state->waveform = boo_waveform_widget_new(ctx);
-    gtk_widget_set_size_request(state->waveform, -1, 64);
+    gtk_widget_set_size_request(state->waveform, -1, 48);
     gtk_box_append(GTK_BOX(body), state->waveform);
 
+    // Transcript history: a stack of cards in a scroller, newest last.
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(scroller, TRUE);
-    state->transcript_label = GTK_LABEL(gtk_label_new(""));
-    gtk_label_set_wrap(state->transcript_label, TRUE);
-    gtk_label_set_xalign(state->transcript_label, 0.0);
-    gtk_label_set_yalign(state->transcript_label, 0.0);
-    gtk_label_set_selectable(state->transcript_label, TRUE);
+    state->scroller = GTK_SCROLLED_WINDOW(scroller);
+    state->card_stack = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 8));
+    gtk_widget_set_valign(GTK_WIDGET(state->card_stack), GTK_ALIGN_START);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller),
-                                  GTK_WIDGET(state->transcript_label));
+                                  GTK_WIDGET(state->card_stack));
     gtk_box_append(GTK_BOX(body), scroller);
 
-    state->record_button = GTK_BUTTON(gtk_button_new_with_label("Record"));
-    gtk_widget_add_css_class(GTK_WIDGET(state->record_button), "suggested-action");
-    gtk_widget_add_css_class(GTK_WIDGET(state->record_button), "pill");
+    // The persistent status line: the visible hotkey at rest.
+    state->hint_label = GTK_LABEL(gtk_label_new(""));
+    gtk_widget_add_css_class(GTK_WIDGET(state->hint_label), "boo-hint");
+    gtk_box_append(GTK_BOX(body), GTK_WIDGET(state->hint_label));
+    set_hint_idle(state);
+
+    // The record disc (empty label; the shape and color carry the state).
+    state->record_button = GTK_BUTTON(gtk_button_new());
+    gtk_widget_add_css_class(GTK_WIDGET(state->record_button), "boo-record");
     gtk_widget_set_halign(GTK_WIDGET(state->record_button), GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(state->record_button),
+                                "Record (Ctrl+Shift+Space)");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(state->record_button),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, "Record", -1);
     g_signal_connect(state->record_button, "clicked", G_CALLBACK(on_record_clicked),
                      state);
     gtk_box_append(GTK_BOX(body), GTK_WIDGET(state->record_button));
