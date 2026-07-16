@@ -17,6 +17,11 @@
 #define VAD_MODEL_NAME "ggml-silero-v6.2.0.bin"
 #define VAD_MODEL_URL                                                                    \
     "https://huggingface.co/ggml-org/whisper-vad/resolve/main/" VAD_MODEL_NAME
+// Pinned SHA-256 (HuggingFace LFS oid). The download is over TLS, but pinning
+// defends against a compromised mirror handing a substituted GGUF to the ggml
+// parser, and rejects a truncated or oversized body before it is written.
+#define VAD_MODEL_SHA256                                                                 \
+    "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
 
 typedef struct {
     BooContext *ctx;
@@ -188,6 +193,15 @@ static void on_vad_downloaded(GObject *source, GAsyncResult *result, gpointer us
     if (!bytes || status != SOUP_STATUS_OK) {
         g_warning("Boo: VAD model download failed (%s); staying in batch mode",
                   error ? error->message : soup_status_get_phrase(status));
+        g_object_unref(session);
+        return;
+    }
+
+    // Verify integrity before trusting the bytes: a mismatch means a corrupt,
+    // truncated, or substituted file, so drop it and stay in batch mode.
+    g_autofree char *digest = g_compute_checksum_for_bytes(G_CHECKSUM_SHA256, bytes);
+    if (!digest || g_strcmp0(digest, VAD_MODEL_SHA256) != 0) {
+        g_warning("Boo: VAD model failed checksum; staying in batch mode");
         g_object_unref(session);
         return;
     }
