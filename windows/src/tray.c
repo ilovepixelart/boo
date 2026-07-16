@@ -7,6 +7,7 @@
 #include "resource.h"
 
 #include <shellapi.h>
+#include <stdio.h>
 #include <string.h>
 
 #define BOO_TRAY_ID 1
@@ -45,6 +46,18 @@ void boo_tray_set_recording(HWND hwnd, bool recording) {
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
+void boo_tray_set_elapsed(HWND hwnd, int seconds) {
+    NOTIFYICONDATAW nid = tray_data(hwnd);
+    nid.uFlags = NIF_TIP | NIF_SHOWTIP;
+    if (seconds < 60) {
+        swprintf(nid.szTip, ARRAYSIZE(nid.szTip), L"Boo, recording %ds", seconds);
+    } else {
+        swprintf(nid.szTip, ARRAYSIZE(nid.szTip), L"Boo, recording %d:%02d", seconds / 60,
+                 seconds % 60);
+    }
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 UINT boo_tray_taskbar_created_msg(void) {
     // Registered once per process; RegisterWindowMessage returns the same id
     // for the same string, which is how Explorer's broadcast finds us.
@@ -56,8 +69,10 @@ UINT boo_tray_taskbar_created_msg(void) {
 void boo_tray_show_menu(HWND hwnd, POINT anchor, bool recording) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
+    // The hotkey is spelled out here too, like the macOS menu-bar item.
     AppendMenuW(menu, MF_STRING, BOO_CMD_TOGGLE_RECORD,
-                recording ? L"Stop recording" : L"Start recording");
+                recording ? L"Stop recording (Ctrl+Shift+Space)"
+                          : L"Start recording (Ctrl+Shift+Space)");
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(menu, MF_STRING, BOO_CMD_QUIT, L"Quit Boo");
 

@@ -7,6 +7,9 @@
 bool boo_tray_add(HWND hwnd);
 void boo_tray_remove(HWND hwnd);
 void boo_tray_set_recording(HWND hwnd, bool recording);
+// Live elapsed seconds in the tooltip while recording (the menu-bar-timer
+// analog); called from the overlay's paint tick, cheap via NIM_MODIFY.
+void boo_tray_set_elapsed(HWND hwnd, int seconds);
 
 // Explorer broadcasts this registered message when the taskbar (re)starts;
 // icons must be re-added on it or they vanish after an Explorer crash.
