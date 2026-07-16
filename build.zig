@@ -370,6 +370,67 @@ pub fn build(b: *std.Build) void {
         app_step.dependOn(&install_linux_app.step);
     }
 
+    // ── Windows Win32 app ──
+    if (target_os == .windows) {
+        const win_app = b.addExecutable(.{
+            .name = "boo-app",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+            // UTF-8 code page + PerMonitorV2 DPI awareness.
+            .win32_manifest = b.path("windows/res/boo.manifest"),
+        });
+        // wWinMain + no console window. mingw's CRT provides the entry glue;
+        // the unicode flag selects the wide (wWinMain) variant of it.
+        win_app.subsystem = .windows;
+        win_app.mingw_unicode_entry_point = true;
+        win_app.root_module.linkLibrary(boo_lib);
+        win_app.root_module.linkLibrary(whisper_lib);
+        // Link flags only, the WASAPI backend lives inside boo_lib's archive.
+        linkAudioSystemDepsOnly(win_app.root_module, target_os);
+        // OS DLLs, resolved from Zig's bundled mingw import libraries, so
+        // this cross-compiles from any host with no Windows SDK.
+        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32" }) |lib| {
+            win_app.root_module.linkSystemLibrary(lib, .{});
+        }
+        win_app.root_module.addIncludePath(b.path("include"));
+        win_app.root_module.addIncludePath(b.path("windows/src"));
+        win_app.root_module.addCSourceFiles(.{
+            .root = b.path("windows/src"),
+            .files = &.{
+                "main.c",
+                "model.c",
+                "overlay.c",
+                "waveform.c",
+                "tray.c",
+                "hotkey.c",
+                "inject.c",
+                "inject_plan.c",
+            },
+            // Same warning set as the Linux frontend; this C is clean under it.
+            .flags = &.{
+                "-O2",                    "-std=c11",
+                "-Wall",                  "-Wextra",
+                "-Wshadow",               "-Wstrict-prototypes",
+                "-Wmissing-prototypes",   "-Wpointer-arith",
+                "-Wvla",                  "-Wformat=2",
+                "-Wold-style-definition", "-Wcast-align",
+                "-Wundef",
+            },
+        });
+        win_app.root_module.addWin32ResourceFile(.{
+            .file = b.path("windows/res/boo.rc"),
+        });
+
+        const install_win_app = b.addInstallArtifact(win_app, .{});
+        b.getInstallStep().dependOn(&install_win_app.step);
+
+        const app_step = b.step("app", "Build Boo Windows app");
+        app_step.dependOn(&install_win_app.step);
+    }
+
     // ── macOS app bundle ──
     if (target_os == .macos) {
         const bundle_step = b.step("app", "Build macOS Boo.app");
