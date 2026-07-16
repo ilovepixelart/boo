@@ -564,9 +564,11 @@ class OverlayWindow: NSWindow {
             return
         }
 
-        // Step 1: Put text on clipboard
+        // Step 1: Put text on clipboard, snapshotting every format first so a
+        // non-text clipboard (image, RTF, files) is restored rather than
+        // destroyed by the transient transcript paste.
         let pasteboard = NSPasteboard.general
-        let oldContents = pasteboard.string(forType: .string)
+        let oldItems = OverlayWindow.snapshotPasteboard(pasteboard)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
@@ -586,13 +588,30 @@ class OverlayWindow: NSWindow {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.performPaste()
 
-            // Restore clipboard quickly, 200ms is enough for paste to complete
+            // Restore clipboard quickly, 200ms is enough for paste to complete.
+            // Only when there was prior content, else the transcript stays put
+            // (a deliberate re-paste convenience), matching the old behavior.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if let old = oldContents {
+                if !oldItems.isEmpty {
                     pasteboard.clearContents()
-                    pasteboard.setString(old, forType: .string)
+                    pasteboard.writeObjects(oldItems)
                 }
             }
+        }
+    }
+
+    /// Deep-copy every pasteboard item across all its types, so the snapshot
+    /// survives the clearContents that follows. Promised (lazy) data that a
+    /// provider won't resolve synchronously is skipped, best-effort.
+    private static func snapshotPasteboard(_ pb: NSPasteboard) -> [NSPasteboardItem] {
+        return (pb.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
         }
     }
 
