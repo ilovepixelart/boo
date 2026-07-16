@@ -8,7 +8,6 @@ class OverlayWindow: NSWindow {
     let booCtx: OpaquePointer
     let waveformView: WaveformView
     var isRecording = false
-    var isTranscribing = false
     var autoType = true
     var previousApp: NSRunningApplication?
     /// Where the transcript is destined, captured when recording starts.
@@ -307,6 +306,10 @@ class OverlayWindow: NSWindow {
     }
 
     func startRecording(viaHotkey: Bool = false) {
+        // One take at a time. The hotkey can fire during the multi-second
+        // transcription that follows a stop; the core ignores the start then,
+        // so starting the UI too would desync it into a phantom recording.
+        guard !boo_is_transcribing(booCtx) else { return }
         startedViaHotkey = viaHotkey
 
         // Pin the destination now. `previousApp` tracks the last non-Boo app to
