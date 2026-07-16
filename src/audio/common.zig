@@ -113,6 +113,35 @@ pub fn updatePeakRms(peak: *f32, waveform: *const [WAVEFORM_BARS]f32) void {
     }
 }
 
+/// Silence gate for transcription. Whisper hallucinates filler ("you",
+/// "Thank you.") on silent input, and the no_speech_prob/avg_logprob filters
+/// do not reliably catch it, so a take whose loudest window never reaches
+/// this RMS floor is not decoded at all. Real speech in tests/eval bottoms
+/// out at 0.07 max-window RMS; a mic at rest stays under 0.001. The floor
+/// sits 14x under the quietest eval sample so it cannot eat soft speech.
+pub const SILENCE_RMS_FLOOR: f32 = 0.005;
+/// The gate is windowed rather than whole-take: one short word inside an
+/// otherwise silent take must pass, and whole-take RMS would dilute it
+/// below any workable floor.
+pub const RMS_WINDOW_SAMPLES: usize = WHISPER_SAMPLE_RATE / 10; // 100ms
+
+/// RMS of the loudest `window`-sized chunk of `samples`. 0.0 when empty.
+pub fn maxWindowRms(samples: []const f32, window: usize) f32 {
+    std.debug.assert(window > 0);
+    var best: f32 = 0.0;
+    var begin: usize = 0;
+    while (begin < samples.len) : (begin += window) {
+        const end = @min(begin + window, samples.len);
+        var sum: f32 = 0;
+        for (samples[begin..end]) |s| {
+            sum += s * s;
+        }
+        const rms = @sqrt(sum / @as(f32, @floatFromInt(end - begin)));
+        if (rms > best) best = rms;
+    }
+    return best;
+}
+
 /// Everything the two audio backends share: the buffers, the lock that guards
 /// them, and the rules for what happens to an incoming block of samples.
 ///
@@ -258,6 +287,41 @@ pub const Capture = struct {
 // waveform the user actually watches while dictating.
 
 const testing = std.testing;
+
+test "maxWindowRms: empty and silent takes read zero" {
+    try testing.expectEqual(@as(f32, 0.0), maxWindowRms(&.{}, RMS_WINDOW_SAMPLES));
+    const silence = [_]f32{0.0} ** (WHISPER_SAMPLE_RATE * 2);
+    try testing.expectEqual(@as(f32, 0.0), maxWindowRms(&silence, RMS_WINDOW_SAMPLES));
+}
+
+test "maxWindowRms: a constant signal reads back as its own amplitude" {
+    const samples = [_]f32{0.05} ** (WHISPER_SAMPLE_RATE * 2);
+    try testing.expectApproxEqAbs(
+        @as(f32, 0.05),
+        maxWindowRms(&samples, RMS_WINDOW_SAMPLES),
+        0.001,
+    );
+}
+
+test "maxWindowRms: one quiet word in a long silent take clears the floor" {
+    // 60s of silence around a single 100ms word at 0.05. Whole-take RMS is
+    // ~0.002, under the floor; the windowed maximum must still find the word.
+    const samples = try testing.allocator.alloc(f32, WHISPER_SAMPLE_RATE * 60);
+    defer testing.allocator.free(samples);
+    @memset(samples, 0.0);
+    @memset(samples[8000 .. 8000 + RMS_WINDOW_SAMPLES], 0.05);
+    try testing.expect(maxWindowRms(samples, RMS_WINDOW_SAMPLES) >= SILENCE_RMS_FLOOR);
+}
+
+test "maxWindowRms: a mic at rest stays under the silence floor" {
+    // Alternating +-0.001 has RMS 0.001: noise-floor input must gate rather
+    // than reach the decoder, that is the hallucination this floor exists for.
+    var noise: [WHISPER_SAMPLE_RATE]f32 = undefined;
+    for (&noise, 0..) |*s, i| {
+        s.* = if (i % 2 == 0) 0.001 else -0.001;
+    }
+    try testing.expect(maxWindowRms(&noise, RMS_WINDOW_SAMPLES) < SILENCE_RMS_FLOOR);
+}
 
 test "computeWaveform: silence in, silence out" {
     var bars: [WAVEFORM_BARS]f32 = .{1.0} ** WAVEFORM_BARS; // pre-dirtied
