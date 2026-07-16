@@ -508,6 +508,8 @@ fn linkAudioSystemDepsOnly(mod: *std.Build.Module, os_tag: std.Target.Os.Tag) vo
             mod.linkFramework("MetalKit", .{});
         },
         .linux => mod.linkSystemLibrary("pipewire-0.3", .{}),
+        // COM entry points for the WASAPI backend; kernel32/ntdll are implicit.
+        .windows => mod.linkSystemLibrary("ole32", .{}),
         else => {},
     }
 }
