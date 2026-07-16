@@ -12,7 +12,7 @@ measured against it, and the gaps are the work.
 | Property | Value | Source |
 |---|---|---|
 | Size | 400 wide, 500 tall; min 400x300, max 400x800 (width fixed) | `OverlayWindow.swift:32,39-40` |
-| Background | `#292C33` at 95% alpha, translucent, non-opaque, shadowed | `OverlayWindow.swift:47-49` |
+| Background | hardcoded `rgba(0.16, 0.17, 0.2, 0.95)` (~`#292B33`), translucent, non-opaque, shadowed; distinct from the theme bg | `OverlayWindow.swift:47-49` |
 | Chrome | Titlebar hidden and transparent, full-size content, draggable by background | `OverlayWindow.swift:44-46` |
 | Placement | Top-right of the main screen (20px right margin, 50px top) | `OverlayWindow.swift:52-56` |
 | Level | Normal (not always-on-top on macOS); does not hide on deactivate | `OverlayWindow.swift:43,50` |
