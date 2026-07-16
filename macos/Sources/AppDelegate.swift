@@ -1,5 +1,6 @@
 import Carbon
 import Cocoa
+import CryptoKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var overlayWindow: OverlayWindow?
@@ -325,6 +326,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// (unlike the speech models), so streaming transcription just starts
     /// working; batch mode covers the seconds until it lands. boo_load_vad is
     /// safe to call at any time, including mid-recording.
+    // Pinned SHA-256 of ggml-silero-v6.2.0.bin (HuggingFace LFS oid). The file
+    // is fetched over TLS, but pinning defends against a compromised mirror
+    // handing a substituted GGUF straight to the ggml parser.
+    private static let vadModelSHA256 =
+        "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
+
     private func downloadVadModel() {
         let dir = NSHomeDirectory() + "/.boo/models"
         let dest = URL(fileURLWithPath: dir + "/ggml-silero-v6.2.0.bin")
@@ -340,6 +347,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog(
                     "Boo: VAD model download failed (%@); staying in batch mode",
                     error?.localizedDescription ?? "bad response")
+                return
+            }
+            // Verify before trusting the bytes: a wrong hash means a corrupt or
+            // substituted file, so drop it and stay in batch mode.
+            guard let data = try? Data(contentsOf: tmp),
+                SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined()
+                    == AppDelegate.vadModelSHA256
+            else {
+                NSLog("Boo: VAD model failed checksum; staying in batch mode")
                 return
             }
             do {
