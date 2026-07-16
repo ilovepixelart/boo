@@ -74,7 +74,8 @@ jobs:
         with:
           bundle: boo.flatpak
           manifest-path: linux/flatpak/com.boo.app.yaml
-          cache-key: flatpak-builder-${{ github.sha }}
+          # Manifest-keyed for the same reason as CI: a per-SHA key never hits.
+          cache-key: flatpak-builder-${{ hashFiles('linux/flatpak/com.boo.app.yaml') }}
           # The action uploads the bundle as an artifact itself. Left on, that
           # artifact and the version-named one below both land in the release,
           # attaching the same 60MB file twice under two names.

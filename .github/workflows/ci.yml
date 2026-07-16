@@ -188,7 +188,11 @@ jobs:
         run: ./linux/tests/integration.sh
 
   windows-cross:
-    name: Windows (cross-compile from Linux)
+    name: Windows (cross-compile, ${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-windows-gnu, aarch64-windows-gnu]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -196,17 +200,17 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          # Matrix jobs share a job name for caching purposes, so the target
+          # must be part of the key or the two architectures evict each other.
+          cache-key: ${{ matrix.target }}
 
-      - name: Cross-compile app (x86_64 + arm64)
+      - name: Cross-compile app
         # Zig bundles mingw-w64 and its own resource compiler, so the full
         # Windows app, resources and manifest included, links from any host.
         # This is the cheap guard that keeps the Windows target from silently
         # rotting between runs of the native job.
         run: |
-          zig build app -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
-          test -f zig-out/bin/boo-app.exe
-          rm -rf zig-out
-          zig build app -Dtarget=aarch64-windows-gnu -Doptimize=ReleaseFast
+          zig build app -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
           test -f zig-out/bin/boo-app.exe
           echo "windows cross ok"
 
@@ -273,4 +277,8 @@ jobs:
         with:
           bundle: boo.flatpak
           manifest-path: linux/flatpak/com.boo.app.yaml
-          cache-key: flatpak-builder-${{ github.sha }}
+          # Keyed on the manifest, not the commit: a per-SHA key can never hit,
+          # which made every push rebuild the GNOME runtime and dependencies
+          # from scratch (~8 minutes, the whole pipeline's critical path).
+          # flatpak-builder rebuilds changed modules incrementally on a hit.
+          cache-key: flatpak-builder-${{ hashFiles('linux/flatpak/com.boo.app.yaml') }}
