@@ -5,6 +5,7 @@
 | `Boo-<ver>-arm64.dmg` | macOS, Apple Silicon |
 | `Boo-<ver>-x86_64.dmg` | macOS, Intel |
 | `boo-<ver>-x86_64.flatpak` | Linux, x86_64, **preview, see below** |
+| `boo-<ver>-windows-x86_64.zip` | Windows 10+, x86_64, **experimental, see below** |
 | `SHA256SUMS` | checksums for the above |
 
 **Verify your download** (these builds aren't notarized, so this is your integrity check):
@@ -40,6 +41,14 @@ The hotkey is **Ctrl+Shift+Space**. Your desktop will ask once to allow the shor
 
 > **⚠️ The hotkey needs GNOME 48+, KDE Plasma, or Hyprland.** GNOME only shipped a GlobalShortcuts portal in version 48, so on **Ubuntu 24.04 LTS (GNOME 46)** the interface does not exist and no app can register a global hotkey. Boo detects this and tells you. Auto-paste still works, so Boo is fully usable from the Record button.
 
+### Windows, experimental, expectations first
+
+Extract the zip anywhere and run `boo-app.exe`. It is **unsigned**, so SmartScreen shows *"Windows protected your PC"* on first launch: **More info → Run anyway**. The SHA256SUMS check above is the integrity story.
+
+**What is verified:** the full app compiles, links, and passes the core test suite natively on Windows in CI, every push. **What is not:** nobody has yet dictated on real Windows hardware, so microphone capture, the tray icon, the hotkey, and auto-paste are design-validated but untested in the wild. Bug reports are gold; the checklist we need help with is [`windows/tests/manual.md`](https://github.com/ilovepixelart/boo/blob/master/windows/tests/manual.md).
+
+Boo lives in the notification area, and Windows 11 hides new tray icons in the overflow flyout by default: drag the icon onto the taskbar to pin it. There are no permission prompts; the microphone works unless **Settings → Privacy & security → Microphone** blocks desktop apps. Pasting into elevated (admin) windows is blocked by Windows itself (UIPI); the transcript stays on the clipboard, press Ctrl+V yourself.
+
 ### You also need a model
 
 No whisper model is bundled (they're 140 MB+):
@@ -53,6 +62,13 @@ curl -L -o ~/.boo/models/ggml-base.en.bin \
 # Linux (Flatpak)
 mkdir -p ~/.var/app/com.boo.app/data/boo/models
 curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+```
+
+```bat
+:: Windows (curl ships with Windows 10 1803+)
+mkdir "%USERPROFILE%\.boo\models"
+curl.exe -L -o "%USERPROFILE%\.boo\models\ggml-base.en.bin" ^
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
