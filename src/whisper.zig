@@ -71,6 +71,15 @@ pub const WhisperContext = struct {
         params.print_realtime = false;
         params.print_timestamps = false;
         params.single_segment = false;
+        // Dictation never shows timestamps, and computing them is a known
+        // repetition/accuracy hazard (ggml-org/whisper.cpp#1724).
+        params.no_timestamps = true;
+        // The upstream default today, pinned: carrying prior output as the
+        // next decode's prompt is a classic repetition-loop vector.
+        params.no_context = true;
+        // Never emit the non-speech token set (music notes, sound-effect
+        // annotations); on silence and noise those are pure hallucination.
+        params.suppress_nst = true;
         params.language = language();
         params.n_threads = threadCount();
 
@@ -83,15 +92,71 @@ pub const WhisperContext = struct {
 
         for (0..@intCast(n_segments)) |i| {
             const segment_text = c.whisper_full_get_segment_text(self.ctx, @intCast(i));
-            if (segment_text != null) {
-                const slice = std.mem.span(segment_text);
-                try text.appendSlice(allocator, slice);
-            }
+            if (segment_text == null) continue;
+            const no_speech = c.whisper_full_get_segment_no_speech_prob(self.ctx, @intCast(i));
+            if (!keepSegment(no_speech, self.segmentAvgLogprob(@intCast(i)))) continue;
+            try text.appendSlice(allocator, std.mem.span(segment_text));
         }
 
         return text.toOwnedSlice(allocator);
     }
+
+    /// Mean log-probability of a segment's tokens, the decoder's own
+    /// confidence in what it wrote.
+    fn segmentAvgLogprob(self: *WhisperContext, segment: c_int) f32 {
+        const n = c.whisper_full_n_tokens(self.ctx, segment);
+        if (n <= 0) return 0.0;
+        var sum: f32 = 0.0;
+        for (0..@intCast(n)) |t| {
+            sum += c.whisper_full_get_token_data(self.ctx, segment, @intCast(t)).plog;
+        }
+        return sum / @as(f32, @floatFromInt(n));
+    }
 };
+
+/// Whether a decoded segment is real speech worth keeping.
+///
+/// Whisper is a generative model: fed silence or noise it happily produces
+/// plausible filler ("Thank you."). Such segments are flagged by a high
+/// no-speech probability COMBINED with low decoder confidence; requiring both
+/// (OpenAI's own heuristic shape) means quiet-but-confident real speech and
+/// mumbled-but-present real speech are never dropped.
+pub fn keepSegment(no_speech_prob: f32, avg_logprob: f32) bool {
+    return !(no_speech_prob > 0.6 and avg_logprob < -0.4);
+}
+
+// ── tests ────────────────────────────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "keepSegment: confident speech is kept" {
+    try testing.expect(keepSegment(0.1, -0.2));
+}
+
+test "keepSegment: classic silence hallucination is dropped" {
+    // The "Thank you." on silence shape: the model is fairly sure there is no
+    // speech AND has low confidence in what it generated anyway.
+    try testing.expect(!keepSegment(0.9, -1.0));
+}
+
+test "keepSegment: high no-speech alone is not enough" {
+    // Breathy or very quiet openings can score high on no-speech while the
+    // decoded tokens are confident; dropping those would eat real first words.
+    // OpenAI's own heuristic requires BOTH signals, so does this one.
+    try testing.expect(keepSegment(0.9, -0.2));
+}
+
+test "keepSegment: low confidence alone is not enough" {
+    // Mumbled but real speech decodes with low avg logprob; keep it rather
+    // than silently deleting the user's words.
+    try testing.expect(keepSegment(0.3, -0.9));
+}
+
+test "keepSegment: thresholds are exclusive at the boundary" {
+    try testing.expect(keepSegment(0.6, -0.4));
+    try testing.expect(keepSegment(0.6, -1.0));
+    try testing.expect(keepSegment(0.9, -0.4));
+}
 
 /// Decode thread count: min(cores, 8), overridable with $BOO_THREADS.
 /// The valgrind CI job sets 1: memcheck serializes every thread onto a single
