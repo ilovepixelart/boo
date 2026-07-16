@@ -1,8 +1,9 @@
 // Host-runnable test for the pure paste-chord planner. No windows.h, so it
 // compiles with any C compiler and runs in CI on Linux/macOS runners:
 //
-//   cc -I windows/src windows/tests/inject_plan_test.c \
+//   cc -I windows/src windows/tests/inject_plan_test.c
 //      windows/src/inject_plan.c -o inject_plan_test && ./inject_plan_test
+//   (one command; a literal backslash here would trip gcc's -Wcomment)
 //
 // What it pins down: the chord that reaches the target app must be exactly
 // Ctrl+V. A physically held Shift/Alt/Win that is not released first turns it
