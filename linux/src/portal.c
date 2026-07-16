@@ -1,5 +1,7 @@
 #include "portal.h"
 
+#include <sys/random.h>
+
 // One in-flight request. Freed when the Response arrives, or when the call
 // itself fails, exactly one of those happens.
 typedef struct {
@@ -10,9 +12,22 @@ typedef struct {
     gpointer user_data;
 } PortalRequest;
 
-// Must be a valid D-Bus object path component, so [A-Za-z0-9_] only.
-static char *portal_new_token(void) {
-    return g_strdup_printf("boo_%08x", g_random_int());
+// A valid D-Bus object-path component ([A-Za-z0-9_] only), unpredictable.
+//
+// The CSPRNG (getrandom), not g_random_int's Mersenne Twister: the client
+// subscribes to the Response object path *before* issuing the call, and that
+// path embeds this token. For RemoteDesktop the Response carries a restore
+// token that is a keyboard-injection capability, so a co-resident same-user
+// process must not be able to predict the path and race for the payload.
+char *boo_portal_new_token(void) {
+    guint64 r = 0;
+    if (getrandom(&r, sizeof(r), 0) != (gssize)sizeof(r)) {
+        // getrandom only fails this early-boot; a desktop session is long
+        // seeded. Fall back to non-crypto rather than block: still a unique,
+        // valid path component.
+        r = ((guint64)g_random_int() << 32) | g_random_int();
+    }
+    return g_strdup_printf("boo_%016" G_GINT64_MODIFIER "x", r);
 }
 
 // Rebuild the object path the portal will reply on, from our unique bus name
@@ -112,7 +127,7 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
         return;
     }
 
-    g_autofree char *token = portal_new_token();
+    g_autofree char *token = boo_portal_new_token();
 
     GVariant *payload = make_payload ? make_payload(user_data, token) : NULL;
     if (!payload) return;
