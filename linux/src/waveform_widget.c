@@ -95,8 +95,8 @@ static gboolean waveform_tick(GtkWidget *widget, GdkFrameClock *clock,
     // full-refresh-rate redraw would be pure battery drain. One extra frame
     // after going inactive repaints the bars in their idle color; without it
     // a stop that captured no audio freezes on the last recording-red frame.
-    const gboolean active = boo_is_recording(st->ctx) ||
-        boo_is_transcribing(st->ctx) || boo_get_peak_rms(st->ctx) > 0.01f;
+    const gboolean active = boo_is_recording(st->ctx) || boo_is_transcribing(st->ctx) ||
+                            boo_get_peak_rms(st->ctx) > 0.01f;
     if (active || st->was_active) gtk_widget_queue_draw(widget);
     st->was_active = active;
     return G_SOURCE_CONTINUE;
