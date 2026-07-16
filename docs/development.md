@@ -60,7 +60,7 @@ zig build app
 ### Flatpak
 
 ```sh
-flatpak install --user flathub org.gnome.Platform//47 org.gnome.Sdk//47
+flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 flatpak-builder --user --install --force-clean build-dir \
   linux/flatpak/com.boo.app.yaml
 flatpak run com.boo.app
