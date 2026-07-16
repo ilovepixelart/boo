@@ -424,11 +424,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if status == noErr {
             hotKeyRef = keyRef
+        } else {
+            // Most often another app already owns Ctrl+Shift+Space. The Record
+            // button and menu bar remain the fallback, as on Linux/Windows, but
+            // don't leave the failure entirely silent.
+            NSLog(
+                "Boo: could not register the Ctrl+Shift+Space hotkey (status %d); "
+                    + "use the menu bar or Record button", status)
         }
 
         // Install handler
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(
+        let handlerStatus = InstallEventHandler(
             GetEventDispatcherTarget(),
             { (_, event, userData) -> OSStatus in
                 guard let userData = userData else { return noErr }
@@ -441,6 +448,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Unmanaged.passUnretained(self).toOpaque(),
             nil
         )
+        if handlerStatus != noErr {
+            NSLog("Boo: could not install the hotkey handler (status %d)", handlerStatus)
+        }
     }
 
     @objc func handleHotKey() {
