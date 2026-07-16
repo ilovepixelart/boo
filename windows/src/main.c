@@ -80,6 +80,9 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
         swprintf(status, ARRAYSIZE(status), L"Hotkey unavailable: %ls", reason);
         wcsncpy(app.status, status, ARRAYSIZE(app.status) - 1);
         app.status[ARRAYSIZE(app.status) - 1] = 0;
+    } else {
+        // Rest on the visible hotkey hint now that registration settled.
+        boo_overlay_status_idle(&app);
     }
 
     MSG msg;
@@ -88,13 +91,19 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
         DispatchMessageW(&msg);
     }
 
-    // A transcription worker may still hold the context; joining it is the
-    // difference between a clean quit and a use-after-free in whisper.
+    // Workers may still hold the context; joining them is the difference
+    // between a clean quit and a use-after-free in whisper.
+    if (app.stream_thread) {
+        WaitForSingleObject(app.stream_thread, INFINITE);
+        CloseHandle(app.stream_thread);
+    }
     if (app.worker) {
         WaitForSingleObject(app.worker, INFINITE);
         CloseHandle(app.worker);
     }
     boo_deinit(ctx);
+    for (int i = 0; i < app.card_count; i++) free(app.cards[i]);
+    free(app.live_text);
     CloseHandle(singleton);
     return 0;
 }
