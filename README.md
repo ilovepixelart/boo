@@ -31,33 +31,7 @@ The architecture is heavily inspired by [Ghostty](https://github.com/ghostty-org
 | Linux (Wayland/X11) | PipeWire (native) | GTK4 + libadwaita | `zig build app` | ⚠️ Preview |
 | Windows 10+ (x86_64) | WASAPI | Win32 (C) | `zig build app` | 🧪 Experimental |
 
-Linux ships as a **preview** Flatpak. Being precise about what that means, because "preview" usually isn't:
-
-**Verified:**
-- Builds and links against GTK4 / libadwaita / PipeWire (CI, every push).
-- **Audio actually works.** In a real Ubuntu VM, Boo's PipeWire backend captured 6 s of speech (96,568 samples @ 16 kHz, RMS tracking the signal) and whisper transcribed it correctly. Reproduce with [`linux/tests/audio.sh`](linux/tests/audio.sh).
-- **GlobalShortcuts portal**: CreateSession → BindShortcuts (`toggle-record`, `CTRL+SHIFT+space`) → an `Activated` signal reaches Boo's callback. *(CI, every push.)*
-- **RemoteDesktop portal**: CreateSession → SelectDevices (keyboard, persisted grant) → Start, and a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`. *(CI, every push.)*
-- The restore token persists, so the permission prompt appears **once**, not every launch.
-
-**Verified against real desktop portal backends, not just the mock:**
-- **GNOME 46** (Ubuntu 24.04 LTS): RemoteDesktop is present; GlobalShortcuts is **absent** (the `.portal` manifest doesn't list it and a `CreateSession` returns "No such interface"). Boo detects this and says so (see [Permissions](#permissions)).
-- **KDE Plasma**: its `xdg-desktop-portal-kde` manifest **does** declare GlobalShortcuts, and its backend serviced a real `CreateSession` (returning a proper Request path), so the hotkey is a live capability there, unlike GNOME 46.
-
-**Not verified:**
-- A full end-to-end hotkey *bind* on a live KDE/Hyprland session (KDE's Qt backend needs a real display, which a headless VM only partly provides). The interface is confirmed present and responsive; a human on real KDE hardware is the remaining check.
-- The GTK4 UI has not been driven by a human on a real desktop.
-
-**The Linux app is smaller than the macOS one:** no menu-bar item, no settings dialog, no theme picker, and it doesn't stay on top. Recording, transcription and auto-paste all work.
-
-**Windows is experimental**, one notch below the Linux preview, and the label is precise:
-
-**Verified:**
-- The full app (Zig core + whisper + WASAPI backend + Win32 frontend) compiles and links for x86_64 and ARM64, natively on a Windows runner and cross-compiled from Linux/macOS (CI, every push).
-- The core's unit tests, the audio maths, the SRWLOCK mutex shim, and the whole C ABI contract including the leak test, pass natively on Windows (CI, every push).
-- The paste chord is pinned by a host-run unit test: exactly Ctrl+V reaches the target, with held Shift/Alt/Win released first ([`windows/tests/inject_plan_test.c`](windows/tests/inject_plan_test.c)).
-
-**Not verified:** nobody has yet run Boo on real Windows hardware, so microphone capture, the tray icon, the hotkey, focus behavior and auto-paste are design-validated but untested in the wild. The full checklist a human needs to run once is [`windows/tests/manual.md`](windows/tests/manual.md); it is the gate for promoting Windows to preview. Streaming transcription is not wired into the Windows frontend yet; it transcribes when you stop, like the pre-streaming releases. Bug reports are genuinely useful here.
+**Preview** means machine-verified but not yet human-verified: on Linux, audio capture and both portal handshakes pass real end-to-end tests, but nobody has driven the UI on a real desktop. **Experimental** is one notch below: Windows compiles, links and passes the core's tests on real Windows runners in CI, but nobody has dictated on real hardware yet. The precise verified/unverified ledger is in [docs/platform-status.md](docs/platform-status.md); working through [`windows/tests/manual.md`](windows/tests/manual.md) on a real machine is what promotes Windows to preview, and bug reports count.
 
 ## Quick start
 
@@ -193,24 +167,7 @@ BOO_LANG=auto boo-app      # let whisper detect the language
 
 ## Ghostty integration
 
-Boo is a companion for [Ghostty](https://ghostty.org), and gets text into it differently on each platform, because Ghostty's capabilities differ sharply between the two.
-
-**macOS, through Ghostty's own API.** Ghostty 1.3+ ships an AppleScript interface, and Boo uses it: `input text` writes straight into the focused terminal's pty. This is strictly better than synthesizing keystrokes:
-
-- it never touches your clipboard;
-- it keeps working under **Secure Input**, the mode macOS enters at password prompts, which silently swallows synthesized keystrokes and breaks most dictation tools;
-- it applies bracketed paste correctly and skips Ghostty's unsafe-paste confirmation;
-- it needs only the one-time **Automation** permission, not Accessibility.
-
-Everything else (older Ghostty, other apps) falls back to clipboard + ⌘V, which needs Accessibility.
-
-**Linux, through the clipboard, because Ghostty has no injection API there.** Its D-Bus surface only opens windows; there's no way to hand it text. So Boo copies the transcript and synthesizes a single `Ctrl+Shift+V`, Ghostty's default paste binding, via the XDG RemoteDesktop portal. This works in any app that pastes on `Ctrl+Shift+V`, on GNOME and KDE alike, inside or outside Flatpak.
-
-Boo pastes rather than types out each character on purpose: synthesized keystrokes are resolved against your active keyboard layout, so any character the layout can't produce (accents, smart quotes, em dashes) is silently dropped. One paste chord sidesteps that entirely.
-
-One rough edge: on Linux, a transcript containing a newline can trip Ghostty's paste-protection prompt. At a normal shell prompt (which enables bracketed paste) you won't see it. The macOS path is exempt.
-
-**Windows: no special case needed.** Ghostty has no Windows release, and unlike Linux the stock terminals already paste on plain Ctrl+V: Windows Terminal binds it by default, and the classic console has done so since Windows 10. Boo's one synthesized Ctrl+V works everywhere, so there is no per-app chord table.
+Boo is a companion for [Ghostty](https://ghostty.org). On macOS it injects text through Ghostty's own AppleScript API: no clipboard involved, it keeps working under Secure Input (password prompts), and it needs only the one-time Automation permission instead of Accessibility. On Linux and Windows it uses the regular clipboard + paste path, which Ghostty and the stock terminals handle fine. The full story, including the Linux paste-chord nuances: [docs/ghostty.md](docs/ghostty.md).
 
 ## Permissions
 
@@ -283,227 +240,15 @@ Two Windows-specific caveats. **Elevated windows**: pasting into an admin termin
 
 **The tray icon is missing (Windows 11)**: it's in the taskbar overflow flyout (the ^ chevron); drag it onto the taskbar to pin it. Windows hides new tray icons by default and offers apps no way around that.
 
-## Build, macOS
+## Developing
 
 ```sh
-brew install zig xcodegen
-xcodegen --spec macos/project.yml --project macos/
-
-# Either: open in Xcode and hit Run
-open macos/Boo.xcodeproj
-
-# Or: build from CLI
-xcodebuild -project macos/Boo.xcodeproj -scheme Boo -configuration Release \
-  -derivedDataPath build/xcode-derived
-open build/xcode-derived/Build/Products/Release/Boo.app
+zig build test                             # core unit tests, any OS
+zig build app                              # native app (Linux/Windows; macOS needs one extra step)
+zig build run -- models/ggml-base.en.bin   # bare-bones CLI REPL, no GUI
 ```
 
-The Xcode pre-build phase invokes `scripts/build-zig-libs.sh`, which runs `zig build -Doptimize=ReleaseFast` and repacks `libwhisper.a` so Apple's linker accepts the alignment.
-
-By default the build is ad-hoc signed (good for local dev). For a properly-signed build:
-
-```sh
-xcodebuild ... \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
-  DEVELOPMENT_TEAM=TEAMID
-```
-
-Or re-sign post-build:
-
-```sh
-BOO_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./bundle.sh
-```
-
-### Without Xcode (Command Line Tools only)
-
-```sh
-zig build app -Doptimize=ReleaseFast   # ReleaseFast required: Debug C objects
-./bundle.sh                            # reference the UBSan runtime, which
-open zig-out/Boo.app                   # swiftc's link step doesn't provide
-```
-
-## Build, Linux
-
-System packages (Debian/Ubuntu):
-
-```sh
-sudo apt install libpipewire-0.3-dev libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev pkg-config
-```
-
-Zig ≥ 0.16 is required (`build.zig.zon` enforces it) and distro packages lag , 
-grab a tarball from [ziglang.org/download](https://ziglang.org/download/) or use
-`snap install zig --classic --beta`.
-
-```sh
-zig build app
-./zig-out/bin/boo-app
-```
-
-### Flatpak
-
-```sh
-flatpak install --user flathub org.gnome.Platform//47 org.gnome.Sdk//47
-flatpak-builder --user --install --force-clean build-dir \
-  linux/flatpak/com.boo.app.yaml
-flatpak run com.boo.app
-```
-
-Inside the Flatpak sandbox, place the model at `~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin` (the app reads `$XDG_DATA_HOME/boo/models/`, and Flatpak maps `XDG_DATA_HOME` to `~/.var/app/com.boo.app/data/`).
-
-## Build, Windows
-
-Zig bundles the mingw-w64 headers, import libraries and a Windows resource compiler, so there is nothing to install beyond Zig itself, no Visual Studio, no Windows SDK:
-
-```bat
-zig build app -Doptimize=ReleaseFast
-zig-out\bin\boo-app.exe
-```
-
-The same command cross-compiles from macOS or Linux with `-Dtarget=x86_64-windows-gnu` (or `aarch64-windows-gnu`), icon, version resources and manifest included; CI uses exactly that as its guard job. The binary is self-contained: mingw's runtime and winpthreads link statically against the UCRT that ships with Windows 10+, so there is no redistributable to install.
-
-## Packaging a release
-
-macOS DMG:
-
-```sh
-zig build app -Doptimize=ReleaseFast
-./bundle.sh              # -> zig-out/Boo.app
-./scripts/make-dmg.sh    # -> zig-out/Boo-<version>-<arch>.dmg
-```
-
-`make-dmg.sh` mounts the image and checks the bundle before declaring success, so a broken DMG fails here rather than on someone else's machine.
-
-Linux Flatpak bundle:
-
-```sh
-flatpak-builder --user --force-clean --repo=repo build-dir \
-  linux/flatpak/com.boo.app.yaml
-flatpak build-bundle repo boo.flatpak com.boo.app
-```
-
-Windows zip:
-
-```bat
-zig build app -Doptimize=ReleaseFast
-:: zip zig-out\bin\boo-app.exe + LICENSE; the release workflow uses Compress-Archive
-```
-
-Pushing a `v*` tag runs the release workflow, which builds **two DMGs on native runners** (`macos-15` → arm64, `macos-15-intel` → Intel; cross-compiling Swift + Zig + whisper and lipo-ing them is far more fragile), the Linux Flatpak, and the Windows zip (`windows-latest`), then publishes a GitHub Release with `SHA256SUMS`.
-
-To cut a release, edit the version in **`build.zig.zon`** (the single source of truth, `bundle.sh` derives from it) and add a `<release>` entry to the metainfo changelog. `macos/project.yml` carries it for the Xcode dev build, and `windows/res/boo.rc` + `boo.manifest` carry it for the Windows resources; `scripts/check-version.sh` runs in CI and fails if any of these drift. Then:
-
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-## Tests
-
-```sh
-zig build test                  # Zig core, audio maths + the C ABI contract
-./linux/tests/run.sh            # portal payloads, needs gtk4; runs on macOS too
-./linux/tests/integration.sh    # portal handshakes, Linux only, needs a D-Bus
-./linux/tests/audio.sh MODEL WAV  # PipeWire capture -> whisper, needs a real
-                                  # PipeWire graph, so a VM or desktop, NOT a
-                                  # container (WirePlumber needs systemd-logind)
-cc -I windows/src windows/tests/inject_plan_test.c \
-   windows/src/inject_plan.c -o t && ./t   # Windows paste chord, runs anywhere
-```
-
-**`zig build test`** covers the pure audio maths (waveform windowing, RMS, clamping, peak attack/decay) and the C ABI contract every frontend depends on: that a failed `boo_init` frees what it allocated, and that every entry point survives a null context, which a frontend whose init failed will absolutely hand it, since its timers and buttons keep firing regardless.
-
-The leak test earns its keep. `boo_init` returns an *optional*, and Zig's `errdefer` only fires on an **error** return, so its cleanup silently never ran, and a failure to open the microphone leaked the entire ~150 MB whisper model. Tested with a leak-checking allocator, so the regression fails the build rather than quietly bloating memory.
-
-**`run.sh`** checks the D-Bus payloads are well-formed. That matters more than it looks: GVariant format strings are parsed at *runtime*, so a malformed payload compiles cleanly and then aborts on a user's desktop.
-
-**`integration.sh`** runs both portal clients end to end against a live session bus, driven by a stand-in portal (`mock_portal.py`) that speaks the real Request/Response protocol. It asserts the hotkey is bound as `toggle-record`/`CTRL+SHIFT+space`, that an `Activated` signal reaches Boo's callback, that RemoteDesktop requests the keyboard with a persisted grant, and that a paste emits exactly `Ctrl↓ Shift↓ V↓ V↑ Shift↑ Ctrl↑`.
-
-Its real value is subtler. The portal's Request/Response protocol requires a client to *predict* the reply's object path and subscribe **before** issuing the call, subscribe after and you race the portal and lose the reply permanently. The mock derives that path independently, exactly as a real portal does, so a passing run proves Boo's prediction is correct. That bug is invisible to a compiler and impossible to reproduce on macOS.
-
-**`audio.sh`** is the one that can't run in CI. It needs a real PipeWire graph, and WirePlumber, PipeWire's session manager, refuses to start without systemd-logind. In a container it dies, no nodes get linked, and Boo's stream captures nothing. So this wants a VM or a desktop:
-
-```sh
-brew install lima
-limactl start --name=boo template://ubuntu-lts
-# inside: install pipewire wireplumber gtk4 libadwaita, then
-./linux/tests/audio.sh ggml-base.en.bin speech.wav
-```
-
-Given a WAV it builds a virtual microphone out of a null sink's monitor, plays the file into it, and asserts a transcript comes back, so it runs unattended. Given no WAV it records from your default source and you just speak.
-
-**`inject_plan_test.c`** pins the Windows paste chord: exactly Ctrl+V reaches the target app, with any physically held Shift/Alt/Win released first, else a user still holding the hotkey would deliver Ctrl+Shift+V instead. The planner is pure C with no windows.h, so this runs on the Linux lint runner.
-
-Still untested: the platform audio backends themselves (`coreaudio.zig`, `pipewire.zig`, `wasapi.zig`) have no unit tests for their hardware paths, they're driven by device callbacks and are covered only end-to-end, by `audio.sh`, by [`windows/tests/manual.md`](windows/tests/manual.md), and by actually using the app. The WASAPI backend's format and downmix maths, being pure, is unit-tested on every platform.
-
-CI runs everything except `audio.sh` and `manual.md` on every push. The Linux job proves the GTK4 frontend links and the portals work; the Windows jobs prove the Win32 frontend links (natively and cross-compiled) and that the core's tests pass on Windows, none of which can be checked on a macOS dev box.
-
-## Build, Zig core only (CLI test binary)
-
-```sh
-zig build run -- models/ggml-base.en.bin
-```
-
-A bare-bones REPL: hit Enter to record, hit Enter again to stop and transcribe. Useful for verifying the core without the GUI layer.
-
-## Project layout
-
-```
-src/                Zig core
-  audio.zig         Comptime-dispatched backend selector
-  audio/
-    common.zig      Shared constants, helpers, Mutex shim
-    coreaudio.zig   macOS audio backend
-    pipewire.zig    Linux audio backend
-    pipewire_glue.{c,h}  C helper for SPA POD format builder
-    wasapi.zig      Windows audio backend (hand-declared COM, ole32 only)
-  whisper.zig       whisper.cpp Zig wrapper
-  c_api.zig         C ABI surface (consumed by frontends)
-
-include/boo.h       The C API contract, single source of truth
-
-macos/
-  Sources/          Swift / AppKit
-  project.yml       xcodegen spec
-  Boo.entitlements
-
-linux/
-  src/              C / GTK4 + libadwaita frontend
-    global_shortcut.c  GlobalShortcuts portal, the Ctrl+Shift+Space hotkey
-    text_inject.c      RemoteDesktop portal, synthesizes the paste chord
-  tests/
-    portal_payloads.c  D-Bus payload signatures (runs anywhere with gtk4)
-    portal_harness.c   Drives both portal clients (Linux)
-    mock_portal.py     Stand-in xdg-desktop-portal speaking the real protocol
-    run.sh             Payload tests
-    integration.sh     End-to-end portal handshakes against a live D-Bus
-  flatpak/          Manifest, .desktop entry, AppStream metainfo
-
-windows/
-  src/              C / Win32 frontend
-    overlay.c       The overlay window; never takes focus, by construction
-    tray.c          Notification-area icon (version-4 protocol)
-    hotkey.c        RegisterHotKey, the Ctrl+Shift+Space hotkey
-    inject.c        Clipboard + synthesized Ctrl+V delivery
-    inject_plan.c   Pure paste-chord planner (host-testable)
-    model.c         Model discovery under %USERPROFILE%\.boo\models
-  res/              .ico, version resources, UTF-8 + PerMonitorV2 manifest
-  tests/
-    inject_plan_test.c  Pins the exact chord; runs on any OS
-    manual.md           Real-hardware checklist gating the experimental label
-
-themes/             486 Ghostty-format color themes (used by the macOS frontend)
-assets/             App icons, Metal shader, mel filterbank
-
-scripts/
-  build-zig-libs.sh Repacks Zig's whisper archive for macOS ld
-  make-dmg.sh       Packages Boo.app into a distributable DMG
-  make-ico.py       Packs the PNG icons into windows/res/boo.ico
-
-.github/workflows/  CI (all three platforms, portal tests) + release
-
-build.zig           OS-conditional Zig build orchestration
-bundle.sh           macOS: ad-hoc / re-sign helper
-```
+Per-platform build guides, packaging, the release checklist, the full test-suite map, and the project layout live in [docs/development.md](docs/development.md).
 
 ## Inspiration
 
