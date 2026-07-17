@@ -657,6 +657,10 @@ static void open_settings(GtkButton *btn, gpointer data) {
         gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.1, 1.0, 0.05);
     gtk_range_set_value(GTK_RANGE(scale), st->opacity);
     gtk_widget_set_hexpand(scale, TRUE);
+    // Live value readout, the reference's monospace "1.00" label.
+    gtk_scale_set_draw_value(GTK_SCALE(scale), TRUE);
+    gtk_scale_set_digits(GTK_SCALE(scale), 2);
+    gtk_scale_set_value_pos(GTK_SCALE(scale), GTK_POS_RIGHT);
     g_signal_connect(scale, "value-changed", G_CALLBACK(on_opacity_changed), ui);
     gtk_box_append(GTK_BOX(orow), scale);
     gtk_box_append(GTK_BOX(content), orow);
