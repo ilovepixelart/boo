@@ -278,17 +278,23 @@ gen_linux() {
             for g in *.gcov; do all_covs+=("app/$g"); done
             cd ..
 
-            # The overlay harness, instrumented: it reaches the handlers the
-            # pixel smoke cannot (transcription round-trip, tracked idles,
-            # the Settings dialog, the download engine).
+            # The headless GTK harnesses, instrumented: they reach the handlers
+            # the pixel smoke cannot (transcription round-trip, tracked idles,
+            # the Settings dialog, the download engine, and the app entry's
+            # dialogs / crash surfacing / model-load error path). Each harness
+            # builds in its own subdir (harness/<name>) so their overlapping
+            # overlay_window.c counters do not collide; gcov each separately and
+            # let gcov_to_sonar union the per-file reports.
             mkdir -p harness
             if BOO_HARNESS_WORK="$PWD/harness" BOO_HARNESS_CFLAGS="--coverage" \
                 BOO_HARNESS_LIBS="$(gcc -print-file-name=libgcov.a)" \
                 bash "$root/linux/tests/ui-harness.sh"; then
-                (cd harness && gcov ./*.gcda >/dev/null 2>&1 || true)
-                for g in harness/*.gcov; do all_covs+=("$g"); done
+                for d in harness/*/; do
+                    (cd "$d" && gcov ./*.gcda >/dev/null 2>&1 || true)
+                    for g in "$d"*.gcov; do all_covs+=("$g"); done
+                done
             else
-                echo "coverage: linux: overlay harness failed; slice skipped" >&2
+                echo "coverage: linux: GTK harnesses failed; slice skipped" >&2
             fi
         else
             echo "coverage: linux: app smoke slice skipped (needs zig-out libs, ImageMagick, a display/xvfb-run, and a model in models/)" >&2

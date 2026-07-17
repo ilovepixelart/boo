@@ -214,12 +214,13 @@ jobs:
         # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
 
-      - name: Overlay harness (headless GTK)
-        # linux/tests/overlay_harness.c drives the overlay's handlers directly
-        # under Xvfb: the transcription worker round-trip, the tracked-idle
-        # machinery, the Settings dialog, and the download engine against a
-        # local HTTP server. This is the harness that pinned the
-        # begin_transcription use-after-free the pixel smoke could not reach.
+      - name: GTK harnesses (headless)
+        # linux/tests/{overlay,main}_harness.c drive the frontend handlers
+        # directly under Xvfb: the transcription worker round-trip, tracked
+        # idles, the Settings dialog and download engine (overlay), and the app
+        # entry's dialogs, crash surfacing, and model-load error path (main).
+        # The overlay one pinned the begin_transcription use-after-free the
+        # pixel smoke could not reach.
         run: bash linux/tests/ui-harness.sh
 
       - name: Install kcov

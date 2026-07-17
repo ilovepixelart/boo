@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Build and run the headless overlay harness (overlay_harness.c) against the
-# real GTK stack. Complements ui-smoke.sh: the smoke asserts rendered pixels,
-# this drives the handlers the smoke cannot reach (transcription round-trip,
-# tracked idles, the Settings dialog, the download engine).
+# Build and run the headless GTK harnesses (overlay_harness.c, main_harness.c)
+# against the real GTK stack. Complements ui-smoke.sh: the smoke asserts
+# rendered pixels, these drive the handlers the smoke cannot reach (the
+# transcription round-trip, tracked idles, the Settings dialog and download
+# engine, and the app entry's dialogs, crash surfacing, and model-load error
+# path). Each harness builds and runs in its own subdir of the build dir.
 #
 # Needs: GTK4 + libadwaita + libsoup dev packages, zig (the archives link via
 # `zig c++`, whisper's C++ was compiled against zig's bundled libc++), the
@@ -63,21 +65,35 @@ cflags=(-O0 -g -std=c11 -Wall -Wextra -I "$root/linux/src" -I "$root/include")
 # shellcheck disable=SC2206  # word-splitting the extra flags is the point
 [[ -n "${BOO_HARNESS_CFLAGS:-}" ]] && cflags+=($BOO_HARNESS_CFLAGS)
 
-(
-    cd "$build_dir"
-    for src in global_shortcut text_inject portal waveform_widget models; do
-        # shellcheck disable=SC2046
-        cc "${cflags[@]}" $(pkg-config --cflags gtk4 libadwaita-1 libsoup-3.0) \
-            -c "$root/linux/src/$src.c" -o "$src.o"
-    done
-    # shellcheck disable=SC2046
-    cc "${cflags[@]}" $(pkg-config --cflags gtk4 libadwaita-1 libsoup-3.0) \
-        -c "$root/linux/tests/overlay_harness.c" -o overlay_harness.o
-    # shellcheck disable=SC2046,SC2086
-    zig c++ ./*.o "$root/zig-out/lib/libboo-core.a" "$root/zig-out/lib/libwhisper.a" \
-        $(pkg-config --libs gtk4 libadwaita-1 libsoup-3.0 libpipewire-0.3) \
-        ${BOO_HARNESS_LIBS:-} -lm -lpthread -o overlay_harness
-)
+gtk_cflags=$(pkg-config --cflags gtk4 libadwaita-1 libsoup-3.0)
+gtk_libs=$(pkg-config --libs gtk4 libadwaita-1 libsoup-3.0 libpipewire-0.3)
+
+# Build one harness in its own subdir so gcov counters never collide: both
+# harnesses cover overlay_window.c (overlay_harness #includes it; main_harness
+# links it as a separate object), and one shared gcov dir would let the second
+# .gcda overwrite the first's .gcov. `frontend` is the frontend sources to
+# compile alongside; overlay_harness omits overlay_window.c (it is #included),
+# main_harness lists it.
+build_and_run_harness() { # <name> <frontend-source-list>
+    local name=$1 frontend=$2 src
+    local dir="$build_dir/$name"
+    mkdir -p "$dir"
+    (
+        cd "$dir"
+        for src in $frontend; do
+            # shellcheck disable=SC2046,SC2086
+            cc "${cflags[@]}" $gtk_cflags -c "$root/linux/src/$src.c" -o "$src.o"
+        done
+        # shellcheck disable=SC2046,SC2086
+        cc "${cflags[@]}" $gtk_cflags -c "$root/linux/tests/$name.c" -o "$name.o"
+        # shellcheck disable=SC2046,SC2086
+        zig c++ ./*.o "$root/zig-out/lib/libboo-core.a" \
+            "$root/zig-out/lib/libwhisper.a" $gtk_libs \
+            ${BOO_HARNESS_LIBS:-} -lm -lpthread -o "$name"
+    )
+    # Run from the repo root so ./themes resolves for the theme checks.
+    (cd "$root" && GSK_RENDERER=cairo "${runner[@]}" "$dir/$name")
+}
 
 runner=()
 if [[ -z "${DISPLAY:-}" ]]; then
@@ -88,5 +104,5 @@ if [[ -z "${DISPLAY:-}" ]]; then
     runner=(xvfb-run -a)
 fi
 
-# Run from the repo root so ./themes resolves for the theme checks.
-(cd "$root" && GSK_RENDERER=cairo "${runner[@]}" "$build_dir/overlay_harness")
+build_and_run_harness overlay_harness "global_shortcut text_inject portal waveform_widget models"
+build_and_run_harness main_harness "global_shortcut text_inject portal waveform_widget models overlay_window"
