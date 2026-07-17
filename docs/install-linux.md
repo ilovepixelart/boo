@@ -14,8 +14,11 @@ troubleshooting.
 flatpak install --user boo-<version>-x86_64.flatpak
 ```
 
-The model goes inside the sandbox's data dir. Parakeet is the best pick: near
-large-v3 accuracy at `base.en` speed, 25 languages, auto-detected (669 MB):
+**The easy way: just launch Boo.** With no model installed it offers a
+download dialog (curated list, progress bar, checksum-verified), and you can
+change or download models later in Settings. The manual way: the model goes
+inside the sandbox's data dir. Parakeet is the best pick: near large-v3
+accuracy at `base.en` speed, 25 languages, auto-detected (669 MB):
 
 ```sh
 mkdir -p ~/.var/app/com.boo.app/data/boo/models

@@ -23,7 +23,7 @@ Status: `have` (shipped, keep it working), `verify` (probably fine, prove it),
 |---|---|---|---|
 | 7 | Deterministic word replacements + user vocabulary (initial prompt) + optional filler-word removal | build | Top-3 request everywhere; keep replacements deterministic and local. Carried prompts can cause repetition, see item 1 |
 | 8 | Transcript history with re-copy (and the raw audio from item 3) | have (all three stack cards with per-card copy); build (raw-audio re-copy) | Pairs with the never-lose guarantee |
-| 9 | Model doctor: checksum after download instructions, explicit load-error messages, visible compute-device indicator (CPU/GPU) | build (errors partial) | Silent model-load failure reads as "app is broken"; device opacity is a recurring complaint |
+| 9 | Model doctor: checksum after download instructions, explicit load-error messages, visible compute-device indicator (CPU/GPU) | have (in-app downloads verify pinned SHA-256s; truncated files detected via `boo_model_verify` and re-offered for download; load errors explicit); build (device indicator) | Silent model-load failure reads as "app is broken"; device opacity is a recurring complaint |
 | 10 | Microphone picker with live level meter; prefer the built-in mic over Bluetooth headsets by default | build | Opening a Bluetooth mic drops it to the low-quality hands-free profile and can add seconds of latency; a hidden cause of "transcripts are garbage" |
 | 11 | Verify-before-paste: confirm the clipboard actually holds the transcript before synthesizing the paste chord, and restore non-text clipboard formats if restore is ever added | verify | Clipboard races under CPU load are the highest-commented bug class in a comparable tool |
 | 12 | Detect macOS Secure Keyboard Entry and say so instead of pasting into the void | build (Ghostty path already immune) | Classic "works everywhere except my terminal" mystery |
@@ -37,12 +37,14 @@ Status: `have` (shipped, keep it working), `verify` (probably fine, prove it),
 | 15 | Spoken punctuation commands ("new line", "new paragraph") as a pre-delivery transform | build | The number-one gripe of long-form dictation veterans |
 | 16 | Windows CPU baseline stays `-mcpu baseline` with runtime feature detection when SIMD tiers ever diverge | have | Illegal-instruction crashes on older CPUs are a recurring release-day failure elsewhere |
 
-A pick-and-download model onboarding dialog (dropdown of curated models,
-progress bar, then load and open the app) is under design in
-[model-onboarding.md](model-onboarding.md); it replaces the copy-a-curl-command
-first run. It is consistent with the privacy stance, the VAD model is already
-auto-fetched over TLS against a pinned hash, and a user-initiated, hash-verified
-download from a curated list is strictly more conservative than that.
+The pick-and-download model onboarding dialog (dropdown of curated models,
+progress bar, then load and open the app) ships on macOS and Linux, and the
+Settings model switcher reuses its machinery to download and swap models in
+place; Windows still shows the curl hint until its download flow lands. Design
+record: [model-onboarding.md](model-onboarding.md). It is consistent with the
+privacy stance, the VAD model is already auto-fetched over TLS against a pinned
+hash, and a user-initiated, hash-verified download from a curated list is
+strictly more conservative than that.
 
 Explicitly rejected for now: muting other audio while recording (fails to restore
 volume reliably on external DACs elsewhere), and cloud anything.

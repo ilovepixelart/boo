@@ -1,21 +1,21 @@
 # Logging and crash reporting
 
-Research + design for making a field bug **diagnosable from a log plus a local
-crash report**, with no debugger attached and no telemetry. Nothing here is built
-yet; this is the plan and the privacy contract.
+Design for making a field bug **diagnosable from a log plus a local crash
+report**, with no debugger attached and no telemetry.
 
 ## Where it stands today
 
 | Layer | Logging today | Crash handling today |
 |---|---|---|
-| Core (Zig) | `std.debug.print` / `std.log` in `main.zig`, `bench.zig` | none |
-| macOS | `NSLog` scattered across `AppDelegate`, `Theme`, `Permissions` | none |
-| Linux | `g_warning` / `g_message` / `g_debug` (GLib, → journald/stderr) | none |
-| Windows | a little `OutputDebugString`; mostly silent | none |
+| Core (Zig) | `src/log.zig`: leveled file sink + stderr, exposed as `boo_log_init` / `boo_log` | none |
+| macOS | core logger → `~/Library/Logs/Boo/boo.log` (plus legacy `NSLog` lines) | none |
+| Linux | core logger → `$XDG_STATE_HOME/boo/boo.log` (plus GLib warnings → journald) | none |
+| Windows | core logger → `%LOCALAPPDATA%\Boo\logs\boo.log` | none |
 
-Two gaps: logging is **ad hoc and unstructured** (no levels, no file, no
-lifecycle trail), and **nothing captures a crash**. A user who hits a segfault or
-a silent exit has nothing to send us.
+The logging half is built: one leveled logger in the core, one file per OS,
+lifecycle events logged as metadata (never transcript text, see the privacy
+contract below). The crash half is not: nothing captures a segfault or silent
+exit yet, so that is the open work.
 
 ## Privacy contract (non-negotiable)
 

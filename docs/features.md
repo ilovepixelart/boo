@@ -45,7 +45,7 @@ real-mic acceptance still runs on real hardware against this table.
 | Explicit "copied / pasted" confirmation | ~ | Y | Y | Status/toast confirms the outcome (M shows in bubble) |
 | Elevated/secure-input handling stated, not silent | Y | n/a | Y | Dictate into an admin window; told to press paste yourself |
 | Ghostty fast path (pty insert, no clipboard, Secure Input safe) | Y | n/a | n/a | Dictate into Ghostty on macOS; no clipboard change |
-| Auto-type toggle (clipboard-only mode) | Y | - | - | Settings > turn off Auto-type; transcript copies but doesn't paste |
+| Auto-type toggle (clipboard-only mode) | Y | Y | Y | Settings > turn off Auto-type; transcript copies but doesn't paste |
 
 ## 4. Window and visual UI
 
@@ -61,7 +61,7 @@ real-mic acceptance still runs on real hardware against this table.
 | Shared brand accent (record red `#FF3B30`, default-theme state colors) | Y | Y | Y | Accent is Boo's, not the OS blue/adwaita |
 | Circular record button (idle circle / recording rounded-square) | Y | Y | Y | Button is a red disc, morphs on record |
 | Follows system light/dark | ~ | - | Y | Flip OS theme; window follows (M has 486 themes instead; L pins the dark default theme) |
-| 486 Ghostty color themes, searchable | Y | - | - | Settings > theme picker |
+| 486 Ghostty color themes, searchable | Y | Y | ~ | Settings > theme picker (W: name list, search deferred) |
 
 ## 5. System integration
 
@@ -72,9 +72,10 @@ real-mic acceptance still runs on real hardware against this table.
 | Hotkey shown in the tray/menu item text | Y | n/a | Y | Menu reads "Record (Ctrl+Shift+Space)" |
 | Window **close / hide** control | Y (traffic lights) | Y (header bar) | Y (x glyph hides) | A way to hide/close from the window itself |
 | Single-instance (second launch surfaces the first) | n/a | Y | Y | Launch twice; one window |
-| Settings window | Y | - | - | Cmd+, opens settings |
-| Window opacity control | Y | - | - | Settings > Opacity slider (0.1-1.0) changes window translucency |
-| Theme picker: search + per-theme swatch + palette preview | Y | - | - | Settings > search filters 486 themes, each with a color swatch |
+| Settings window | Y | Y | Y | Cmd+, (M), header-bar gear (L), tray menu (W) opens settings |
+| Window opacity control | Y | Y | Y | Settings > Opacity slider (0.1-1.0) changes window translucency |
+| Theme picker: search + per-theme swatch + palette preview | Y | Y | ~ | Settings > search filters 486 themes, each with a color swatch (W: name list only) |
+| Model switcher: dropdown + in-place swap + persisted choice | Y | Y | ~ | Settings > pick a model; absent manifest models download inline (M, L; W dropdown lists on-disk models only until its onboarding lands) |
 | Permissions handled with clear prompts/messages | Y (mic, Accessibility, Automation) | Y (portals) | Y (none needed; privacy toggle noted) | First-run permission flow |
 
 ## 6. Privacy and security
@@ -82,7 +83,7 @@ real-mic acceptance still runs on real hardware against this table.
 | Feature | M | L | W | How to test |
 |---|---|---|---|---|
 | Audio and transcripts never leave the machine | Y | Y | Y | No outbound traffic during dictation |
-| Only outbound request is the pinned-hash VAD model download | Y | Y | Y | First run fetches ~1MB silero, checksum-verified |
+| Outbound requests are only pinned-hash model downloads (auto VAD fetch; speech models on request) | Y | Y | Y | First run fetches ~1MB silero; onboarding/Settings downloads verify against pinned SHA-256s |
 | Text-injection capability documented (SECURITY.md) | Y | Y | Y | Review SECURITY.md |
 
 ## Priority gaps (the parity backlog)
@@ -96,6 +97,6 @@ From the columns above, the cross-platform work, in impact order:
 3. **Windows tray live indicator** is elapsed-tooltip only; the macOS menu bar
    draws a live waveform with a timer.
 
-Deferred (platform-bound, bigger): the Settings window beyond macOS (opacity
-slider, auto-type toggle, 486-theme picker with search/swatch/palette preview);
-translucency on Linux/Windows.
+Deferred (smaller): the Windows theme picker's search, per-row swatches, and
+palette preview (it lists names only); download entries in the Windows model
+switcher, which arrive with its onboarding flow.

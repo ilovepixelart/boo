@@ -25,6 +25,14 @@ With several models installed, Boo picks the most capable one it recognizes:
 Parakeet transcribes at ~120x realtime (11s of audio in under 100ms); turbo
 runs at ~20x.
 
+You rarely need the shell for any of this: first run with no model offers a
+download dialog, and **Settings has a model switcher**, one dropdown of
+everything on disk plus the curated models not yet downloaded (picking one
+downloads it with progress, verifies its pinned SHA-256, and swaps to it in
+place). An explicit choice there persists and beats the capability ranking on
+later launches. Partial files from an interrupted manual download are detected
+by size and skipped, and offered for re-download instead.
+
 The `.en` models are English-only. Everything else is multilingual, but see
 [Non-English dictation](#non-english-dictation), or they'll silently produce
 English.

@@ -1,9 +1,15 @@
 # Model onboarding: a pick-and-download dialog
 
-Research + design for replacing the "no model found, here is a curl command"
+Design record for replacing the "no model found, here is a curl command"
 dialog with a native picker that downloads the chosen model, shows progress,
-and drops the user straight into a working app. Nothing here is built yet; this
-is the plan and the decision record.
+and drops the user straight into a working app.
+
+**Status: shipped on macOS (`macos/Sources/ModelOnboarding.swift`) and Linux
+(`linux/src/main.c` + `linux/src/models.c`); Windows still shows the curl
+hint.** The curated manifest with pinned SHA-256s is the core's `boo_models`
+(`src/c_api.zig`), and the Settings model switcher reuses the same download
+machinery to fetch and swap models after onboarding. The rest of this document
+is the decision record.
 
 ## The problem
 

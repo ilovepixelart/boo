@@ -19,7 +19,7 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 - A full end-to-end hotkey *bind* on a live KDE/Hyprland session (KDE's Qt backend needs a real display, which a headless VM only partly provides). The interface is confirmed present and responsive; a human on real KDE hardware is the remaining check.
 - The GTK4 UI has not been driven by a human on a real desktop.
 
-**The Linux app is smaller than the macOS one:** no menu-bar item, no settings dialog, no theme picker, and it doesn't stay on top. Recording, transcription and auto-paste all work.
+**The Linux app is close to macOS parity:** settings dialog (opacity, auto-type, 486-theme picker, model switcher with in-app downloads), streaming transcription, and first-run model onboarding all ship. What it lacks: a tray/menu-bar item (GNOME has no tray) and staying on top. Recording, transcription and auto-paste all work.
 
 **Windows is experimental**, one notch below the Linux preview, and the label is precise:
 
@@ -30,4 +30,4 @@ Linux ships as a **preview** Flatpak. Being precise about what that means, becau
 
 **First run happened, in a Windows 11 ARM64 VM (UTM on Apple Silicon):** the x86_64 zip crashed on launch with `STATUS_ILLEGAL_INSTRUCTION` under x86 emulation. That was an architecture mismatch, not a code bug (the binary has zero AVX; emulation still tripped), and the fix was to ship a native `boo-<version>-windows-arm64.zip`, which the release now does. Whether the x86_64 build also traps on *real* Intel/AMD hardware is still open.
 
-**Still not verified:** a successful dictation on any Windows build. Microphone capture, the tray icon, the hotkey, focus behavior and auto-paste are design-validated but not yet confirmed by a human. The full checklist is [`windows/tests/manual.md`](../windows/tests/manual.md); passing it is the gate for promoting Windows to preview. Streaming transcription is not wired into the Windows frontend yet; it transcribes when you stop, like the pre-streaming releases. Bug reports are genuinely useful here.
+**Still not verified:** a successful dictation on any Windows build. Microphone capture, the tray icon, the hotkey, focus behavior and auto-paste are design-validated but not yet confirmed by a human. The full checklist is [`windows/tests/manual.md`](../windows/tests/manual.md); passing it is the gate for promoting Windows to preview. Bug reports are genuinely useful here.

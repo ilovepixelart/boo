@@ -69,7 +69,7 @@ The whole loop is three steps:
 
 That is it, there is nothing to sign into and nothing leaves your machine. You can also click the record button in Boo's window (or the tray/menu-bar item where the OS has one). Past transcripts stack up as cards in the window, each with copy and dismiss.
 
-Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from, never itself. The settings window (opacity, auto-type toggle, 486 [Ghostty-format](https://ghostty.org) themes) is macOS-only for now; the full per-feature matrix is [docs/features.md](docs/features.md).
+Every transcript is **copied to the clipboard** and **pasted into whatever app was focused** when you started recording. Boo deliberately targets the app you came from, never itself. All three frontends ship a settings window: opacity, auto-type toggle, 486 [Ghostty-format](https://ghostty.org) themes, and a model switcher that downloads and swaps models in place; the full per-feature matrix is [docs/features.md](docs/features.md).
 
 ## Ghostty integration
 
@@ -87,7 +87,7 @@ Per-platform build guides, packaging, the release checklist, the full test-suite
 
 ## Security
 
-Your audio and transcripts never leave the machine: nothing Boo records or produces is ever uploaded. Boo makes exactly one kind of outbound request, downloading the optional Silero VAD model from Hugging Face on first run (verified against a pinned SHA-256), and never sends anything. Transcription is fully local. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
+Your audio and transcripts never leave the machine: nothing Boo records or produces is ever uploaded. Boo makes exactly one kind of outbound request, model downloads from Hugging Face (the ~1MB Silero VAD model automatically on first run, speech models only when you ask, from the onboarding dialog or Settings), each verified against a SHA-256 pinned in the binary, and never sends anything. Transcription is fully local. The text-injection paths (which do hold real capabilities) and the sandbox permissions are documented in [SECURITY.md](SECURITY.md), along with how to report an issue.
 
 ## License
 

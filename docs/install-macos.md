@@ -32,8 +32,12 @@ blocked launch, if you don't see it, double-click Boo again first.
 
 ## Get a model
 
-Boo needs a GGML speech model, none is bundled. Parakeet is the best pick:
-near large-v3 accuracy at `base.en` speed, 25 languages, auto-detected (669 MB):
+Boo needs a GGML speech model, none is bundled. **The easy way: just launch
+Boo.** With no model installed it offers a download dialog (curated list,
+progress bar, checksum-verified), and you can change or download models later
+in Settings. The manual way, if you prefer the shell: Parakeet is the best
+pick, near large-v3 accuracy at `base.en` speed, 25 languages, auto-detected
+(669 MB):
 
 ```sh
 mkdir -p ~/.boo/models
