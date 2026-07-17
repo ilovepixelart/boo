@@ -25,6 +25,24 @@ static int fail_dialog(const WCHAR *heading, const WCHAR *body) {
     return 1;
 }
 
+// Open the diagnostic log at %LOCALAPPDATA%\Boo\logs\boo.log. Best-effort; on
+// failure boo_log falls back to stderr. Never logs recognized text.
+static void init_logging(void) {
+    WCHAR base[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    WCHAR dir[MAX_PATH];
+    if (swprintf(dir, MAX_PATH, L"%ls\\Boo", base) < 0) return;
+    CreateDirectoryW(dir, NULL);
+    if (swprintf(dir, MAX_PATH, L"%ls\\Boo\\logs", base) < 0) return;
+    CreateDirectoryW(dir, NULL);
+    WCHAR path[MAX_PATH];
+    if (swprintf(path, MAX_PATH, L"%ls\\boo.log", dir) < 0) return;
+    char upath[MAX_PATH * 3];
+    if (WideCharToMultiByte(CP_UTF8, 0, path, -1, upath, sizeof(upath), NULL, NULL) > 0)
+        boo_log_init(upath, BOO_LOG_INFO);
+}
+
 int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     (void)prev;
     (void)cmdline;
@@ -40,8 +58,11 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
         return 0;
     }
 
+    init_logging();
+
     char *model_path = boo_model_find();
     if (!model_path) {
+        boo_log(BOO_LOG_ERROR, "no speech model found");
         WCHAR hint[1024];
         boo_model_missing_hint(hint, ARRAYSIZE(hint));
         return fail_dialog(L"No speech model found", hint);
@@ -50,6 +71,7 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     BooContext *ctx = boo_init(model_path);
     free(model_path);
     if (!ctx) {
+        boo_log(BOO_LOG_ERROR, "speech model failed to load");
         return fail_dialog(
             L"Could not start Boo",
             L"The model file exists but could not be loaded, or the microphone "
@@ -58,6 +80,8 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
             L"Microphone,\nboth the global toggle and \"Let desktop apps access "
             L"your microphone\".");
     }
+
+    boo_log(BOO_LOG_INFO, "speech model loaded");
 
     static BooApp app; // zero-initialized
     app.ctx = ctx;
