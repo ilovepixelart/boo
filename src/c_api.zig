@@ -665,8 +665,15 @@ test "boo_reload_model swaps the engine in place and survives a bad path" {
     defer boo_deinit(ctx);
     const engine_before = &ctx.engine;
 
-    // A bad path must leave the context serving with the old engine.
+    // A bad path (the user deleted the file, say) must leave the context
+    // serving with the old engine, and serving means decoding, not merely
+    // existing: push a second of audio through it after the failed swap.
     try testing.expect(!boo_reload_model(ctx, "/nonexistent/model.bin"));
+    const silence = try testing.allocator.alloc(f32, 16000);
+    defer testing.allocator.free(silence);
+    @memset(silence, 0.0);
+    const text = try ctx.engine.transcribe(testing.allocator, silence, false);
+    testing.allocator.free(text);
 
     // A good path swaps in place: same slot, same context pointer.
     try testing.expect(boo_reload_model(ctx, model));
