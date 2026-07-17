@@ -79,10 +79,8 @@ extension AppDelegate {
 
         win.contentView = content
         // Wire the controls to a downloader the button action can reach.
-        modelDownloader = ModelDownloader(
-            models: models, count: count, popup: popup, bar: bar, status: status,
-            button: button, window: win
-        ) { [weak self] path in
+        let ui = DownloadUI(popup: popup, bar: bar, status: status, button: button, window: win)
+        modelDownloader = ModelDownloader(models: models, count: count, ui: ui) { [weak self] path in
             win.close()
             self?.startWithModel(path: path)
         }
@@ -91,7 +89,7 @@ extension AppDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc func startModelDownload(_ sender: NSButton) {
+    @objc func startModelDownload(_: NSButton) {
         modelDownloader?.start()
     }
 
@@ -100,60 +98,59 @@ extension AppDelegate {
     }
 }
 
+/// The download dialog's controls, grouped so the downloader takes one handle.
+struct DownloadUI {
+    let popup: NSPopUpButton
+    let bar: NSProgressIndicator
+    let status: NSTextField
+    let button: NSButton
+    let window: NSWindow
+}
+
 /// Streams the selected model with progress, verifies its pinned SHA-256, moves
 /// it into ~/.boo/models, and reports the final path.
 final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     private let models: UnsafePointer<BooModelInfo>
     private let count: Int
-    private let popup: NSPopUpButton
-    private let bar: NSProgressIndicator
-    private let status: NSTextField
-    private let button: NSButton
-    private let window: NSWindow
+    private let ui: DownloadUI
     private let onDone: (String) -> Void
     private var session: URLSession?
     private var model: BooModelInfo?
 
     init(
-        models: UnsafePointer<BooModelInfo>, count: Int, popup: NSPopUpButton,
-        bar: NSProgressIndicator, status: NSTextField, button: NSButton, window: NSWindow,
+        models: UnsafePointer<BooModelInfo>, count: Int, ui: DownloadUI,
         onDone: @escaping (String) -> Void
     ) {
         self.models = models
         self.count = count
-        self.popup = popup
-        self.bar = bar
-        self.status = status
-        self.button = button
-        self.window = window
+        self.ui = ui
         self.onDone = onDone
     }
 
     func start() {
-        let idx = popup.indexOfSelectedItem
+        let idx = ui.popup.indexOfSelectedItem
         guard idx >= 0, idx < count, let url = URL(string: str(models[idx].url)) else { return }
         model = models[idx]
-        button.isEnabled = false
-        popup.isEnabled = false
-        window.standardWindowButton(.closeButton)?.isEnabled = false  // no mid-download close
-        status.stringValue = "Downloading…"
+        ui.button.isEnabled = false
+        ui.popup.isEnabled = false
+        ui.window.standardWindowButton(.closeButton)?.isEnabled = false  // no mid-download close
+        ui.status.stringValue = "Downloading…"
         let cfg = URLSessionConfiguration.default
         session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
         session?.downloadTask(with: url).resume()
     }
 
     func urlSession(
-        _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData: Int64,
-        totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+        _: URLSession, downloadTask _: URLSessionDownloadTask, didWriteData _: Int64,
+        totalBytesWritten: Int64, totalBytesExpectedToWrite _: Int64
     ) {
         let total = Double(model?.size ?? 0)
-        if total > 0 { bar.doubleValue = Double(totalBytesWritten) / total * 100 }
+        if total > 0 { ui.bar.doubleValue = Double(totalBytesWritten) / total * 100 }
     }
 
     // Must move/verify synchronously: URLSession deletes `location` on return.
     func urlSession(
-        _ session: URLSession, downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
+        _: URLSession, downloadTask _: URLSessionDownloadTask, didFinishDownloadingTo location: URL
     ) {
         guard let model = model else { return }
         guard let data = try? Data(contentsOf: location, options: .mappedIfSafe) else {
@@ -180,18 +177,16 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         onDone(dest.path)
     }
 
-    func urlSession(
-        _ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?
-    ) {
+    func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
         if let error = error { fail("Download failed: \(error.localizedDescription)") }
     }
 
     private func fail(_ why: String) {
         boo_log(Int32(BOO_LOG_ERROR), "model download failed")
-        status.stringValue = why
-        button.isEnabled = true
-        popup.isEnabled = true
-        window.standardWindowButton(.closeButton)?.isEnabled = true
+        ui.status.stringValue = why
+        ui.button.isEnabled = true
+        ui.popup.isEnabled = true
+        ui.window.standardWindowButton(.closeButton)?.isEnabled = true
     }
 
     private func str(_ p: UnsafePointer<CChar>?) -> String {
