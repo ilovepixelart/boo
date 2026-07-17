@@ -47,6 +47,12 @@ const char *boo_transcribe(BooContext *ctx);
 // Idempotent; returns false if the model cannot be loaded.
 bool boo_load_vad(BooContext *ctx, const char *vad_model_path);
 
+// Swap the speech model in place; the context pointer stays valid, so a
+// frontend switches models without rebuilding anything. On failure the old
+// model keeps serving and this returns false. Loading takes seconds, call it
+// off the UI thread; refuse swaps while recording or transcribing for UX.
+bool boo_reload_model(BooContext *ctx, const char *model_path);
+
 // Call every 200-500ms from ONE background thread while recording. Cheap
 // when nothing ended; blocks for one utterance's inference when it did.
 // Returns true when new committed text is available.

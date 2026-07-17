@@ -3,7 +3,7 @@ import Cocoa
 class SettingsWindowController: NSWindowController {
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 490),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -24,10 +24,15 @@ class SettingsViewController: NSViewController {
     var opacityLabel: NSTextField!
     var autoTypeCheckbox: NSButton!
     var themePreview: NSView!
+    var modelPopup: NSPopUpButton!
+    var modelStatus: NSTextField!
     var filteredThemes: [(Int, BooTheme)] = []
+    var installedModels: [(name: String, path: String)] = []
+
+    private var appDelegate: AppDelegate? { NSApp.delegate as? AppDelegate }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 400))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 490))
     }
 
     override func viewDidLoad() {
@@ -81,6 +86,35 @@ class SettingsViewController: NSViewController {
         autoTypeCheckbox.font = .systemFont(ofSize: 13)
         stack.addArrangedSubview(autoTypeCheckbox)
 
+        // ── Model ──
+        let modelTitle = NSTextField(labelWithString: "Model")
+        modelTitle.font = .systemFont(ofSize: 13, weight: .medium)
+        stack.addArrangedSubview(modelTitle)
+
+        let modelRow = NSStackView()
+        modelRow.orientation = .horizontal
+        modelRow.spacing = 8
+
+        modelPopup = NSPopUpButton()
+        modelPopup.target = self
+        modelPopup.action = #selector(modelChanged(_:))
+        modelPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        modelRow.addArrangedSubview(modelPopup)
+
+        let downloadButton = NSButton(
+            title: "Download…", target: self, action: #selector(downloadModel(_:)))
+        downloadButton.bezelStyle = .rounded
+        modelRow.addArrangedSubview(downloadButton)
+
+        stack.addArrangedSubview(modelRow)
+
+        modelStatus = NSTextField(labelWithString: "")
+        modelStatus.font = .systemFont(ofSize: 11)
+        modelStatus.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(modelStatus)
+
+        reloadModelList()
+
         // ── Theme section ──
         let themeTitle = NSTextField(labelWithString: "Theme")
         themeTitle.font = .systemFont(ofSize: 13, weight: .medium)
@@ -131,6 +165,55 @@ class SettingsViewController: NSViewController {
 
     @objc func autoTypeChanged(_ sender: NSButton) {
         NotificationCenter.default.post(name: .autoTypeChanged, object: sender.state == .on)
+    }
+
+    /// Refill the model popup from disk and select the loaded model.
+    func reloadModelList() {
+        guard let app = appDelegate else { return }
+        installedModels = app.installedModels()
+        modelPopup.removeAllItems()
+        for model in installedModels {
+            modelPopup.addItem(withTitle: model.name)
+        }
+        if let current = app.currentModelPath,
+            let idx = installedModels.firstIndex(where: { $0.path == current })
+        {
+            modelPopup.selectItem(at: idx)
+        }
+    }
+
+    @objc func modelChanged(_ sender: NSPopUpButton) {
+        let idx = sender.indexOfSelectedItem
+        guard let app = appDelegate, idx >= 0, idx < installedModels.count else { return }
+        let target = installedModels[idx]
+        guard target.path != app.currentModelPath else { return }
+        if let ctx = app.booCtx, boo_is_recording(ctx) || boo_is_transcribing(ctx) {
+            modelStatus.stringValue = "Stop recording first."
+            reloadModelList()  // snap the selection back to the loaded model
+            return
+        }
+        modelPopup.isEnabled = false
+        modelStatus.stringValue = "Loading \(target.name)…"
+        app.switchModel(path: target.path) { [weak self] ok in
+            guard let self = self else { return }
+            self.modelPopup.isEnabled = true
+            self.modelStatus.stringValue =
+                ok
+                ? "Loaded \(target.name)."
+                : "Could not load \(target.name); keeping the previous model."
+            if !ok { self.reloadModelList() }
+        }
+    }
+
+    @objc func downloadModel(_: NSButton) {
+        appDelegate?.showDownloadWindow { [weak self] path in
+            self?.appDelegate?.switchModel(path: path) { ok in
+                guard let self = self else { return }
+                self.reloadModelList()
+                self.modelStatus.stringValue =
+                    ok ? "Downloaded and switched." : "Downloaded, but it could not be loaded."
+            }
+        }
     }
 
     @objc func searchChanged(_ sender: NSSearchField) {

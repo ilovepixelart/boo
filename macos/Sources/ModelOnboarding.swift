@@ -37,10 +37,13 @@ extension AppDelegate {
     }
 
     /// A small window: a model dropdown + a progress bar + Download.
-    func showDownloadWindow() {
+    /// `onDone` receives the verified path; nil means first-run onboarding,
+    /// which boots the app with the download (and quits when there is nothing
+    /// to offer, since no model can be loaded any other way at that point).
+    func showDownloadWindow(onDone: ((String) -> Void)? = nil) {
         var count = 0
         guard let models = boo_models(&count), count > 0 else {
-            NSApp.terminate(nil)
+            if onDone == nil { NSApp.terminate(nil) }
             return
         }
 
@@ -64,7 +67,10 @@ extension AppDelegate {
         bar.maxValue = 100
         content.addSubview(bar)
 
-        let status = NSTextField(labelWithString: "Downloads to ~/.boo/models, then opens Boo.")
+        let status = NSTextField(
+            labelWithString: onDone == nil
+                ? "Downloads to ~/.boo/models, then opens Boo."
+                : "Downloads to ~/.boo/models, then switches to it.")
         status.frame = NSRect(x: 20, y: 48, width: 380, height: 18)
         status.textColor = .secondaryLabelColor
         status.font = .systemFont(ofSize: 11)
@@ -80,9 +86,10 @@ extension AppDelegate {
         win.contentView = content
         // Wire the controls to a downloader the button action can reach.
         let ui = DownloadUI(popup: popup, bar: bar, status: status, button: button, window: win)
-        modelDownloader = ModelDownloader(models: models, count: count, ui: ui) { [weak self] path in
+        let done = onDone ?? { [weak self] path in self?.startWithModel(path: path) }
+        modelDownloader = ModelDownloader(models: models, count: count, ui: ui) { path in
             win.close()
-            self?.startWithModel(path: path)
+            done(path)
         }
         downloadWindow = win
         win.makeKeyAndOrderFront(nil)

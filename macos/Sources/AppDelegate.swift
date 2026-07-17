@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Retained while the onboarding download runs (ModelOnboarding.swift).
     var modelDownloader: ModelDownloader?
     var downloadWindow: NSWindow?
+    /// Path of the model currently loaded into the core (Settings shows it).
+    private(set) var currentModelPath: String?
 
     /// Open the diagnostic log at ~/Library/Logs/Boo/boo.log. Never logs
     /// recognized text (see docs/logging-and-crash-reporting.md).
@@ -58,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         booCtx = ctx
+        currentModelPath = path
         boo_log(Int32(BOO_LOG_INFO), "speech model loaded")
 
         // Optional streaming VAD: when a Silero model is present, utterances
@@ -285,6 +288,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return env
         }
 
+        // A model the user explicitly picked in Settings wins over the
+        // capability ranking below; a stale choice (file deleted since) just
+        // falls through to auto-discovery.
+        if let saved = UserDefaults.standard.string(forKey: AppDelegate.modelDefaultsKey),
+            FileManager.default.fileExists(atPath: saved)
+        {
+            return saved
+        }
+
         let fm = FileManager.default
         for dir in modelSearchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
@@ -304,6 +316,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return (dir as NSString).appendingPathComponent(chosen)
         }
         return nil
+    }
+
+    /// UserDefaults key for the model the user explicitly picked in Settings.
+    /// Absent until the first manual switch, so a newly downloaded, more
+    /// capable model still wins auto-discovery by default.
+    static let modelDefaultsKey = "modelPath"
+
+    /// Speech models on disk for the Settings popup: every ggml-*.bin in the
+    /// search directories (minus the silero VAD models), deduplicated by
+    /// filename so ~/.boo/models shadows a bundled copy, ranked most capable
+    /// first with alphabetical tiebreak.
+    func installedModels() -> [(name: String, path: String)] {
+        let fm = FileManager.default
+        var seen = Set<String>()
+        var out: [(name: String, path: String)] = []
+        for dir in modelSearchDirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for name in entries.sorted()
+            where name.hasPrefix("ggml-") && name.hasSuffix(".bin")
+                && !name.hasPrefix("ggml-silero") && seen.insert(name).inserted
+            {
+                out.append((name, (dir as NSString).appendingPathComponent(name)))
+            }
+        }
+        return out.sorted { (boo_model_rank($0.name), $0.name) < (boo_model_rank($1.name), $1.name) }
+    }
+
+    /// Swap the loaded model in place (core boo_reload_model) off the main
+    /// thread; loading takes seconds. On failure the core keeps serving with
+    /// the old model. On success the choice persists and wins future launches.
+    func switchModel(path: String, completion: @escaping (Bool) -> Void) {
+        guard let ctx = booCtx, !boo_is_recording(ctx), !boo_is_transcribing(ctx) else {
+            completion(false)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = boo_reload_model(ctx, path)
+            DispatchQueue.main.async {
+                if ok {
+                    self.currentModelPath = path
+                    UserDefaults.standard.set(path, forKey: AppDelegate.modelDefaultsKey)
+                }
+                completion(ok)
+            }
+        }
     }
 
     /// Find a Silero VAD model (ggml-silero-*.bin) in the same places as the

@@ -168,6 +168,24 @@ export fn boo_load_vad(ctx: ?*BooContext, vad_model_path: [*:0]const u8) bool {
     return true;
 }
 
+/// Swap the speech model in place; the context pointer stays valid, so
+/// frontends switch models without rebuilding anything. The new engine loads
+/// before the old one is touched: on failure the context is untouched and
+/// keeps serving with the old model. VAD and chunker survive the swap, the
+/// chunker aims at the engine slot, not the engine value. Safe against
+/// concurrent ticks/transcriptions (mutex), though frontends should refuse
+/// mid-recording swaps for UX reasons.
+export fn boo_reload_model(ctx: ?*BooContext, model_path: [*:0]const u8) bool {
+    const c = ctx orelse return false;
+    const new_engine = Engine.init(std.mem.span(model_path), .{}) catch return false;
+    c.whisper_mutex.lock();
+    defer c.whisper_mutex.unlock();
+    c.engine.deinit();
+    c.engine = new_engine;
+    log.logf(.info, "model reloaded", .{});
+    return true;
+}
+
 export fn boo_start_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
     // One take at a time. Starting while the previous take is still being
@@ -532,6 +550,7 @@ test "every C entry point tolerates a null context" {
     try testing.expectEqual(@as(c_int, 0), boo_get_audio_samples(null));
     try testing.expect(boo_transcribe(null) == null);
     try testing.expect(boo_load_vad(null, "/nonexistent/vad.bin") == false);
+    try testing.expect(boo_reload_model(null, "/nonexistent/model.bin") == false);
     try testing.expect(boo_stream_tick(null) == false);
     try testing.expect(boo_get_live_transcript(null) == null);
 
@@ -548,6 +567,31 @@ test "the transcribing flag is atomic, not a plain bool" {
     // plain bool, that is a data race, so pin the type.
     const Field = @FieldType(BooContext, "transcribing");
     try testing.expectEqual(std.atomic.Value(bool), Field);
+}
+
+test "boo_reload_model swaps the engine in place and survives a bad path" {
+    // Runs only when the standard local model exists (~/.boo/models), like the
+    // stream tests; skips otherwise so CI checkouts stay green.
+    whisper_mod.setLogSilent();
+    const home = std.c.getenv("HOME") orelse return error.SkipZigTest;
+    var buf: [512]u8 = undefined;
+    const model = std.fmt.bufPrintSentinel(
+        &buf,
+        "{s}/.boo/models/ggml-base.en.bin",
+        .{std.mem.span(home)},
+        0,
+    ) catch return error.SkipZigTest;
+
+    const ctx = boo_init(model) orelse return error.SkipZigTest;
+    defer boo_deinit(ctx);
+    const engine_before = &ctx.engine;
+
+    // A bad path must leave the context serving with the old engine.
+    try testing.expect(!boo_reload_model(ctx, "/nonexistent/model.bin"));
+
+    // A good path swaps in place: same slot, same context pointer.
+    try testing.expect(boo_reload_model(ctx, model));
+    try testing.expectEqual(engine_before, &ctx.engine);
 }
 
 test "boo_deinit is safe to call twice via a nulled-out handle" {

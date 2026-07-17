@@ -159,9 +159,9 @@ elapsed timer (` 4s`, then ` 1:23`); while transcribing, it switches to
 
 ### Settings (all platforms)
 The macOS Settings window (`SettingsWindow.swift`) is the reference. It is a
-**cross-platform requirement**: every frontend presents the same three controls
+**cross-platform requirement**: every frontend presents the same four controls
 in native chrome (macOS AppKit, a GTK dialog on Linux, a Win32 dialog on
-Windows), each **persisted per user**. Its three controls:
+Windows), each **persisted per user**. Its four controls:
 
 **1. Opacity** slider, 0.1-1.0, **default 1.0** (fully opaque, matching
 Ghostty's `background-opacity` default), with a live monospace value label. It
@@ -173,7 +173,18 @@ user's opacity, not a constant.
 **2. Auto-type** checkbox ("Auto-type into focused app after transcription", on
 by default); off = clipboard-only, never paste.
 
-**3. Theme picker.** A search field filters the **486 Ghostty themes**, each row
+**3. Model switcher.** A dropdown of the speech models on disk (every
+`ggml-*.bin` in the model search directories minus the silero VAD models,
+deduplicated by filename, ranked by the core's `boo_model_rank`), plus a
+"Download…" button that reopens the onboarding download dialog and switches to
+the verified download. Selecting a model swaps it **in place** via the core's
+`boo_reload_model` (the context handle stays valid, the old model keeps
+serving on a failed load), off the UI thread with a status line; swaps are
+refused while recording or transcribing. The explicit choice **persists per
+user** and wins over ranked auto-discovery on later launches; a stale choice
+(file deleted since) falls back to auto-discovery.
+
+**4. Theme picker.** A search field filters the **486 Ghostty themes**, each row
 shows a color **swatch** + name, a 16-color **palette preview strip** sits at the
 bottom, and selecting one **re-themes the overlay live**. Default is *Ghostty
 Default Style Dark*. Backed by the **shared core parser** (§2): every frontend
@@ -224,6 +235,7 @@ platform-native chrome and the deferred items, nothing else.
 | Elapsed timer | status + menu bar | status | status + tray tooltip |
 | Tray / menu bar | live waveform + timer + menu | none (GNOME has no tray) | icon + menu; elapsed in tooltip only |
 | Settings: opacity + auto-type + theme picker | full (reference: slider w/ live value, checkbox, search + swatch + palette preview) | full (dialog: slider w/ live value, checkbox, search + swatch list + palette preview) | full (dialog: trackbar w/ live %, checkbox, theme name list); per-row swatch + search + palette preview deferred |
+| Settings: model switcher (dropdown + Download…) | full (in-place swap, persisted choice) | missing | missing |
 | Theme colors applied | 486-theme picker | 486-theme picker (dark default until one is picked) | 486-theme picker (system light/dark until one is picked) |
 
 The behavior-parity matrix and the remaining backlog live in
