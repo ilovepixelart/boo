@@ -147,6 +147,9 @@ jobs:
           New-Item -ItemType Directory pkg | Out-Null
           Copy-Item zig-out/bin/boo-app.exe pkg/
           Copy-Item LICENSE pkg/
+          # Bundle the Ghostty theme set next to the exe so the Settings theme
+          # picker has themes to offer (themes_dir looks beside the exe first).
+          Copy-Item -Recurse themes pkg/themes
           Compress-Archive -Path pkg/* -DestinationPath "boo-$env:TAG-windows-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v5

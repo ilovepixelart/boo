@@ -20,6 +20,7 @@
 
 #include "hotkey.h"
 #include "inject.h"
+#include "settings.h"
 #include "tray.h"
 #include "waveform.h"
 
@@ -53,6 +54,10 @@
 #define ICON_SIZE   12
 // Per-card display cap; the clipboard always carries the full text.
 #define CARD_MAX_UNITS 4096
+
+// System-menu command for "Settings"; arrives via WM_SYSCOMMAND. Must be
+// < 0xF000 and a multiple of 16 (Windows masks the low nibble).
+#define BOO_SC_SETTINGS 0x0010
 
 typedef struct {
     COLORREF bg, text, subtext, record, wave_idle, wave_rec, wave_think, card, card_live;
@@ -96,16 +101,39 @@ static COLORREF mix(COLORREF fg, COLORREF bg, float alpha) {
     return RGB(r, g, b);
 }
 
-// Tokens from the macOS reference's DEFAULT theme, "Ghostty Default Style
-// Dark" (docs/ui-spec.md): until Windows gains theme support these exact
-// values make it pixel-equivalent to a default-themed macOS build. The record
-// disc's #FF3B30 is the one color hardcoded on every platform. Card fills are
-// the reference's white@6%/white@3% pre-blended, since GDI has no alpha.
-// Light mode is the same accents over light-equivalent surfaces (the default
-// theme is dark; light follows the system toggle).
-static Palette palette(bool dark) {
+static COLORREF pcolor(uint32_t rgb) {
+    return RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+}
+
+// The overlay's colours. A theme picked in Settings wins; with none picked the
+// fallback below follows the system light/dark toggle. The dark fallback is the
+// macOS reference's default theme, "Ghostty Default Style Dark" (docs/ui-spec.md),
+// so a default Windows build is pixel-equivalent to a default-themed macOS one.
+// The record disc's #FF3B30 is the one colour hardcoded on every platform. Card
+// fills are the reference's white@6%/white@3% (black on light) pre-blended,
+// since GDI has no alpha.
+
+static Palette palette(const BooApp *app) {
     const COLORREF record = RGB(0xFF, 0x3B, 0x30);
-    if (dark) {
+    // A picked theme wins over the system light/dark follow, matching macOS and
+    // Linux. Its tokens map to the same slots the hardcoded default uses.
+    if (app->current_theme >= 0) {
+        const BooThemeColors *c = &app->themes[app->current_theme].colors;
+        const COLORREF bg = pcolor(c->bg);
+        // Card fills are white@6%/3% over a dark surface, black over a light one.
+        const int lum = ((c->bg >> 16) & 0xFF) + ((c->bg >> 8) & 0xFF) + (c->bg & 0xFF);
+        const COLORREF over = lum < 3 * 128 ? RGB(255, 255, 255) : RGB(0, 0, 0);
+        return (Palette){bg,
+                         pcolor(c->fg),
+                         pcolor(c->palette[8]), // dim
+                         record,
+                         pcolor(c->palette[14]), // idle
+                         pcolor(c->palette[9]),  // recording
+                         pcolor(c->palette[11]), // thinking
+                         mix(over, bg, 0.06f),
+                         mix(over, bg, 0.03f)};
+    }
+    if (app->dark) {
         const COLORREF bg = RGB(0x28, 0x2C, 0x34); // theme background
         return (Palette){bg,
                          RGB(0xFF, 0xFF, 0xFF), // theme foreground
@@ -338,7 +366,9 @@ static void on_transcribed(BooApp *app, char *text) {
         // because delivery only pastes when it still equals the CURRENT
         // foreground window, so the worst case is Ctrl+V landing in the
         // window the user is actually looking at.
-        switch (boo_inject_deliver(app->overlay, app->paste_target, text)) {
+        // Auto-type off makes Boo clipboard-only: pass no paste target.
+        HWND target = app->auto_type ? app->paste_target : NULL;
+        switch (boo_inject_deliver(app->overlay, target, text)) {
         case BOO_DELIVER_PASTED:
             set_status(app, L"copied to clipboard and pasted");
             break;
@@ -541,7 +571,7 @@ static void paint(BooApp *app, HWND hwnd) {
     HGDIOBJ old_bmp = SelectObject(dc, bmp);
 
     const UINT dpi = GetDpiForWindow(hwnd);
-    const Palette pal = palette(app->dark);
+    const Palette pal = palette(app);
     const int margin = px(MARGIN, dpi);
 
     HBRUSH bg = CreateSolidBrush(pal.bg);
@@ -741,7 +771,15 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_COMMAND:
         if (LOWORD(wparam) == BOO_CMD_TOGGLE_RECORD) boo_overlay_toggle_recording(app);
         if (LOWORD(wparam) == BOO_CMD_QUIT) DestroyWindow(hwnd);
+        if (LOWORD(wparam) == BOO_CMD_SETTINGS) boo_settings_open(app);
         return 0;
+    case WM_SYSCOMMAND:
+        // The custom "Settings" item added to the window's system menu.
+        if ((wparam & 0xFFF0) == BOO_SC_SETTINGS) {
+            boo_settings_open(app);
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_TIMER:
         if (wparam == BOO_TIMER_WAVEFORM) on_waveform_tick(app);
         if (wparam == BOO_TIMER_AUTO_STOP) on_auto_stop_poll(app);
@@ -784,6 +822,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         InterlockedExchange(&app->stream_running, 0);
         boo_hotkey_unregister(hwnd);
         boo_tray_remove(hwnd);
+        boo_settings_free(app);
         PostQuitMessage(0);
         return 0;
     default:
@@ -823,6 +862,19 @@ HWND boo_overlay_create(BooApp *app) {
                               WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     app->dark = system_dark();
     set_status_idle(app);
+
+    // A "Settings" entry at the top of the window's system menu (title-bar icon
+    // / Alt+Space), the keyboard-reachable twin of the tray menu item.
+    HMENU sysmenu = GetSystemMenu(hwnd, FALSE);
+    if (sysmenu) {
+        InsertMenuW(sysmenu, 0, MF_BYPOSITION | MF_STRING, BOO_SC_SETTINGS, L"Settings…");
+        InsertMenuW(sysmenu, 1, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
+    }
+
+    // Load every theme + the persisted prefs, then apply the saved opacity (the
+    // saved theme is picked up by the first paint via palette()).
+    boo_settings_init(app);
+    boo_settings_apply(app);
 
     const UINT dpi = GetDpiForWindow(hwnd);
     make_fonts(dpi);
