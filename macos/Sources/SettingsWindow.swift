@@ -61,11 +61,11 @@ class SettingsViewController: NSViewController {
         opacityRow.addArrangedSubview(opacityTitle)
 
         opacitySlider = NSSlider(
-            value: 0.95, minValue: 0.1, maxValue: 1.0, target: self, action: #selector(opacityChanged(_:)))
+            value: 1.0, minValue: 0.1, maxValue: 1.0, target: self, action: #selector(opacityChanged(_:)))
         opacitySlider.controlSize = .regular
         opacityRow.addArrangedSubview(opacitySlider)
 
-        opacityLabel = NSTextField(labelWithString: "0.95")
+        opacityLabel = NSTextField(labelWithString: "1.00")
         opacityLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         opacityLabel.alignment = .right
         opacityLabel.widthAnchor.constraint(equalToConstant: 36).isActive = true

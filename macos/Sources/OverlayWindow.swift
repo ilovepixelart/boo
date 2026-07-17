@@ -10,6 +10,9 @@ class OverlayWindow: NSWindow {
     let waveformView: WaveformView
     var isRecording = false
     var autoType = true
+    // Window background opacity, default fully opaque to match Ghostty. Held
+    // here so a theme change reapplies the user's chosen opacity, not a constant.
+    var opacity: CGFloat = 1.0
     var previousApp: NSRunningApplication?
     /// Where the transcript is destined, captured when recording starts.
     /// Resolving this at transcription time instead would be wrong: by then
@@ -44,7 +47,7 @@ class OverlayWindow: NSWindow {
         self.titlebarAppearsTransparent = true
         self.titleVisibility = .hidden
         self.isMovableByWindowBackground = true
-        self.backgroundColor = NSColor(red: 0.16, green: 0.17, blue: 0.2, alpha: 0.95)
+        self.backgroundColor = NSColor(red: 0.16, green: 0.17, blue: 0.2, alpha: 1.0)
         self.isOpaque = false
         self.hasShadow = true
         self.hidesOnDeactivate = false
@@ -190,7 +193,7 @@ class OverlayWindow: NSWindow {
     // MARK: - Theme
 
     func applyTheme(_ theme: BooTheme) {
-        self.backgroundColor = theme.bgWithAlpha(0.95)
+        self.backgroundColor = theme.bgWithAlpha(opacity)
         waveformView.barColorIdle = theme.cyan
         waveformView.barColorRecording = theme.red
         waveformView.barColorThinking = theme.yellow
