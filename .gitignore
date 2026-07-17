@@ -16,3 +16,4 @@ macos/Boo.xcodeproj/
 macos/Info.plist
 # Personal Xcode signing overrides (optional, per-user)
 macos/local.xcconfig
+coverage/

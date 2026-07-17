@@ -370,6 +370,11 @@ jobs:
           # Sonar needs full history to attribute new code and blame.
           fetch-depth: 0
 
+      # Coverage for the unit-testable C (the paste-chord planner) via gcov,
+      # converted to Sonar's generic format. ubuntu-24.04 ships gcc/gcov/python3.
+      - name: Generate coverage
+        run: bash scripts/coverage.sh
+
       # Scans the C + Swift frontends per sonar-project.properties (the Zig core
       # is not a Sonar language). Read-only; PR decoration comes from the
       # SonarCloud GitHub App, not the token. Skipped on forks/without the

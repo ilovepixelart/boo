@@ -245,13 +245,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         overlayWindow?.autoType = value
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationWillTerminate(_: Notification) {
         if let ctx = booCtx {
             boo_deinit(ctx)
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
         return true
     }
 
