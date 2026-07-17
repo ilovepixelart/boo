@@ -11,26 +11,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Models the README recommends, most capable first. Downloading a bigger
-// model is a deliberate act, so it wins over the default base.en when both
-// exist. Matches the macOS and Linux frontends.
-static const WCHAR *const preferred_models[] = {
-    L"ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
-    L"ggml-parakeet-tdt-0.6b-v3-f16.bin",
-    L"ggml-large-v3-turbo-q5_0.bin",
-    L"ggml-large-v3-turbo.bin",
-    L"ggml-small.en.bin",
-    L"ggml-base.en.bin",
-};
+static char *to_utf8(const WCHAR *wide);
 
-#define PREFERRED_COUNT (sizeof(preferred_models) / sizeof(preferred_models[0]))
-
-// Position in preferred_models, or one past the end for everything else.
-static unsigned model_rank(const WCHAR *name) {
-    for (unsigned i = 0; i < PREFERRED_COUNT; i++) {
-        if (wcscmp(name, preferred_models[i]) == 0) return i;
-    }
-    return PREFERRED_COUNT;
+// Rank of a model filename via the shared core order (boo_model_rank), which
+// takes UTF-8; the names are ASCII so the conversion is cheap. Unknown or
+// unconvertible names rank worst.
+static unsigned rank_of(const WCHAR *name) {
+    char *u = to_utf8(name);
+    if (!u) return (unsigned)-1;
+    const unsigned r = boo_model_rank(u);
+    free(u);
+    return r;
 }
 
 // Pick a model out of `dir`, or NULL. Returned path is malloc'd, wide.
@@ -49,7 +40,7 @@ static WCHAR *find_model_in(const WCHAR *dir) {
         // ggml-silero-* is the VAD model, not a speech model.
         if (wcsncmp(entry.cFileName, L"ggml-silero", 11) == 0) continue;
 
-        const unsigned rank = model_rank(entry.cFileName);
+        const unsigned rank = rank_of(entry.cFileName);
         if (best[0] == 0 || rank < best_rank ||
             (rank == best_rank && wcscmp(entry.cFileName, best) < 0)) {
             wcscpy(best, entry.cFileName);
