@@ -784,7 +784,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 }
 
 static void CALLBACK on_foreground_changed(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
-                                           LONG obj, LONG child, DWORD thread, DWORD time) {
+                                           LONG obj, LONG child, DWORD thread,
+                                           DWORD time) {
     (void)hook, (void)event, (void)child, (void)thread, (void)time;
     if (obj == OBJID_WINDOW && hwnd) last_external_fg = hwnd;
 }
