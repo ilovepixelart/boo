@@ -508,7 +508,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSLog("Boo: fetching the VAD model to enable streaming transcription")
         vadDownloader = ModelDownloader(
-            onProgress: { _ in },
+            onProgress: { _ in
+                // Background first-run fetch: no dialog is open, so there is
+                // nowhere to surface progress. Completion logs instead.
+            },
             onDone: { [weak self] path in
                 self?.vadDownloader = nil
                 guard let ctx = self?.booCtx else { return }
