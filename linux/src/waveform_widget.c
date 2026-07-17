@@ -13,6 +13,9 @@ typedef struct {
     BooContext *ctx;
     float smoothed[64];
     gboolean was_active;
+    // State colors (0xRRGGBB) from the active theme; default-theme tokens until
+    // a theme is applied: idle #70C0B1, recording #D54E53, thinking #E7C547.
+    guint32 idle, rec, think;
 } WaveformState;
 
 static void rounded_bar(cairo_t *cr, double x, double cy, double w, double h) {
@@ -45,13 +48,16 @@ static void waveform_draw(GtkDrawingArea *area, cairo_t *cr, int width, int heig
     for (int i = 0; i < n_bars; i++)
         st->smoothed[i] += (bars[i] - st->smoothed[i]) * lerp;
 
-    // Default-theme tokens: idle #70C0B1, recording #D54E53, thinking #E7C547.
-    double r = 0x70 / 255.0, g = 0xC0 / 255.0, b = 0xB1 / 255.0;
+    // Colors come from the active theme (set via boo_waveform_widget_set_colors).
+    guint32 rgb = st->idle;
     if (recording) {
-        r = 0xD5 / 255.0, g = 0x4E / 255.0, b = 0x53 / 255.0;
+        rgb = st->rec;
     } else if (transcribing) {
-        r = 0xE7 / 255.0, g = 0xC5 / 255.0, b = 0x47 / 255.0;
+        rgb = st->think;
     }
+    const double r = ((rgb >> 16) & 0xFF) / 255.0;
+    const double g = ((rgb >> 8) & 0xFF) / 255.0;
+    const double b = (rgb & 0xFF) / 255.0;
 
     const double gap = 3.0;
     const double bar_w = MAX((width - gap * (n_bars - 1)) / n_bars, 2.0);
@@ -107,10 +113,23 @@ GtkWidget *boo_waveform_widget_new(BooContext *ctx) {
 
     WaveformState *st = g_new0(WaveformState, 1);
     st->ctx = ctx;
+    st->idle = 0x70C0B1;  // palette[14]
+    st->rec = 0xD54E53;   // palette[9]
+    st->think = 0xE7C547; // palette[11]
     g_object_set_data_full(G_OBJECT(area), "boo-waveform-state", st, g_free);
 
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), waveform_draw, st, NULL);
     gtk_widget_add_tick_callback(area, waveform_tick, st, NULL);
 
     return area;
+}
+
+void boo_waveform_widget_set_colors(GtkWidget *widget, uint32_t idle, uint32_t recording,
+                                    uint32_t thinking) {
+    WaveformState *st = g_object_get_data(G_OBJECT(widget), "boo-waveform-state");
+    if (!st) return;
+    st->idle = idle;
+    st->rec = recording;
+    st->think = thinking;
+    gtk_widget_queue_draw(widget);
 }

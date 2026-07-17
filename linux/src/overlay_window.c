@@ -24,7 +24,8 @@ typedef struct {
     AdwToastOverlay *toast_overlay;
     BooGlobalShortcut *shortcut;
     BooTextInject *inject;
-    guint hint_reset; // 0 == no pending reset to the idle hint
+    GtkCssProvider *css; // reloaded on theme change
+    guint hint_reset;    // 0 == no pending reset to the idle hint
     gboolean hotkey_ok;
 
     // The UI's own view of whether we're recording. Deliberately not
@@ -66,6 +67,7 @@ static void window_state_free(gpointer data) {
     if (state->transcribe_thread) g_thread_join(state->transcribe_thread);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
+    if (state->css) g_object_unref(state->css);
     g_free(state);
 }
 
@@ -394,24 +396,66 @@ static void on_shortcut_unavailable(const char *reason, gpointer user_data) {
     if (!state->ui_recording) set_hint_idle(state);
 }
 
-// Design tokens from the macOS reference's default theme (docs/ui-spec.md):
-// until Linux gains theme support these exact values make it match a
-// default-themed macOS build. #FF3B30 is the one cross-platform hardcode.
-// The record disc's border-radius transition IS the circle-to-rounded-square
-// morph (20px idle, 6px recording, 150ms), driven by the .boo-recording class.
-static const char *BOO_CSS =
-    "window.boo, window.boo headerbar { background: #282c34; color: #eaeaea; }\n"
+// Design tokens come from the active Ghostty theme (docs/ui-spec.md); %06x
+// slots are filled from the theme by apply_theme. #FF3B30 is the one
+// cross-platform hardcode; the record disc's border-radius transition IS the
+// circle -> rounded-square morph (20px idle, 6px recording, 150ms).
+static const char *BOO_CSS_FMT =
+    "window.boo, window.boo headerbar { background: #%06x; color: #%06x; }\n"
     ".boo-card { background: alpha(#ffffff, 0.06); border-radius: 10px;"
-    "  padding: 8px 12px; color: #ffffff; }\n"
+    "  padding: 8px 12px; color: #%06x; }\n"
     ".boo-card-live { background: alpha(#ffffff, 0.03); border-radius: 10px;"
-    "  padding: 8px 12px; color: #666666; }\n"
-    ".boo-card-btn { color: #666666; min-width: 0; min-height: 0; padding: 2px; }\n"
-    ".boo-card-btn.boo-flash { color: #70c0b1; }\n"
-    ".boo-hint { color: #666666; font-family: monospace; font-size: 11pt; }\n"
+    "  padding: 8px 12px; color: #%06x; }\n"
+    ".boo-card-btn { color: #%06x; min-width: 0; min-height: 0; padding: 2px; }\n"
+    ".boo-card-btn.boo-flash { color: #%06x; }\n"
+    ".boo-hint { color: #%06x; font-family: monospace; font-size: 11pt; }\n"
     "button.boo-record { background: #ff3b30; min-width: 40px; min-height: 40px;"
     "  padding: 0; border-radius: 20px; transition: border-radius 150ms ease;"
     "  background-image: none; border: none; box-shadow: none; }\n"
     "button.boo-record.boo-recording { border-radius: 6px; }\n";
+
+// "Ghostty Default Style Dark" values, the fallback when no themes dir is found.
+static const BooThemeColors DEFAULT_THEME = {
+    .bg = 0x282C34,
+    .fg = 0xFFFFFF,
+    .palette = {[8] = 0x666666, [9] = 0xD54E53, [11] = 0xE7C547, [14] = 0x70C0B1},
+};
+
+// ./themes for a source run, then the XDG data dir, the Flatpak share, and the
+// system share, mirroring the model search.
+static char *find_themes_dir(void) {
+    const char *xdg_env = g_getenv("XDG_DATA_HOME");
+    g_autofree char *xdg = (xdg_env && *xdg_env)
+                               ? g_build_filename(xdg_env, "boo", "themes", NULL)
+                               : g_build_filename(g_get_home_dir(), ".local", "share",
+                                                  "boo", "themes", NULL);
+    const char *dirs[] = {"themes", xdg, "/app/share/boo/themes", "/usr/share/boo/themes",
+                          NULL};
+    for (int i = 0; dirs[i]; i++)
+        if (g_file_test(dirs[i], G_FILE_TEST_IS_DIR)) return g_strdup(dirs[i]);
+    return NULL;
+}
+
+static BooThemeColors default_theme_colors(void) {
+    g_autofree char *dir = find_themes_dir();
+    if (dir) {
+        g_autofree char *path = g_build_filename(dir, "Ghostty Default Style Dark", NULL);
+        BooThemeColors c;
+        if (boo_theme_parse_file(path, &c)) return c;
+    }
+    return DEFAULT_THEME;
+}
+
+// Regenerate the window CSS and the waveform colors from `c`.
+static void apply_theme(WindowState *st, const BooThemeColors *c) {
+    char *css = g_strdup_printf(BOO_CSS_FMT, c->bg, c->fg, c->fg, c->palette[8],
+                                c->palette[8], c->palette[14], c->palette[8]);
+    gtk_css_provider_load_from_string(st->css, css);
+    g_free(css);
+    if (st->waveform)
+        boo_waveform_widget_set_colors(st->waveform, c->palette[14], c->palette[9],
+                                       c->palette[11]);
+}
 
 GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     GtkWidget *window = adw_application_window_new(app);
@@ -420,18 +464,18 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     gtk_window_set_default_size(GTK_WINDOW(window), 400, 500);
     gtk_widget_add_css_class(window, "boo");
 
-    GtkCssProvider *css = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(css, BOO_CSS);
-    gtk_style_context_add_provider_for_display(gtk_widget_get_display(window),
-                                               GTK_STYLE_PROVIDER(css),
-                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(css);
-
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
     state->window = GTK_WINDOW(window);
     state->hotkey_ok = TRUE; // downgraded by on_shortcut_unavailable
     g_object_set_data_full(G_OBJECT(window), "boo-state", state, window_state_free);
+
+    // The CSS provider is reloaded on every theme change; apply_theme (below,
+    // once the waveform exists) fills it from the default theme.
+    state->css = gtk_css_provider_new();
+    gtk_style_context_add_provider_for_display(gtk_widget_get_display(window),
+                                               GTK_STYLE_PROVIDER(state->css),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     AdwHeaderBar *header = ADW_HEADER_BAR(adw_header_bar_new());
 
@@ -493,6 +537,10 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // Auto-paste of transcripts into the focused app (RemoteDesktop portal).
     // First run shows a one-time permission dialog; the grant persists.
     state->inject = boo_text_inject_new(GTK_WINDOW(window));
+
+    // Colour everything from the default theme now that the waveform exists.
+    const BooThemeColors colors = default_theme_colors();
+    apply_theme(state, &colors);
 
     return GTK_WINDOW(window);
 }
