@@ -67,30 +67,52 @@ class ThemeManager {
     }
 
     private func loadThemes() {
-        // Load themes from the themes/ directory (Ghostty format)
+        // Parse through the shared core parser (src/theme.zig) so macOS, Linux
+        // and Windows all read one implementation of the Ghostty format.
         themes = [defaultTheme]
 
-        let themesDir = findThemesDir()
-        guard let dir = themesDir else {
+        guard let dir = findThemesDir() else {
             print("No themes directory found, using default only")
             return
         }
+        guard let handle = boo_themes_load(dir) else {
+            print("Theme parser could not open \(dir), using default only")
+            return
+        }
+        defer { boo_themes_free(handle) }
 
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
-
-        for file in files.sorted() {
-            let path = (dir as NSString).appendingPathComponent(file)
-            if let theme = parseThemeFile(name: file, path: path) {
-                themes.append(theme)
-            }
+        let count = Int(boo_themes_count(handle))
+        themes.reserveCapacity(count + 1)
+        for i in 0..<count {
+            guard let namePtr = boo_themes_name(handle, Int32(i)) else { continue }
+            var colors = BooThemeColors()
+            guard boo_themes_colors(handle, Int32(i), &colors) else { continue }
+            themes.append(makeTheme(name: String(cString: namePtr), colors: colors))
         }
 
-        // Find "Ghostty Default Style Dark" and set as default
-        if let idx = themes.firstIndex(where: { $0.name == "Ghostty Default Style Dark" }) {
-            currentIndex = idx
-        }
-
+        // The core reports the default's index within its own list; themes[0]
+        // is the prepended fallback, so shift by one.
+        currentIndex = Int(boo_themes_default_index(handle)) + 1
         print("Loaded \(themes.count) themes")
+    }
+
+    private func color(_ rgb: UInt32) -> NSColor {
+        NSColor(
+            red: CGFloat((rgb >> 16) & 0xFF) / 255.0,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(rgb & 0xFF) / 255.0,
+            alpha: 1.0
+        )
+    }
+
+    private func makeTheme(name: String, colors: BooThemeColors) -> BooTheme {
+        var palette = [NSColor]()
+        palette.reserveCapacity(16)
+        withUnsafeBytes(of: colors.palette) { raw in
+            let buf = raw.bindMemory(to: UInt32.self)
+            for i in 0..<16 { palette.append(color(buf[i])) }
+        }
+        return BooTheme(name: name, bg: color(colors.bg), fg: color(colors.fg), palette: palette)
     }
 
     private func findThemesDir() -> String? {
@@ -117,63 +139,6 @@ class ThemeManager {
             }
         }
         return nil
-    }
-
-    private func parseThemeFile(name: String, path: String) -> BooTheme? {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-
-        var bg: NSColor?
-        var fg: NSColor?
-        var palette = [Int: NSColor]()
-
-        for line in content.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-
-            // Split on first "=" only, "palette = 0=#hex" → key="palette", value="0=#hex"
-            guard let eqIdx = trimmed.firstIndex(of: "=") else { continue }
-            let key = trimmed[trimmed.startIndex..<eqIdx].trimmingCharacters(in: .whitespaces)
-            let value = trimmed[trimmed.index(after: eqIdx)...].trimmingCharacters(in: .whitespaces)
-
-            if key == "background", let color = parseHexColor(value) {
-                bg = color
-            } else if key == "foreground", let color = parseHexColor(value) {
-                fg = color
-            } else if key == "palette" {
-                // Format: "0=#hex"
-                guard let palEq = value.firstIndex(of: "=") else { continue }
-                let idxStr = value[value.startIndex..<palEq].trimmingCharacters(in: .whitespaces)
-                let hexStr = value[value.index(after: palEq)...].trimmingCharacters(in: .whitespaces)
-                if let idx = Int(idxStr), let color = parseHexColor(hexStr) {
-                    palette[idx] = color
-                }
-            }
-        }
-
-        guard let b = bg, let f = fg, palette.count >= 16 else { return nil }
-
-        var pal = [NSColor]()
-        for i in 0..<16 {
-            pal.append(palette[i] ?? NSColor.gray)
-        }
-
-        return BooTheme(name: name, bg: b, fg: f, palette: pal)
-    }
-
-    private func parseHexColor(_ hex: String) -> NSColor? {
-        var h = hex.trimmingCharacters(in: .whitespaces)
-        if h.hasPrefix("#") { h = String(h.dropFirst()) }
-        guard h.count == 6 else { return nil }
-
-        var rgb: UInt64 = 0
-        Scanner(string: h).scanHexInt64(&rgb)
-
-        return NSColor(
-            red: CGFloat((rgb >> 16) & 0xFF) / 255.0,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(rgb & 0xFF) / 255.0,
-            alpha: 1.0
-        )
     }
 
     func selectTheme(at index: Int) {

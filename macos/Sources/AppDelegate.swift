@@ -214,6 +214,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func opacityDidChange(_ notification: Notification) {
         guard let value = notification.object as? Double else { return }
+        overlayWindow?.opacity = CGFloat(value)
         overlayWindow?.backgroundColor = ThemeManager.shared.current.bgWithAlpha(CGFloat(value))
     }
 
