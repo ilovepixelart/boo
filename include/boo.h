@@ -84,11 +84,11 @@ uint32_t boo_model_rank(const char *name);
 // digest; a download must verify against it before the file is accepted.
 typedef struct {
     const char *filename; // e.g. "ggml-base.en.bin"
-    const char *url;       // full https download URL
-    const char *sha256;    // pinned SHA-256, 64 lowercase hex chars
-    const char *label;     // short display name
-    const char *note;      // one-line size + tradeoff
-    uint64_t size;         // bytes
+    const char *url;      // full https download URL
+    const char *sha256;   // pinned SHA-256, 64 lowercase hex chars
+    const char *label;    // short display name
+    const char *note;     // one-line size + tradeoff
+    uint64_t size;        // bytes
 } BooModelInfo;
 
 // The curated download manifest, recommended first (index 0). `*out_count` gets
