@@ -219,8 +219,8 @@ static void on_download_clicked(GtkButton *button, gpointer user_data) {
     gtk_label_set_text(ui->status, "Downloading…");
     // No mid-download close: the async chain updates this dialog's widgets.
     gtk_window_set_deletable(GTK_WINDOW(ui->win), FALSE);
-    boo_model_download(&models[idx], ui->progress, on_onboarding_done,
-                       on_onboarding_fail, ui);
+    boo_model_download(&models[idx], ui->progress, on_onboarding_done, on_onboarding_fail,
+                       ui);
 }
 
 // The download dialog: a curated model dropdown, a progress bar, and Download.

@@ -330,7 +330,8 @@ static void begin_transcription(WindowState *state) {
     // Reap the prior take's thread (long finished by now) before replacing the
     // handle, so a completed thread is never leaked.
     if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
-    state->workers.transcribe_thread = g_thread_new("boo-transcribe", transcribe_worker, state);
+    state->workers.transcribe_thread =
+        g_thread_new("boo-transcribe", transcribe_worker, state);
 }
 
 // The core stops capturing by itself once a recording hits MAX_RECORDING_SECONDS
@@ -395,7 +396,8 @@ static void toggle_recording(WindowState *state) {
         // Without a VAD model every tick is an immediate no-op, so the thread
         // idles harmlessly; with one, utterances land as you pause.
         g_atomic_int_set(&state->workers.stream_running, 1);
-        state->workers.stream_thread = g_thread_new("boo-stream", stream_tick_worker, state);
+        state->workers.stream_thread =
+            g_thread_new("boo-stream", stream_tick_worker, state);
     }
 }
 
@@ -533,7 +535,8 @@ static void settings_save(WindowState *st) {
     g_autoptr(GKeyFile) kf = g_key_file_new();
     const char *theme =
         (st->settings.themes && st->settings.current_theme >= 0)
-            ? g_array_index(st->settings.themes, ThemeEntry, st->settings.current_theme).name
+            ? g_array_index(st->settings.themes, ThemeEntry, st->settings.current_theme)
+                  .name
             : "";
     g_key_file_set_string(kf, "boo", "theme", theme);
     g_key_file_set_double(kf, "boo", "opacity", st->settings.opacity);
@@ -564,7 +567,8 @@ static void settings_load(WindowState *st) {
     g_autofree const char *theme = g_key_file_get_string(kf, "boo", "theme", NULL);
     if (theme && st->settings.themes)
         for (guint i = 0; i < st->settings.themes->len; i++)
-            if (g_strcmp0(g_array_index(st->settings.themes, ThemeEntry, i).name, theme) == 0) {
+            if (g_strcmp0(g_array_index(st->settings.themes, ThemeEntry, i).name,
+                          theme) == 0) {
                 st->settings.current_theme = (int)i;
                 break;
             }
@@ -574,7 +578,8 @@ static void settings_load(WindowState *st) {
 }
 
 static void select_theme(WindowState *st, int index) {
-    if (!st->settings.themes || index < 0 || index >= (int)st->settings.themes->len) return;
+    if (!st->settings.themes || index < 0 || index >= (int)st->settings.themes->len)
+        return;
     st->settings.current_theme = index;
     apply_theme(st, &g_array_index(st->settings.themes, ThemeEntry, index).colors);
     settings_save(st);
@@ -647,7 +652,8 @@ static void on_theme_row(const GtkListBox *box, GtkListBoxRow *row, gpointer dat
     if (!row) return;
     int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "boo-theme-index"));
     select_theme(ui->st, index);
-    palette_preview(ui, &g_array_index(ui->st->settings.themes, ThemeEntry, index).colors);
+    palette_preview(ui,
+                    &g_array_index(ui->st->settings.themes, ThemeEntry, index).colors);
 }
 
 static gboolean theme_filter(GtkListBoxRow *row, gpointer data) {
@@ -672,8 +678,7 @@ static void on_opacity_changed(GtkRange *range, gpointer data) {
     settings_save(ui->st);
 }
 
-static gboolean on_autotype_changed(const GtkSwitch *sw, gboolean active,
-                                    gpointer data) {
+static gboolean on_autotype_changed(const GtkSwitch *sw, gboolean active, gpointer data) {
     (void)sw;
     SettingsUI *ui = data;
     ui->st->settings.auto_type = active;
@@ -707,8 +712,7 @@ static void model_list_rebuild(SettingsUI *ui) {
     for (size_t i = 0; i < count; i++) {
         gboolean on_disk = FALSE;
         for (guint j = 0; j < installed->len && !on_disk; j++) {
-            g_autofree char *base =
-                g_path_get_basename(g_ptr_array_index(installed, j));
+            g_autofree char *base = g_path_get_basename(g_ptr_array_index(installed, j));
             on_disk = g_strcmp0(base, models[i].filename) == 0;
         }
         if (on_disk) continue;
@@ -945,8 +949,9 @@ static void open_settings(GtkButton *btn, gpointer data) {
     ui->palette = GTK_BOX(palette);
     gtk_box_append(GTK_BOX(content), palette);
     if (st->settings.themes && st->settings.current_theme >= 0)
-        palette_preview(ui,
-                        &g_array_index(st->settings.themes, ThemeEntry, st->settings.current_theme).colors);
+        palette_preview(ui, &g_array_index(st->settings.themes, ThemeEntry,
+                                           st->settings.current_theme)
+                                 .colors);
 
     gtk_window_present(GTK_WINDOW(win));
 }
@@ -1049,9 +1054,9 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx,
     load_theme_list(state);
     settings_load(state);
     if (state->settings.themes && state->settings.current_theme >= 0) {
-        apply_theme(
-            state,
-            &g_array_index(state->settings.themes, ThemeEntry, state->settings.current_theme).colors);
+        apply_theme(state, &g_array_index(state->settings.themes, ThemeEntry,
+                                          state->settings.current_theme)
+                                .colors);
     } else {
         const BooThemeColors colors = default_theme_colors();
         apply_theme(state, &colors);

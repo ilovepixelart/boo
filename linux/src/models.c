@@ -19,8 +19,8 @@ static GPtrArray *model_dirs(void) {
     if (xdg_env && *xdg_env) {
         g_ptr_array_add(dirs, g_build_filename(xdg_env, "boo", "models", NULL));
     } else {
-        g_ptr_array_add(dirs, g_build_filename(g_get_home_dir(), ".local", "share",
-                                               "boo", "models", NULL));
+        g_ptr_array_add(dirs, g_build_filename(g_get_home_dir(), ".local", "share", "boo",
+                                               "models", NULL));
     }
     g_ptr_array_add(dirs, g_strdup("/usr/share/boo/models"));
     return dirs;
@@ -55,7 +55,8 @@ static char *find_model_in(const char *dir) {
         // Best rank wins; alphabetical order breaks ties among the
         // unrecognized, so the choice is at least deterministic.
         unsigned rank = boo_model_rank(name);
-        if (!best || rank < best_rank || (rank == best_rank && g_strcmp0(name, best) < 0)) {
+        if (!best || rank < best_rank ||
+            (rank == best_rank && g_strcmp0(name, best) < 0)) {
             g_free(best);
             best = g_strdup(name);
             best_rank = rank;
@@ -131,10 +132,9 @@ char *boo_find_vad_model_path(void) {
 
 char *boo_models_write_dir(void) {
     const char *xdg = g_getenv("XDG_DATA_HOME");
-    char *dir = (xdg && *xdg)
-                    ? g_build_filename(xdg, "boo", "models", NULL)
-                    : g_build_filename(g_get_home_dir(), ".local", "share", "boo",
-                                       "models", NULL);
+    char *dir = (xdg && *xdg) ? g_build_filename(xdg, "boo", "models", NULL)
+                              : g_build_filename(g_get_home_dir(), ".local", "share",
+                                                 "boo", "models", NULL);
     g_mkdir_with_parents(dir, 0700);
     return dir;
 }
@@ -154,7 +154,8 @@ static gint model_path_cmp(gconstpointer a, gconstpointer b) {
 
 GPtrArray *boo_installed_models(void) {
     GPtrArray *out = g_ptr_array_new_with_free_func(g_free);
-    g_autoptr(GHashTable) seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    g_autoptr(GHashTable) seen =
+        g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     g_autoptr(GPtrArray) dirs = model_dirs();
 
     for (guint i = 0; i < dirs->len; i++) {
