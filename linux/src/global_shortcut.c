@@ -202,8 +202,9 @@ static void request(BooGlobalShortcut *gs, BooGsStep step) {
     };
 
     gs->step = step; // make_payload and on_response both key off this
+    const BooPortalHandlers handlers = {make_payload, on_response, on_error, gs};
     boo_portal_call(gs->dbus, &gs->response_subscription, PORTAL_IFACE_GLOBAL_SHORTCUTS,
-                    methods[step], make_payload, on_response, on_error, gs);
+                    methods[step], &handlers);
 }
 
 // ---------------------------------------------------------------------------

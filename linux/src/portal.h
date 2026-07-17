@@ -48,6 +48,15 @@ typedef void (*BooPortalResponseFn)(guint32 response, GVariant *results,
 typedef void (*BooPortalErrorFn)(const char *reason, gboolean unsupported,
                                  gpointer user_data);
 
+/// The callbacks (and their shared user_data) for one portal request. Copied by
+/// boo_portal_call before it returns, so a stack-allocated value is fine.
+typedef struct {
+    BooPortalPayloadFn make_payload;
+    BooPortalResponseFn on_response;
+    BooPortalErrorFn on_error;
+    gpointer user_data;
+} BooPortalHandlers;
+
 /// Issue a portal request: subscribe to Response on the predicted path, then
 /// call the method.
 ///
@@ -55,9 +64,7 @@ typedef void (*BooPortalErrorFn)(const char *reason, gboolean unsupported,
 /// owns it so it can be torn down on free. It must be 0 (no request in flight)
 /// on entry; the callbacks run with it already cleared.
 void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *iface,
-                     const char *method, BooPortalPayloadFn make_payload,
-                     BooPortalResponseFn on_response, BooPortalErrorFn on_error,
-                     gpointer user_data);
+                     const char *method, const BooPortalHandlers *handlers);
 
 /// Close a portal session. Safe with a NULL handle.
 void boo_portal_close_session(GDBusConnection *dbus, const char *session_handle);

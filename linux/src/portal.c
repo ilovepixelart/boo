@@ -21,7 +21,14 @@ typedef struct {
 // process must not be able to predict the path and race for the payload.
 char *boo_portal_new_token(void) {
     guint64 r = 0;
-    if (getrandom(&r, sizeof(r), 0) != (gssize)sizeof(r)) {
+    // getrandom is Linux-only; macOS, where run.sh compiles this file too,
+    // spells the same CSPRNG syscall getentropy.
+#ifdef __APPLE__
+    const gboolean seeded = getentropy(&r, sizeof(r)) == 0;
+#else
+    const gboolean seeded = getrandom(&r, sizeof(r), 0) == (gssize)sizeof(r);
+#endif
+    if (!seeded) {
         // getrandom only fails this early-boot; a desktop session is long
         // seeded. Fall back to non-crypto rather than block: still a unique,
         // valid path component.
@@ -116,35 +123,37 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
 }
 
 void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *iface,
-                     const char *method, BooPortalPayloadFn make_payload,
-                     BooPortalResponseFn on_response_cb, BooPortalErrorFn on_error_cb,
-                     gpointer user_data) {
+                     const char *method, const BooPortalHandlers *handlers) {
     g_return_if_fail(dbus != NULL);
     g_return_if_fail(subscription != NULL);
+    g_return_if_fail(handlers != NULL);
 
     if (*subscription != 0) {
         g_warning("Boo: a %s request is already in flight; skipping", iface);
         return;
     }
 
-    g_autofree char *token = boo_portal_new_token();
+    g_autofree const char *token = boo_portal_new_token();
 
-    GVariant *payload = make_payload ? make_payload(user_data, token) : NULL;
+    GVariant *payload = handlers->make_payload
+                            ? handlers->make_payload(handlers->user_data, token)
+                            : NULL;
     if (!payload) return;
 
-    g_autofree char *request_path = portal_request_path(dbus, token);
+    g_autofree const char *request_path = portal_request_path(dbus, token);
     if (!request_path) {
         g_variant_unref(g_variant_ref_sink(payload)); // payload was floating
-        if (on_error_cb) on_error_cb("no D-Bus unique name", FALSE, user_data);
+        if (handlers->on_error)
+            handlers->on_error("no D-Bus unique name", FALSE, handlers->user_data);
         return;
     }
 
     PortalRequest *req = g_new0(PortalRequest, 1);
     req->dbus = dbus;
     req->subscription = subscription;
-    req->on_response = on_response_cb;
-    req->on_error = on_error_cb;
-    req->user_data = user_data;
+    req->on_response = handlers->on_response;
+    req->on_error = handlers->on_error;
+    req->user_data = handlers->user_data;
 
     // Subscribe BEFORE calling, see the header. Skipping this is the classic
     // portal bug: it passes against a slow portal and hangs against a fast one.

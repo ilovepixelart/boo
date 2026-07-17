@@ -70,7 +70,7 @@ static char *token_path(void) {
 }
 
 static char *load_restore_token(void) {
-    g_autofree char *path = token_path();
+    g_autofree const char *path = token_path();
 
     char *token = NULL;
     if (!g_file_get_contents(path, &token, NULL, NULL)) return NULL;
@@ -83,8 +83,8 @@ static char *load_restore_token(void) {
 }
 
 static void save_restore_token(const char *token) {
-    g_autofree char *path = token_path();
-    g_autofree char *dir = g_path_get_dirname(path);
+    g_autofree const char *path = token_path();
+    g_autofree const char *dir = g_path_get_dirname(path);
     g_mkdir_with_parents(dir, 0700);
 
     // 0600, not g_file_set_contents' default 0644. This token is a capability:
@@ -99,7 +99,7 @@ static void save_restore_token(const char *token) {
 }
 
 static void clear_restore_token(void) {
-    g_autofree char *path = token_path();
+    g_autofree const char *path = token_path();
     g_unlink(path);
 }
 
@@ -169,7 +169,7 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
                               g_variant_new_uint32(PERSIST_UNTIL_REVOKED));
 
         // Replaying the token is what stops the portal asking again.
-        g_autofree char *restore = load_restore_token();
+        g_autofree const char *restore = load_restore_token();
         if (restore) {
             g_variant_builder_add(&options, "{sv}", "restore_token",
                                   g_variant_new_string(restore));
@@ -259,8 +259,9 @@ static void request(BooTextInject *ti, BooInjectState step) {
     };
 
     ti->state = step; // make_payload and on_response both key off this
+    const BooPortalHandlers handlers = {make_payload, on_response, on_error, ti};
     boo_portal_call(ti->dbus, &ti->response_subscription, PORTAL_IFACE_REMOTE_DESKTOP,
-                    methods[step], make_payload, on_response, on_error, ti);
+                    methods[step], &handlers);
 }
 
 // ---------------------------------------------------------------------------
