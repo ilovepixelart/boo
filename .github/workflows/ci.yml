@@ -50,6 +50,19 @@ jobs:
         # which swiftc's link step does not provide.
         run: zig build app -Doptimize=ReleaseFast
 
+      - name: Swift unit tests + coverage
+        # macos/Tests/main.swift, compiled with the sources under test by plain
+        # swiftc (no Xcode project). Pins GhosttyInjector's subroutine event,
+        # the injection security boundary, without needing Ghostty; llvm-cov's
+        # lcov export becomes the Swift slice of the Sonar coverage report.
+        run: bash scripts/coverage.sh swift
+
+      - name: Upload coverage (Swift)
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-swift
+          path: coverage/swift.xml
+
       - name: Cache bench models
         uses: actions/cache@v4
         with:
@@ -163,7 +176,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
-            pkg-config xvfb dbus-x11 python3-gi
+            pkg-config xvfb dbus-x11 python3-gi kcov
 
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
@@ -195,6 +208,28 @@ jobs:
         # This is what proves Boo's predicted Request path matches the one the
         # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
+
+      - name: Coverage (Linux C, Windows planner, Zig core)
+        # Generic XMLs for the sonar job, plus kcov over the Zig core. The
+        # core's number cannot land in Sonar (no Zig language there), so it
+        # goes to the job summary and the coverage-core artifact instead.
+        run: |
+          bash scripts/coverage.sh windows linux core
+          if [ -f coverage/core-summary.txt ]; then
+            cat coverage/core-summary.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage (Linux C + Windows planner)
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-linux
+          path: coverage/*.xml
+
+      - name: Upload coverage (Zig core, kcov)
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-core
+          path: coverage/core
 
   linux-ui-smoke:
     name: Linux (UI smoke, pixel-asserted)
@@ -364,16 +399,30 @@ jobs:
   sonar:
     name: SonarCloud
     runs-on: ubuntu-24.04
+    # Waits for the per-platform coverage artifacts (scripts/coverage.sh run in
+    # each job); the scan itself is what merges them.
+    needs: [macos, linux]
     steps:
       - uses: actions/checkout@v7
         with:
           # Sonar needs full history to attribute new code and blame.
           fetch-depth: 0
 
-      # Coverage for the unit-testable C (the paste-chord planner) via gcov,
-      # converted to Sonar's generic format. ubuntu-24.04 ships gcc/gcov/python3.
-      - name: Generate coverage
-        run: bash scripts/coverage.sh
+      - name: Assemble coverage
+        uses: actions/download-artifact@v6
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: coverage
+
+      - name: Fill in missing reports
+        # A platform whose artifact is absent must not sink the scan; an empty
+        # report is valid and simply contributes nothing.
+        run: |
+          mkdir -p coverage
+          for f in windows linux swift; do
+            [ -f "coverage/$f.xml" ] || printf '<coverage version="1"/>\n' > "coverage/$f.xml"
+          done
 
       # Scans the C + Swift frontends per sonar-project.properties (the Zig core
       # is not a Sonar language). Read-only; PR decoration comes from the

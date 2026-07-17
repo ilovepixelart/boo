@@ -36,22 +36,18 @@ def parse_gcov(path):
             yield source, int(lineno), count != "#####"
 
 
-def main(argv):
-    if len(argv) < 4:
-        print(__doc__, file=sys.stderr)
-        return 2
-    out_path, src_root = argv[1], os.path.abspath(argv[2])
+def add_line(files, src_root, source, lineno, covered):
+    """Merge one executable line into `files`; a line any report covered stays
+    covered. Paths outside `src_root` (system headers) are dropped."""
+    rel = os.path.relpath(os.path.abspath(source), src_root)
+    if rel.startswith(".."):
+        return
+    lines = files.setdefault(rel, {})
+    lines[lineno] = lines.get(lineno, False) or covered
 
-    files = {}
-    for gcov in argv[3:]:
-        for source, lineno, covered in parse_gcov(gcov):
-            if source is None:
-                continue
-            rel = os.path.relpath(os.path.abspath(source), src_root)
-            if rel.startswith(".."):
-                continue  # outside the repo (system headers)
-            files.setdefault(rel, {})[lineno] = covered
 
+def write_report(out_path, files):
+    """Write `files` ({rel_path: {line: covered}}) as Sonar generic XML."""
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as out:
         out.write('<coverage version="1">\n')
@@ -63,6 +59,22 @@ def main(argv):
             out.write("  </file>\n")
         out.write("</coverage>\n")
     print(f"{out_path}: {len(files)} files")
+
+
+def main(argv):
+    if len(argv) < 4:
+        print(__doc__, file=sys.stderr)
+        return 2
+    out_path, src_root = argv[1], os.path.abspath(argv[2])
+
+    files = {}
+    for gcov in argv[3:]:
+        for source, lineno, covered in parse_gcov(gcov):
+            if source is None:
+                continue
+            add_line(files, src_root, source, lineno, covered)
+
+    write_report(out_path, files)
     return 0
 
 

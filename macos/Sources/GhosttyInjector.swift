@@ -38,14 +38,12 @@ enum GhosttyInjector {
         end boo_inject
         """
 
-    /// Injects `text` into the focused terminal of Ghostty's front window.
-    /// Returns false on any failure (Ghostty < 1.3, Automation permission
-    /// denied, no terminal window) so the caller can fall back.
-    static func inputText(_ text: String) -> Bool {
-        guard let script = NSAppleScript(source: injectSource) else { return false }
-
-        // Call the handler through an AppleScript subroutine event. The
-        // subroutine name must be the lowercase form of the handler identifier.
+    /// The subroutine event that carries `text` into the script's boo_inject
+    /// handler as its single parameter; the subroutine name must be the
+    /// lowercase form of the handler identifier. Split from inputText so the
+    /// test harness (macos/Tests) can prove the text arrives byte-identical,
+    /// and that none of it executes, without talking to Ghostty.
+    static func injectEvent(_ text: String) -> NSAppleEventDescriptor {
         let event = NSAppleEventDescriptor(
             eventClass: AEEventClass(kASAppleScriptSuite),
             eventID: AEEventID(kASSubroutineEvent),
@@ -58,9 +56,17 @@ enum GhosttyInjector {
         let params = NSAppleEventDescriptor.list()
         params.insert(NSAppleEventDescriptor(string: text), at: 1)
         event.setParam(params, forKeyword: AEKeyword(keyDirectObject))
+        return event
+    }
+
+    /// Injects `text` into the focused terminal of Ghostty's front window.
+    /// Returns false on any failure (Ghostty < 1.3, Automation permission
+    /// denied, no terminal window) so the caller can fall back.
+    static func inputText(_ text: String) -> Bool {
+        guard let script = NSAppleScript(source: injectSource) else { return false }
 
         var error: NSDictionary?
-        script.executeAppleEvent(event, error: &error)
+        script.executeAppleEvent(injectEvent(text), error: &error)
         if let error {
             let message = error[NSAppleScript.errorMessage] as? String ?? "\(error)"
             NSLog("Boo: Ghostty AppleScript injection failed, falling back to paste: %@", message)

@@ -16,10 +16,12 @@ human UAT.**
   pure-logic pieces (the Windows paste-chord planner, model discovery, theme
   token mapping) are unit-testable; the rest is exercised by the pixel smoke and
   UAT, not unit tests.
-- **SonarCloud coverage reflects the C + Swift frontends only** — it does not
-  analyse Zig, so the core's extensive tests are invisible to it. Coverage there
-  is scoped to the unit-testable frontend logic (`sonar.coverage.exclusions`);
-  the UI files are excluded because a coverage number for them would be a lie.
+- **SonarCloud coverage spans all three frontends** (`scripts/coverage.sh`, one
+  generic XML per platform, merged by the sonar CI job). Every analysed file
+  counts, so UI glue verified only by the pixel smoke and UAT shows as
+  uncovered rather than excluded. Sonar does not analyse Zig, so the core's
+  coverage cannot be imported; it is measured with kcov in the linux CI job
+  (job summary + the coverage-core artifact) instead.
 
 ## Per language
 
@@ -48,20 +50,22 @@ human UAT.**
 - **Warnings are tests**: the frontends build under `-Wall -Wextra -Wshadow
   -Wstrict-prototypes -Wmissing-prototypes -Wformat=2 -Wcast-align -Wundef`, and
   clang-format `--Werror` in CI.
-- **Coverage**: `scripts/coverage.sh` builds the pure-C tests with gcov and
-  `scripts/gcov_to_sonar.py` converts to Sonar's generic format.
+- **Coverage**: `scripts/coverage.sh` builds the pure-C tests (the Windows
+  planner, and the Linux portal payload suites, which `#include` the client
+  `.c` under test) with gcov; `scripts/gcov_to_sonar.py` converts to Sonar's
+  generic format.
 
 ### Swift (macOS, `macos/Sources`)
-- **Framework**: XCTest (or the newer Swift Testing) in a test target; run with
-  `swift test --enable-code-coverage` (or `xcodebuild test`), export coverage
-  with `xcrun llvm-cov export`.
-- **Best practice**: keep the **testable logic free of AppKit** so a test target
-  can reach it, theme colour mapping (`makeTheme`/`color`), model selection,
-  the download SHA/path handling. Name unused delegate params `_`, prefer value
-  types, and run `swift format lint --strict` (CI enforces `.swift-format`).
-- **Status**: no test target yet — this is the open work (a Swift `Package.swift`
-  test target for the pure logic, feeding coverage to Sonar; the app itself is
-  built via `zig build`, so the test target is a separate SwiftPM manifest).
+- **Framework**: a plain-Swift harness (`macos/Tests/main.swift`), compiled
+  together with the sources under test by `scripts/coverage.sh swift` via bare
+  `swiftc` — no Xcode project, mirroring the C harness style. Coverage comes
+  from `-profile-generate -profile-coverage-mapping` + `xcrun llvm-cov export
+  --format=lcov`, converted by `scripts/lcov_to_sonar.py`.
+- **Best practice**: keep the **testable logic free of app state** so the
+  harness can compile just the file under test (model:
+  `GhosttyInjector.injectEvent`, the injection security boundary). Name unused
+  delegate params `_`, prefer value types, and run `swift format lint --strict`
+  (CI enforces `.swift-format`).
 
 ### Python (test harness, `linux/tests`)
 - **Framework**: the harness (`mock_portal.py`) supports the Linux integration
@@ -82,5 +86,5 @@ human UAT.**
 The overlay windows, waveform, tray/menu-bar, portals and native dialogs need a
 real desktop. They are covered by the pixel smoke where headless rendering
 allows, and otherwise by the human UAT pass (Linux + Windows). No unit test
-substitutes for that, and pretending otherwise (e.g. demanding coverage on the
-window code) is why those files are excluded from the coverage metric.
+substitutes for that; those files sit in the coverage metric as uncovered, and
+the pixel smoke and UAT, not a unit-test number, are what vouch for them.

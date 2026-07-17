@@ -393,9 +393,11 @@ pub fn build(b: *std.Build) void {
         linkAudioSystemDepsOnly(win_app.root_module, target_os);
         // OS DLLs, resolved from Zig's bundled mingw import libraries, so
         // this cross-compiles from any host with no Windows SDK.
-        // comctl32: the settings trackbar. shlwapi: PathRemoveFileSpec for the
-        // exe-relative themes dir. advapi32: the settings registry keys.
-        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32", "comctl32", "shlwapi" }) |lib| {
+        // comctl32: the settings trackbar + download progress bars. shlwapi:
+        // PathRemoveFileSpec for the exe-relative themes dir. advapi32: the
+        // settings registry keys. winhttp + bcrypt: the model download and
+        // its SHA-256 verification. comdlg32: the onboarding file picker.
+        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32", "comctl32", "shlwapi", "winhttp", "bcrypt", "comdlg32" }) |lib| {
             win_app.root_module.linkSystemLibrary(lib, .{});
         }
         win_app.root_module.addIncludePath(b.path("include"));
@@ -405,6 +407,8 @@ pub fn build(b: *std.Build) void {
             .files = &.{
                 "main.c",
                 "model.c",
+                "download.c",
+                "onboarding.c",
                 "overlay.c",
                 "settings.c",
                 "waveform.c",
@@ -543,6 +547,13 @@ pub fn build(b: *std.Build) void {
     linkPlatformAudio(b, unit_tests.root_module, target_os);
 
     b.step("test", "Run unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
+
+    // The same test binary, installed (zig-out/bin/boo-core-test) instead of
+    // run, so coverage tooling (kcov in CI, see scripts/coverage.sh) can
+    // execute it under instrumentation.
+    const test_install = b.addInstallArtifact(unit_tests, .{ .dest_sub_path = "boo-core-test" });
+    b.step("test-exe", "Install the unit-test binary for coverage tooling")
+        .dependOn(&test_install.step);
 }
 
 fn linkPlatformAudio(b: *std.Build, mod: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
