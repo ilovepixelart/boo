@@ -354,6 +354,10 @@ static gboolean check_auto_stop(gpointer data) {
     show_toast(state, "Maximum recording length reached");
     state->auto_stop_poll = 0; // about to be removed; don't remove twice
     begin_transcription(state);
+    // After begin_transcription, whose own "thinking..." would otherwise
+    // replace it: the cap outcome stays on the status line while the take
+    // transcribes, the reference behavior.
+    set_hint(state, "max length reached");
     return G_SOURCE_REMOVE;
 }
 
@@ -960,8 +964,12 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx,
                                   const char *model_path) {
     GtkWidget *window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Boo");
-    // The reference geometry.
+    // The reference geometry. GTK4 has no max-size or fixed-width constraint
+    // (Wayland leaves that to the compositor), so the spec's 400-wide /
+    // 300-minimum contract is enforced as a minimum size and the rest is
+    // best-effort.
     gtk_window_set_default_size(GTK_WINDOW(window), 400, 500);
+    gtk_widget_set_size_request(window, 400, 300);
     gtk_widget_add_css_class(window, "boo");
 
     WindowState *state = g_new0(WindowState, 1);

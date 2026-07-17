@@ -388,6 +388,12 @@ class OverlayWindow: NSWindow {
                         self.addTranscript(text)
                         if self.autoType {
                             self.typeTextIntoFocusedApp(text)
+                        } else {
+                            // Auto-type off means clipboard-only, never silent:
+                            // the transcript must still land somewhere pasteable.
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                            self.flashStatus("copied")
                         }
                     } else {
                         self.statusLabel.stringValue = "no speech detected"
@@ -397,6 +403,18 @@ class OverlayWindow: NSWindow {
                 }
                 // Stop display link, no animation needed when idle
                 self.stopDisplayLink()
+            }
+        }
+    }
+
+    /// Show a short-lived delivery outcome ("copied" / "pasted"), then settle
+    /// back on the idle hotkey hint, matching the other frontends' transient
+    /// confirmations.
+    func flashStatus(_ text: String) {
+        statusLabel.stringValue = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if self.statusLabel.stringValue == text && !self.isRecording {
+                self.statusLabel.stringValue = "ctrl+shift+space"
             }
         }
     }
@@ -558,6 +576,7 @@ class OverlayWindow: NSWindow {
         // generic paste below.
         let target = targetApp ?? previousApp
         if GhosttyInjector.isGhostty(target), GhosttyInjector.inputText(text) {
+            flashStatus("pasted")
             return
         }
 
@@ -597,6 +616,8 @@ class OverlayWindow: NSWindow {
         let delay = startedViaHotkey ? 0.05 : 0.5
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             self.performPaste()
+            // The explicit per-action outcome the spec asks for (§4.5).
+            self.flashStatus("pasted")
 
             // Restore clipboard quickly, 200ms is enough for paste to complete.
             // Only when there was prior content, else the transcript stays put
@@ -707,8 +728,10 @@ class OverlayWindow: NSWindow {
         // freezing the app in whisper. It can't finish the job from inside the
         // audio callback, so notice it here and transcribe what was captured.
         if isRecording && !boo_is_recording(booCtx) {
-            statusLabel.stringValue = "max length reached"
+            // After stopAndTranscribe, whose own "thinking..." would otherwise
+            // overwrite this in the same frame and the cap would look silent.
             stopAndTranscribe()
+            statusLabel.stringValue = "max length reached"
             return
         }
 

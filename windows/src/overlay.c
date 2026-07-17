@@ -40,18 +40,24 @@
 #endif
 
 // Base layout in 96-dpi pixels; geometry from the macOS reference.
-#define BASE_W      400
-#define BASE_H      500
-#define MARGIN      12
-#define WAVE_TOP    20
-#define WAVE_H      48
-#define STATUS_H    16
-#define BUTTON_SIZE 40
-#define CARD_RADIUS 10
-#define CARD_GAP    8
-#define CARD_PAD_X  12
-#define HEADER_H    20
-#define ICON_SIZE   12
+#define BASE_W 400
+#define BASE_H 500
+// The spec's height-only resize range (client px at 96 DPI).
+#define MIN_H 300
+#define MAX_H 800
+// THICKFRAME makes the window resizable; WM_GETMINMAXINFO pins the width and
+// clamps the height to the spec range.
+#define BOO_OVERLAY_STYLE (WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME)
+#define MARGIN            12
+#define WAVE_TOP          20
+#define WAVE_H            48
+#define STATUS_H          16
+#define BUTTON_SIZE       40
+#define CARD_RADIUS       10
+#define CARD_GAP          8
+#define CARD_PAD_X        12
+#define HEADER_H          20
+#define ICON_SIZE         12
 // Per-card display cap; the clipboard always carries the full text.
 #define CARD_MAX_UNITS 4096
 
@@ -520,7 +526,9 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
         RECT close_rc = {right - inset - icon, top + px(5, dpi), right - inset,
                          top + px(5, dpi) + icon};
         const bool flashing = hit == flash_card && GetTickCount64() < flash_until;
-        paint_icon_copy(dc, copy_rc, flashing ? RGB(131, 190, 177) : pal->subtext);
+        // accent.confirm is the theme's palette[14], the same token the idle
+        // waveform uses; a hardcoded color would ignore the picked theme.
+        paint_icon_copy(dc, copy_rc, flashing ? pal->wave_idle : pal->subtext);
         paint_icon_close(dc, close_rc, pal->subtext, true);
         // Generous hit areas around the small glyphs.
         InflateRect(&copy_rc, px(6, dpi), px(6, dpi));
@@ -788,6 +796,21 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     }
 
     switch (msg) {
+    case WM_GETMINMAXINFO: {
+        // The spec's height-only resize: clamp the client height to
+        // MIN_H..MAX_H and pin the width by making min and max agree.
+        const UINT dpi = GetDpiForWindow(hwnd);
+        MINMAXINFO *mmi = (MINMAXINFO *)lparam;
+        RECT min_rc = {0, 0, px(BASE_W, dpi), px(MIN_H, dpi)};
+        RECT max_rc = {0, 0, px(BASE_W, dpi), px(MAX_H, dpi)};
+        AdjustWindowRectExForDpi(&min_rc, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
+        AdjustWindowRectExForDpi(&max_rc, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
+        mmi->ptMinTrackSize.x = min_rc.right - min_rc.left;
+        mmi->ptMinTrackSize.y = min_rc.bottom - min_rc.top;
+        mmi->ptMaxTrackSize.x = min_rc.right - min_rc.left; // width fixed
+        mmi->ptMaxTrackSize.y = max_rc.bottom - max_rc.top;
+        return 0;
+    }
     case WM_LBUTTONDOWN:
         on_mouse_down(app, hwnd, lparam);
         return 0;
@@ -887,9 +910,9 @@ HWND boo_overlay_create(BooApp *app) {
     // keeps the overlay watchable over the app you dictate into. It is
     // activatable now, so the dictation target is tracked separately (see
     // last_external_fg) instead of relying on the window never taking focus.
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, BOO_OVERLAY_CLASS, L"Boo",
-                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0, 0, BASE_W,
-                                BASE_H, NULL, NULL, app->hinst, app);
+    HWND hwnd =
+        CreateWindowExW(WS_EX_TOPMOST, BOO_OVERLAY_CLASS, L"Boo", BOO_OVERLAY_STYLE, 0, 0,
+                        BASE_W, BASE_H, NULL, NULL, app->hinst, app);
     if (!hwnd) return NULL;
     app->overlay = hwnd;
     fg_hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL,
@@ -925,8 +948,7 @@ HWND boo_overlay_create(BooApp *app) {
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     RECT wr = {0, 0, px(BASE_W, dpi), px(BASE_H, dpi)};
-    AdjustWindowRectExForDpi(&wr, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE,
-                             WS_EX_TOPMOST, dpi);
+    AdjustWindowRectExForDpi(&wr, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
     const int w = wr.right - wr.left;
     const int h = wr.bottom - wr.top;
     SetWindowPos(hwnd, NULL, work.right - w - px(20, dpi), work.top + px(50, dpi), w, h,

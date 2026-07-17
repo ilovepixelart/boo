@@ -132,6 +132,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(autoTypeDidChange(_:)), name: .autoTypeChanged, object: nil)
 
+        // After the observers: the restored theme re-applies through them.
+        restorePreferences()
+
         // Setup status bar item
         setupStatusBar()
 
@@ -267,19 +270,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// UserDefaults keys for the persisted preferences; the other frontends
+    /// persist theirs (settings.ini, registry), so the reference must too.
+    static let opacityDefaultsKey = "opacity"
+    static let autoTypeDefaultsKey = "autoType"
+    static let themeDefaultsKey = "theme"
+
     @objc func themeDidChange() {
         overlayWindow?.applyTheme(ThemeManager.shared.current)
+        UserDefaults.standard.set(
+            ThemeManager.shared.current.name, forKey: AppDelegate.themeDefaultsKey)
     }
 
     @objc func opacityDidChange(_ notification: Notification) {
         guard let value = notification.object as? Double else { return }
         overlayWindow?.opacity = CGFloat(value)
         overlayWindow?.backgroundColor = ThemeManager.shared.current.bgWithAlpha(CGFloat(value))
+        UserDefaults.standard.set(value, forKey: AppDelegate.opacityDefaultsKey)
     }
 
     @objc func autoTypeDidChange(_ notification: Notification) {
         guard let value = notification.object as? Bool else { return }
         overlayWindow?.autoType = value
+        UserDefaults.standard.set(value, forKey: AppDelegate.autoTypeDefaultsKey)
+    }
+
+    /// Re-apply the persisted preferences at startup: theme by name (a
+    /// removed theme falls back to the default), then opacity and auto-type
+    /// onto the fresh overlay. Defaults absent on first run leave the
+    /// built-in values (1.0, on, default theme) untouched.
+    private func restorePreferences() {
+        let defaults = UserDefaults.standard
+        if let name = defaults.string(forKey: AppDelegate.themeDefaultsKey),
+            let idx = ThemeManager.shared.themes.firstIndex(where: { $0.name == name })
+        {
+            ThemeManager.shared.selectTheme(at: idx)
+        }
+        if defaults.object(forKey: AppDelegate.opacityDefaultsKey) != nil {
+            let value = defaults.double(forKey: AppDelegate.opacityDefaultsKey)
+            if value >= 0.1 && value <= 1.0 {
+                overlayWindow?.opacity = CGFloat(value)
+                overlayWindow?.backgroundColor =
+                    ThemeManager.shared.current.bgWithAlpha(CGFloat(value))
+            }
+        }
+        if defaults.object(forKey: AppDelegate.autoTypeDefaultsKey) != nil {
+            overlayWindow?.autoType = defaults.bool(forKey: AppDelegate.autoTypeDefaultsKey)
+        }
     }
 
     func applicationWillTerminate(_: Notification) {

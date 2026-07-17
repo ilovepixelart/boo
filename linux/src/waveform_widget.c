@@ -62,7 +62,9 @@ static void waveform_draw(GtkDrawingArea *area, cairo_t *cr, int width, int heig
     const double b = (rgb & 0xFF) / 255.0;
 
     const double gap = 3.0;
-    const double bar_w = MAX((width - gap * (n_bars - 1)) / n_bars, 2.0);
+    // The reference insets the bars 12px from the widget edges.
+    const double inset = 12.0;
+    const double bar_w = MAX((width - inset * 2 - gap * (n_bars - 1)) / n_bars, 2.0);
     const double cy = height / 2.0;
     const double max_h = height * 0.75;
     const float peak = boo_get_peak_rms(st->ctx);
@@ -72,7 +74,7 @@ static void waveform_draw(GtkDrawingArea *area, cairo_t *cr, int width, int heig
         clock ? (double)gdk_frame_clock_get_frame_time(clock) / 1e6 : 0.0;
 
     for (int i = 0; i < n_bars; i++) {
-        const double x = i * (bar_w + gap);
+        const double x = inset + i * (bar_w + gap);
         const double center =
             1.0 - fabs((double)i / n_bars - 0.5) * (transcribing ? 0.6 : 0.4);
         double h;

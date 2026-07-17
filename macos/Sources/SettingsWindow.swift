@@ -68,12 +68,19 @@ class SettingsViewController: NSViewController {
         opacityTitle.font = .systemFont(ofSize: 13, weight: .medium)
         opacityRow.addArrangedSubview(opacityTitle)
 
+        // Controls open at the persisted values, so the first interaction
+        // adjusts the real state rather than stomping it with defaults.
+        let defaults = UserDefaults.standard
+        let savedOpacity =
+            defaults.object(forKey: AppDelegate.opacityDefaultsKey) != nil
+            ? defaults.double(forKey: AppDelegate.opacityDefaultsKey) : 1.0
         opacitySlider = NSSlider(
-            value: 1.0, minValue: 0.1, maxValue: 1.0, target: self, action: #selector(opacityChanged(_:)))
+            value: savedOpacity, minValue: 0.1, maxValue: 1.0, target: self,
+            action: #selector(opacityChanged(_:)))
         opacitySlider.controlSize = .regular
         opacityRow.addArrangedSubview(opacitySlider)
 
-        opacityLabel = NSTextField(labelWithString: "1.00")
+        opacityLabel = NSTextField(labelWithString: String(format: "%.2f", savedOpacity))
         opacityLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         opacityLabel.alignment = .right
         opacityLabel.widthAnchor.constraint(equalToConstant: 36).isActive = true
@@ -82,10 +89,13 @@ class SettingsViewController: NSViewController {
         stack.addArrangedSubview(opacityRow)
 
         // ── Auto-type ──
+        let savedAutoType =
+            defaults.object(forKey: AppDelegate.autoTypeDefaultsKey) != nil
+            ? defaults.bool(forKey: AppDelegate.autoTypeDefaultsKey) : true
         autoTypeCheckbox = NSButton(
             checkboxWithTitle: "Auto-type into focused app after transcription", target: self,
             action: #selector(autoTypeChanged(_:)))
-        autoTypeCheckbox.state = .on
+        autoTypeCheckbox.state = savedAutoType ? .on : .off
         autoTypeCheckbox.font = .systemFont(ofSize: 13)
         stack.addArrangedSubview(autoTypeCheckbox)
 
