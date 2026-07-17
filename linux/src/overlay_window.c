@@ -372,19 +372,10 @@ static void begin_transcription(WindowState *state) {
     set_button_idle(state);
     gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
     // Reap the prior take's thread (long finished by now) before replacing the
-    // handle, so a completed thread is never leaked.
+    // handle, so a completed thread is never leaked. The pending-idle set
+    // stays alive: cancelling it belongs to window teardown alone
+    // (window_state_free), and the fresh worker is about to queue into it.
     if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
-    // With the workers gone, the pending set is stable: cancel anything the
-    // main loop has not dispatched yet (their notifies free the payloads).
-    if (state->workers.pending_idles) {
-        for (guint i = 0; i < state->workers.pending_idles->len; i++) {
-            GSource *src = g_ptr_array_index(state->workers.pending_idles, i);
-            g_source_destroy(src);
-            g_source_unref(src);
-        }
-        g_ptr_array_free(state->workers.pending_idles, TRUE);
-    }
-    g_mutex_clear(&state->workers.idle_lock);
     state->workers.transcribe_thread =
         g_thread_new("boo-transcribe", transcribe_worker, state);
 }
