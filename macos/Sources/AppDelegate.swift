@@ -259,7 +259,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ].filter { !$0.isEmpty }
     }
 
-
     /// Find a whisper model.
     ///
     /// Any of whisper.cpp's GGML models works, so this accepts any `ggml-*.bin`
