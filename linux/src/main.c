@@ -7,6 +7,7 @@
 // will see a system permission prompt on first capture; no in-app UI needed.
 
 #include <adwaita.h>
+#include <glib/gstdio.h>
 #include <gtk/gtk.h>
 #include <libsoup/soup.h>
 #include <stdlib.h>
@@ -277,6 +278,222 @@ static void start_with_model(AppState *state, const char *model_path) {
     gtk_window_present(boo_overlay_window_new(app, state->ctx));
 }
 
+// ── in-app model download (docs/model-onboarding.md) ──
+// A curated dropdown + a progress bar; the file streams to models/<name>.part,
+// its SHA-256 is verified against the pinned manifest digest, then it is moved
+// into place and the app opens. The manifest (boo_models) is the shared source.
+
+typedef struct {
+    AppState *state;
+    const BooModelInfo *model;
+    GtkWidget *win;
+    GtkProgressBar *progress;
+    GtkLabel *status;
+    GtkWidget *button;
+    SoupSession *session;
+    GCancellable *cancel;
+    GChecksum *sum;
+    GFileOutputStream *out;
+    char *tmp_path;   // models/<name>.part while downloading
+    char *final_path; // models/<name>
+    goffset received;
+    guint8 buf[65536];
+} DownloadCtx;
+
+static char *models_write_dir(void) {
+    const char *xdg = g_getenv("XDG_DATA_HOME");
+    char *dir = (xdg && *xdg) ? g_build_filename(xdg, "boo", "models", NULL)
+                              : g_build_filename(g_get_home_dir(), ".local", "share",
+                                                 "boo", "models", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    return dir;
+}
+
+// Free the per-attempt download resources, so a retry starts clean. Leaves the
+// DownloadCtx itself, which the dialog window owns (freed on window destroy).
+static void download_reset(DownloadCtx *dc) {
+    g_clear_object(&dc->out);
+    if (dc->sum) {
+        g_checksum_free(dc->sum);
+        dc->sum = NULL;
+    }
+    g_clear_object(&dc->cancel);
+    g_clear_object(&dc->session);
+    g_clear_pointer(&dc->tmp_path, g_free);
+    g_clear_pointer(&dc->final_path, g_free);
+}
+
+static void download_ctx_free(gpointer data) {
+    DownloadCtx *dc = data;
+    download_reset(dc);
+    g_free(dc);
+}
+
+static void download_fail(DownloadCtx *dc, const char *why) {
+    boo_log(BOO_LOG_ERROR, "model download failed");
+    if (dc->tmp_path) g_unlink(dc->tmp_path);
+    download_reset(dc);
+    gtk_label_set_text(dc->status, why);
+    gtk_widget_set_sensitive(dc->button, TRUE);
+    gtk_window_set_deletable(GTK_WINDOW(dc->win), TRUE);
+}
+
+static void read_chunk(DownloadCtx *dc, GInputStream *stream);
+
+static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_data) {
+    DownloadCtx *dc = user_data;
+    GInputStream *stream = G_INPUT_STREAM(source);
+    g_autoptr(GError) error = NULL;
+    gssize n = g_input_stream_read_finish(stream, result, &error);
+
+    if (n < 0) {
+        g_object_unref(stream);
+        download_fail(dc, "Download interrupted.");
+        return;
+    }
+    if (n == 0) { // end of stream: verify, move into place, load
+        g_object_unref(stream);
+        g_output_stream_close(G_OUTPUT_STREAM(dc->out), NULL, NULL);
+        const char *got = g_checksum_get_string(dc->sum);
+        if (g_ascii_strcasecmp(got, dc->model->sha256) != 0) {
+            download_fail(dc, "Downloaded file failed its checksum. Try again.");
+            return;
+        }
+        if (g_rename(dc->tmp_path, dc->final_path) != 0) {
+            download_fail(dc, "Could not save the model file.");
+            return;
+        }
+        boo_log(BOO_LOG_INFO, "model downloaded and verified");
+        AppState *st = dc->state;
+        g_autofree char *path = g_strdup(dc->final_path);
+        g_clear_pointer(&dc->tmp_path, g_free);  // moved, do not unlink
+        gtk_window_destroy(GTK_WINDOW(dc->win)); // window owns dc, this frees it
+        start_with_model(st, path);              // open the app
+        return;
+    }
+
+    if (!g_output_stream_write_all(G_OUTPUT_STREAM(dc->out), dc->buf, (gsize)n, NULL,
+                                   NULL, NULL)) {
+        g_object_unref(stream);
+        download_fail(dc, "Could not write the model file (disk full?).");
+        return;
+    }
+    g_checksum_update(dc->sum, dc->buf, n);
+    dc->received += n;
+    gtk_progress_bar_set_fraction(dc->progress,
+                                  (double)dc->received / (double)dc->model->size);
+    read_chunk(dc, stream);
+}
+
+static void read_chunk(DownloadCtx *dc, GInputStream *stream) {
+    g_input_stream_read_async(stream, dc->buf, sizeof(dc->buf), G_PRIORITY_DEFAULT,
+                              dc->cancel, on_chunk_read, dc);
+}
+
+static void on_send_ready(GObject *source, GAsyncResult *result, gpointer user_data) {
+    DownloadCtx *dc = user_data;
+    g_autoptr(GError) error = NULL;
+    GInputStream *stream = soup_session_send_finish(SOUP_SESSION(source), result, &error);
+    if (!stream) {
+        download_fail(dc, "Could not connect. Check your network and try again.");
+        return;
+    }
+
+    g_autoptr(GError) ferr = NULL;
+    GFile *file = g_file_new_for_path(dc->tmp_path);
+    dc->out = g_file_replace(file, NULL, FALSE, G_FILE_CREATE_NONE, NULL, &ferr);
+    g_object_unref(file);
+    if (!dc->out) {
+        g_object_unref(stream);
+        download_fail(dc, "Could not create the model file.");
+        return;
+    }
+    read_chunk(dc, stream);
+}
+
+static void on_download_clicked(GtkButton *button, gpointer user_data) {
+    DownloadCtx *dc = user_data;
+    guint idx = gtk_drop_down_get_selected(
+        GTK_DROP_DOWN(g_object_get_data(G_OBJECT(dc->win), "boo-model-dropdown")));
+    size_t count = 0;
+    const BooModelInfo *models = boo_models(&count);
+    if (idx >= count) return;
+    dc->model = &models[idx];
+
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    gtk_label_set_text(dc->status, "Downloading…");
+    // No mid-download close: the async chain reads dc and its widgets.
+    gtk_window_set_deletable(GTK_WINDOW(dc->win), FALSE);
+
+    g_autofree char *dir = models_write_dir();
+    dc->final_path = g_build_filename(dir, dc->model->filename, NULL);
+    dc->tmp_path = g_strconcat(dc->final_path, ".part", NULL);
+    dc->sum = g_checksum_new(G_CHECKSUM_SHA256);
+    dc->received = 0;
+    dc->cancel = g_cancellable_new();
+    dc->session = soup_session_new();
+
+    SoupMessage *msg = soup_message_new("GET", dc->model->url);
+    soup_session_send_async(dc->session, msg, G_PRIORITY_DEFAULT, dc->cancel,
+                            on_send_ready, dc);
+    g_object_unref(msg);
+}
+
+// The download dialog: a curated model dropdown, a progress bar, and Download.
+static void show_download_dialog(AppState *state) {
+    size_t count = 0;
+    const BooModelInfo *models = boo_models(&count);
+
+    GtkWidget *win = adw_window_new();
+    // An application window so it keeps the app alive while it is the only one.
+    gtk_window_set_application(GTK_WINDOW(win), state->app);
+    gtk_window_set_title(GTK_WINDOW(win), "Download a Model");
+    gtk_window_set_default_size(GTK_WINDOW(win), 400, 220);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+
+    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(outer), adw_header_bar_new());
+    gtk_box_append(GTK_BOX(outer), box);
+    adw_window_set_content(ADW_WINDOW(win), outer);
+
+    GtkStringList *labels = gtk_string_list_new(NULL);
+    for (size_t i = 0; i < count; i++) {
+        g_autofree char *row =
+            g_strdup_printf("%s  (%s)", models[i].label, models[i].note);
+        gtk_string_list_append(labels, row);
+    }
+    GtkWidget *dropdown = gtk_drop_down_new(G_LIST_MODEL(labels), NULL);
+    g_object_set_data(G_OBJECT(win), "boo-model-dropdown", dropdown);
+    gtk_box_append(GTK_BOX(box), dropdown);
+
+    GtkWidget *progress = gtk_progress_bar_new();
+    gtk_box_append(GTK_BOX(box), progress);
+    GtkWidget *status = gtk_label_new("Downloads to your models folder, then opens Boo.");
+    gtk_widget_add_css_class(status, "boo-hint");
+    gtk_box_append(GTK_BOX(box), status);
+
+    GtkWidget *button = gtk_button_new_with_label("Download");
+    gtk_widget_add_css_class(button, "suggested-action");
+    gtk_widget_set_halign(button, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), button);
+
+    DownloadCtx *dc = g_new0(DownloadCtx, 1);
+    dc->state = state;
+    dc->win = win;
+    dc->progress = GTK_PROGRESS_BAR(progress);
+    dc->status = GTK_LABEL(status);
+    dc->button = button;
+    g_object_set_data_full(G_OBJECT(win), "boo-download-ctx", dc, download_ctx_free);
+    g_signal_connect(button, "clicked", G_CALLBACK(on_download_clicked), dc);
+
+    gtk_window_present(GTK_WINDOW(win));
+}
+
 // The "Choose a File" path on the no-model dialog: a native file chooser, then
 // load the picked model and open the app. Zero network, the friendly
 // alternative to editing BOO_MODEL for a user who already has a GGML model.
@@ -306,7 +523,9 @@ static void on_no_model_response(AdwAlertDialog *dialog, const char *response,
                                  gpointer user_data) {
     (void)dialog;
     AppState *state = user_data;
-    if (g_strcmp0(response, "choose") == 0) {
+    if (g_strcmp0(response, "download") == 0) {
+        show_download_dialog(state); // its window keeps the app alive
+    } else if (g_strcmp0(response, "choose") == 0) {
         choose_model_file(state); // takes its own hold before we drop the dialog's
     } else {
         g_application_quit(G_APPLICATION(state->app));
@@ -314,14 +533,15 @@ static void on_no_model_response(AdwAlertDialog *dialog, const char *response,
     g_application_release(G_APPLICATION(state->app));
 }
 
-// The no-model dialog: the download hint plus a "Choose a File" button, so a
-// user who already has a model on disk never has to touch a terminal.
+// The no-model dialog: Download a model, Choose one already on disk, or Quit, so
+// a first run never requires a terminal.
 static void show_no_model_dialog(AppState *state, const char *hint) {
     AdwAlertDialog *dialog =
         ADW_ALERT_DIALOG(adw_alert_dialog_new("No speech model found", hint));
+    adw_alert_dialog_add_response(dialog, "download", "Download…");
     adw_alert_dialog_add_response(dialog, "choose", "Choose a File…");
     adw_alert_dialog_add_response(dialog, "quit", "Quit");
-    adw_alert_dialog_set_default_response(dialog, "choose");
+    adw_alert_dialog_set_default_response(dialog, "download");
     g_signal_connect(dialog, "response", G_CALLBACK(on_no_model_response), state);
     g_application_hold(G_APPLICATION(state->app));
     adw_dialog_present(ADW_DIALOG(dialog), NULL);

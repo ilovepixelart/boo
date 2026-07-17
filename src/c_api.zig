@@ -357,6 +357,76 @@ export fn boo_model_rank(name: [*:0]const u8) u32 {
     return recommended_models.len;
 }
 
+// The curated download manifest: what the model-onboarding dialog offers, one
+// source for every frontend. Recommended first. SHA-256s are pinned (the HF LFS
+// oids); a download must verify against them. Keep in step with docs/models.md
+// and the recommended_models order above.
+const BooModelInfo = extern struct {
+    filename: [*:0]const u8,
+    url: [*:0]const u8,
+    sha256: [*:0]const u8,
+    label: [*:0]const u8,
+    note: [*:0]const u8,
+    size: u64,
+};
+
+const hf = "https://huggingface.co/";
+const models_list = [_]BooModelInfo{
+    .{
+        .filename = "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+        .url = hf ++ "ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+        .sha256 = "4d64e9e96c2792186d072fde0034df0ad670cf680a2f53069052ead827fd600e",
+        .label = "Parakeet TDT",
+        .note = "669 MB, best accuracy, 25 languages",
+        .size = 668757119,
+    },
+    .{
+        .filename = "ggml-base.en.bin",
+        .url = hf ++ "ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+        .sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+        .label = "base.en",
+        .note = "148 MB, fast, English only",
+        .size = 147964211,
+    },
+    .{
+        .filename = "ggml-base.en-q5_1.bin",
+        .url = hf ++ "ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin",
+        .sha256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
+        .label = "base.en (quantized)",
+        .note = "60 MB, English, nearly as accurate",
+        .size = 59721011,
+    },
+    .{
+        .filename = "ggml-tiny.en-q5_1.bin",
+        .url = hf ++ "ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin",
+        .sha256 = "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b",
+        .label = "tiny.en",
+        .note = "32 MB, fastest, for weak hardware",
+        .size = 32166155,
+    },
+    .{
+        .filename = "ggml-small.en.bin",
+        .url = hf ++ "ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+        .sha256 = "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+        .label = "small.en",
+        .note = "488 MB, English, clearly better than base",
+        .size = 487614201,
+    },
+    .{
+        .filename = "ggml-large-v3-turbo-q5_0.bin",
+        .url = hf ++ "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        .sha256 = "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        .label = "large-v3-turbo",
+        .note = "574 MB, best whisper accuracy, multilingual",
+        .size = 574041195,
+    },
+};
+
+export fn boo_models(out_count: ?*usize) [*]const BooModelInfo {
+    if (out_count) |cnt| cnt.* = models_list.len;
+    return &models_list;
+}
+
 // ── diagnostic logging ────────────────────────────────────────────────────────
 // See src/log.zig. The frontend passes the per-OS log file path (or null for
 // stderr only) and the minimum level (0=error 1=warn 2=info 3=debug). Never log
@@ -397,6 +467,21 @@ test "boo_model_rank orders the recommended models best-first" {
     // always beats an unrecognized one.
     try testing.expectEqual(recommended_models.len, boo_model_rank("ggml-something-else.bin"));
     try testing.expect(boo_model_rank("ggml-small.en.bin") < boo_model_rank("ggml-base.en.bin"));
+}
+
+test "the download manifest is well-formed" {
+    var count: usize = 0;
+    const list = boo_models(&count);
+    try testing.expect(count > 0);
+    for (0..count) |i| {
+        const m = list[i];
+        // A pinned SHA-256 is 64 hex chars; a blank one would defeat verification.
+        try testing.expectEqual(@as(usize, 64), std.mem.span(m.sha256).len);
+        try testing.expect(m.size > 0);
+        try testing.expect(std.mem.startsWith(u8, std.mem.span(m.url), "https://"));
+    }
+    // Recommended first: Parakeet also tops boo_model_rank.
+    try testing.expectEqual(@as(u32, 0), boo_model_rank(list[0].filename));
 }
 
 test "a failed init frees everything it had already allocated" {
