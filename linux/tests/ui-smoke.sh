@@ -72,8 +72,49 @@ check_disc() { # <png> <label>
     check_pixel "$png" 200 "$best_y" "ff3b30" "$label (reddest at y=$best_y)"
 }
 
+# Locate the "3024 Day" reference theme the way the app does, so the switch test
+# only runs when the theme set is present (it is in CI, from the repo themes/).
+find_ref_theme() {
+    local d
+    for d in "themes" "$PWD/themes" "$(dirname "$APP")/themes" \
+        "$(dirname "$APP")/../themes" "/app/share/boo/themes" "/usr/share/boo/themes"; do
+        [[ -f "$d/3024 Day" ]] && return 0
+    done
+    return 1
+}
+
+# A persisted non-default theme must apply at startup. Exercises the exact
+# settings-load + apply path the Settings dialog writes to, without pixel-
+# clicking the dialog (whose gear shifts with header-bar width across runners).
+check_theme_switch() {
+    if ! find_ref_theme; then
+        echo "  skip theme switch (no '3024 Day' theme found)"
+        return
+    fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/boo"
+    mkdir -p "$cfg"
+    [[ -f "$cfg/settings.ini" ]] && mv "$cfg/settings.ini" "$cfg/settings.ini.bak"
+    printf '[boo]\ntheme=3024 Day\nopacity=1\nauto-type=true\n' >"$cfg/settings.ini"
+    GSK_RENDERER=cairo "$APP" </dev/null >"$OUT/app-theme.log" 2>&1 &
+    local pid=$!
+    sleep 5
+    xdotool search --name "Boo" windowmove 0 0 >/dev/null 2>&1
+    sleep 1
+    shot themed
+    # 3024 Day background is #f7f7f7: an empty body pixel must read light.
+    check_pixel "$OUT/themed.png" 200 250 "f7f7f7" "persisted theme applied at startup" 12
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    rm -f "$cfg/settings.ini"
+    [[ -f "$cfg/settings.ini.bak" ]] && mv "$cfg/settings.ini.bak" "$cfg/settings.ini"
+}
+
 echo "== Boo Linux UI smoke =="
-GSK_RENDERER=cairo "$APP" >"$OUT/app.log" 2>&1 &
+# </dev/null is load-bearing: a backgrounded child inherits the script's stdin,
+# and for a script large enough that bash must re-read it mid-run, a child that
+# consumes that shared stream makes bash read from a corrupted offset and stop
+# early. Detaching stdin keeps the app off the script's input.
+GSK_RENDERER=cairo "$APP" </dev/null >"$OUT/app.log" 2>&1 &
 APP_PID=$!
 sleep 5
 
@@ -124,6 +165,9 @@ fi
 
 kill "$APP_PID" 2>/dev/null
 wait "$APP_PID" 2>/dev/null
+
+# With the main app down, verify a persisted theme paints a different window.
+check_theme_switch
 
 echo "== $([ $fail -eq 0 ] && echo PASS || echo FAIL) (screenshots in $OUT) =="
 exit $fail

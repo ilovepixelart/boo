@@ -25,6 +25,10 @@ typedef struct {
     BooGlobalShortcut *shortcut;
     BooTextInject *inject;
     GtkCssProvider *css; // reloaded on theme change
+    GArray *themes;      // ThemeEntry, all parsed themes sorted by name
+    int current_theme;   // index into themes, -1 == the built-in default
+    double opacity;      // window opacity, 0.1..1.0
+    gboolean auto_type;  // paste into the focused app vs clipboard-only
     guint hint_reset;    // 0 == no pending reset to the idle hint
     gboolean hotkey_ok;
 
@@ -50,6 +54,12 @@ typedef struct {
     char *text; // owned, may be NULL
 } TranscribeResult;
 
+// A parsed theme (name + colors) for the picker list.
+typedef struct {
+    char *name;
+    BooThemeColors colors;
+} ThemeEntry;
+
 static void window_state_free(gpointer data) {
     WindowState *state = data;
     // Cancel the timers first: closing the window mid-recording would
@@ -68,6 +78,11 @@ static void window_state_free(gpointer data) {
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     if (state->css) g_object_unref(state->css);
+    if (state->themes) {
+        for (guint i = 0; i < state->themes->len; i++)
+            g_free(g_array_index(state->themes, ThemeEntry, i).name);
+        g_array_free(state->themes, TRUE);
+    }
     g_free(state);
 }
 
@@ -257,7 +272,8 @@ static gboolean transcribe_done(gpointer user_data) {
         // When dictation was triggered by the global hotkey, focus stayed in
         // the target app, auto-paste there. When our own window is focused
         // (Record button click), pasting would land back in Boo; skip it.
-        if (!gtk_window_is_active(state->window)) {
+        // Auto-type off makes Boo clipboard-only (never paste).
+        if (state->auto_type && !gtk_window_is_active(state->window)) {
             boo_text_inject_paste(state->inject);
         }
     } else {
@@ -457,6 +473,249 @@ static void apply_theme(WindowState *st, const BooThemeColors *c) {
                                        c->palette[11]);
 }
 
+static gint theme_name_cmp(gconstpointer a, gconstpointer b) {
+    return g_strcmp0(*(const char *const *)a, *(const char *const *)b);
+}
+
+// Enumerate the themes dir and parse every file via the shared core parser,
+// sorted by name. Empty when no themes dir is found (built-in default only).
+static void load_theme_list(WindowState *st) {
+    st->themes = g_array_new(FALSE, FALSE, sizeof(ThemeEntry));
+    st->current_theme = -1;
+    g_autofree char *dir = find_themes_dir();
+    if (!dir) return;
+    GDir *d = g_dir_open(dir, 0, NULL);
+    if (!d) return;
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    const char *nm;
+    while ((nm = g_dir_read_name(d)))
+        if (nm[0] != '.') g_ptr_array_add(names, g_strdup(nm));
+    g_dir_close(d);
+    g_ptr_array_sort(names, theme_name_cmp);
+    for (guint i = 0; i < names->len; i++) {
+        g_autofree char *path = g_build_filename(dir, names->pdata[i], NULL);
+        BooThemeColors c;
+        if (boo_theme_parse_file(path, &c)) {
+            ThemeEntry e = {g_strdup(names->pdata[i]), c};
+            g_array_append_val(st->themes, e);
+        }
+    }
+    g_ptr_array_free(names, TRUE);
+}
+
+// ── settings persistence (XDG config keyfile) ──
+
+static char *settings_path(void) {
+    const char *cfg = g_getenv("XDG_CONFIG_HOME");
+    g_autofree char *dir =
+        (cfg && *cfg) ? g_build_filename(cfg, "boo", NULL)
+                      : g_build_filename(g_get_home_dir(), ".config", "boo", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    return g_build_filename(dir, "settings.ini", NULL);
+}
+
+static void settings_save(WindowState *st) {
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    const char *theme =
+        (st->themes && st->current_theme >= 0)
+            ? g_array_index(st->themes, ThemeEntry, st->current_theme).name
+            : "";
+    g_key_file_set_string(kf, "boo", "theme", theme);
+    g_key_file_set_double(kf, "boo", "opacity", st->opacity);
+    g_key_file_set_boolean(kf, "boo", "auto-type", st->auto_type);
+    g_autofree char *path = settings_path();
+    g_key_file_save_to_file(kf, path, NULL);
+}
+
+static void settings_load(WindowState *st) {
+    st->opacity = 1.0;
+    st->auto_type = TRUE;
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    g_autofree char *path = settings_path();
+    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) return;
+    double o = g_key_file_get_double(kf, "boo", "opacity", NULL);
+    if (o >= 0.1 && o <= 1.0) st->opacity = o;
+    if (g_key_file_has_key(kf, "boo", "auto-type", NULL))
+        st->auto_type = g_key_file_get_boolean(kf, "boo", "auto-type", NULL);
+    g_autofree char *theme = g_key_file_get_string(kf, "boo", "theme", NULL);
+    if (theme && st->themes)
+        for (guint i = 0; i < st->themes->len; i++)
+            if (g_strcmp0(g_array_index(st->themes, ThemeEntry, i).name, theme) == 0) {
+                st->current_theme = (int)i;
+                break;
+            }
+}
+
+static void select_theme(WindowState *st, int index) {
+    if (!st->themes || index < 0 || index >= (int)st->themes->len) return;
+    st->current_theme = index;
+    apply_theme(st, &g_array_index(st->themes, ThemeEntry, index).colors);
+    settings_save(st);
+}
+
+// ── settings dialog (theme picker + opacity + auto-type, per docs/ui-spec.md) ──
+
+static void swatch_draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data) {
+    (void)area;
+    guint32 rgb = GPOINTER_TO_UINT(data);
+    cairo_set_source_rgb(cr, ((rgb >> 16) & 0xFF) / 255.0, ((rgb >> 8) & 0xFF) / 255.0,
+                         (rgb & 0xFF) / 255.0);
+    cairo_rectangle(cr, 0, 0, w, h);
+    cairo_fill(cr);
+}
+
+static GtkWidget *swatch_new(guint32 rgb, int size) {
+    GtkWidget *a = gtk_drawing_area_new();
+    gtk_widget_set_size_request(a, size, size);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), swatch_draw,
+                                   GUINT_TO_POINTER(rgb), NULL);
+    return a;
+}
+
+typedef struct {
+    WindowState *st;
+    GtkListBox *list;
+    GtkSearchEntry *search;
+    GtkBox *palette; // 16-swatch preview strip
+} SettingsUI;
+
+static void palette_preview(SettingsUI *ui, const BooThemeColors *c) {
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(ui->palette))))
+        gtk_box_remove(ui->palette, child);
+    for (int i = 0; i < 16; i++)
+        gtk_box_append(ui->palette, swatch_new(c->palette[i], 16));
+}
+
+static void on_theme_row(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+    (void)box;
+    SettingsUI *ui = data;
+    if (!row) return;
+    int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "boo-theme-index"));
+    select_theme(ui->st, index);
+    palette_preview(ui, &g_array_index(ui->st->themes, ThemeEntry, index).colors);
+}
+
+static gboolean theme_filter(GtkListBoxRow *row, gpointer data) {
+    SettingsUI *ui = data;
+    const char *q = gtk_editable_get_text(GTK_EDITABLE(ui->search));
+    if (!q || !*q) return TRUE;
+    const char *name = g_object_get_data(G_OBJECT(row), "boo-theme-name");
+    g_autofree char *lname = g_ascii_strdown(name, -1);
+    g_autofree char *lq = g_ascii_strdown(q, -1);
+    return strstr(lname, lq) != NULL;
+}
+
+static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
+    (void)entry;
+    gtk_list_box_invalidate_filter(((SettingsUI *)data)->list);
+}
+
+static void on_opacity_changed(GtkRange *range, gpointer data) {
+    SettingsUI *ui = data;
+    ui->st->opacity = gtk_range_get_value(range);
+    gtk_widget_set_opacity(GTK_WIDGET(ui->st->window), ui->st->opacity);
+    settings_save(ui->st);
+}
+
+static gboolean on_autotype_changed(GtkSwitch *sw, gboolean active, gpointer data) {
+    (void)sw;
+    SettingsUI *ui = data;
+    ui->st->auto_type = active;
+    settings_save(ui->st);
+    return FALSE; // let the default handler update the visual state
+}
+
+static void open_settings(GtkButton *btn, gpointer data) {
+    (void)btn;
+    WindowState *st = data;
+    SettingsUI *ui = g_new0(SettingsUI, 1);
+    ui->st = st;
+
+    GtkWidget *win = adw_window_new();
+    gtk_window_set_title(GTK_WINDOW(win), "Boo Settings");
+    gtk_window_set_default_size(GTK_WINDOW(win), 360, 520);
+    gtk_window_set_transient_for(GTK_WINDOW(win), st->window);
+    g_object_set_data_full(G_OBJECT(win), "boo-settings-ui", ui, g_free);
+
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(content, 12);
+    gtk_widget_set_margin_bottom(content, 12);
+    gtk_widget_set_margin_start(content, 12);
+    gtk_widget_set_margin_end(content, 12);
+    gtk_widget_set_vexpand(content, TRUE);
+
+    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(outer), adw_header_bar_new());
+    gtk_box_append(GTK_BOX(outer), content);
+    adw_window_set_content(ADW_WINDOW(win), outer);
+
+    // Opacity slider
+    GtkWidget *orow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(orow), gtk_label_new("Opacity"));
+    GtkWidget *scale =
+        gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.1, 1.0, 0.05);
+    gtk_range_set_value(GTK_RANGE(scale), st->opacity);
+    gtk_widget_set_hexpand(scale, TRUE);
+    g_signal_connect(scale, "value-changed", G_CALLBACK(on_opacity_changed), ui);
+    gtk_box_append(GTK_BOX(orow), scale);
+    gtk_box_append(GTK_BOX(content), orow);
+
+    // Auto-type toggle
+    GtkWidget *arow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *alabel = gtk_label_new("Auto-type into focused app");
+    gtk_widget_set_hexpand(alabel, TRUE);
+    gtk_widget_set_halign(alabel, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(arow), alabel);
+    GtkWidget *sw = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(sw), st->auto_type);
+    gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
+    g_signal_connect(sw, "state-set", G_CALLBACK(on_autotype_changed), ui);
+    gtk_box_append(GTK_BOX(arow), sw);
+    gtk_box_append(GTK_BOX(content), arow);
+
+    gtk_box_append(GTK_BOX(content), gtk_label_new("Theme"));
+
+    // Theme search + list (swatch + name), filtered live.
+    GtkWidget *search = gtk_search_entry_new();
+    ui->search = GTK_SEARCH_ENTRY(search);
+    g_signal_connect(search, "search-changed", G_CALLBACK(on_search_changed), ui);
+    gtk_box_append(GTK_BOX(content), search);
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    GtkWidget *list = gtk_list_box_new();
+    ui->list = GTK_LIST_BOX(list);
+    gtk_list_box_set_filter_func(GTK_LIST_BOX(list), theme_filter, ui, NULL);
+    g_signal_connect(list, "row-activated", G_CALLBACK(on_theme_row), ui);
+    for (guint i = 0; st->themes && i < st->themes->len; i++) {
+        ThemeEntry *e = &g_array_index(st->themes, ThemeEntry, i);
+        GtkWidget *row = gtk_list_box_row_new();
+        g_object_set_data(G_OBJECT(row), "boo-theme-index", GINT_TO_POINTER((int)i));
+        g_object_set_data(G_OBJECT(row), "boo-theme-name", e->name);
+        GtkWidget *rb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_set_margin_top(rb, 4);
+        gtk_widget_set_margin_bottom(rb, 4);
+        gtk_widget_set_margin_start(rb, 6);
+        gtk_box_append(GTK_BOX(rb), swatch_new(e->colors.bg, 20));
+        gtk_box_append(GTK_BOX(rb), gtk_label_new(e->name));
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), rb);
+        gtk_list_box_append(GTK_LIST_BOX(list), row);
+    }
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list);
+    gtk_box_append(GTK_BOX(content), scroll);
+
+    // 16-color palette preview strip for the current theme.
+    GtkWidget *palette = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    ui->palette = GTK_BOX(palette);
+    gtk_box_append(GTK_BOX(content), palette);
+    if (st->themes && st->current_theme >= 0)
+        palette_preview(ui,
+                        &g_array_index(st->themes, ThemeEntry, st->current_theme).colors);
+
+    gtk_window_present(GTK_WINDOW(win));
+}
+
 GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     GtkWidget *window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Boo");
@@ -478,6 +737,15 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     AdwHeaderBar *header = ADW_HEADER_BAR(adw_header_bar_new());
+
+    // Settings button (opacity + auto-type + theme picker), mirroring the macOS
+    // gear in the title bar.
+    GtkWidget *settings_btn = gtk_button_new_from_icon_name("emblem-system-symbolic");
+    gtk_widget_set_tooltip_text(settings_btn, "Settings");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(settings_btn),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, "Settings", -1);
+    g_signal_connect(settings_btn, "clicked", G_CALLBACK(open_settings), state);
+    adw_header_bar_pack_end(header, settings_btn);
 
     GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_append(GTK_BOX(content), GTK_WIDGET(header));
@@ -538,9 +806,20 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // First run shows a one-time permission dialog; the grant persists.
     state->inject = boo_text_inject_new(GTK_WINDOW(window));
 
-    // Colour everything from the default theme now that the waveform exists.
-    const BooThemeColors colors = default_theme_colors();
-    apply_theme(state, &colors);
+    // Load every theme and the persisted settings, then colour everything now
+    // that the waveform exists. A persisted theme wins; else the built-in
+    // default. Opacity is a whole-window property.
+    load_theme_list(state);
+    settings_load(state);
+    if (state->themes && state->current_theme >= 0) {
+        apply_theme(
+            state,
+            &g_array_index(state->themes, ThemeEntry, state->current_theme).colors);
+    } else {
+        const BooThemeColors colors = default_theme_colors();
+        apply_theme(state, &colors);
+    }
+    gtk_widget_set_opacity(window, state->opacity);
 
     return GTK_WINDOW(window);
 }
