@@ -102,6 +102,11 @@ typedef struct {
 // every frontend's model-download dialog offers the same set from one place.
 const BooModelInfo *boo_models(size_t *out_count);
 
+// The pinned Silero VAD model, kept out of boo_models (pickers must not
+// offer it as a speech model) but fetched by every frontend with the same
+// verified-download machinery on first run.
+const BooModelInfo *boo_vad_model(void);
+
 // Completeness of a model file on disk, judged by comparing its size against
 // the pinned manifest size (catches a hand-run download that was interrupted;
 // stat-priced, no hashing). Files not named like a manifest entry cannot be

@@ -9,21 +9,11 @@
 #include <adwaita.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
-#include <libsoup/soup.h>
 #include <stdlib.h>
 
 #include "boo.h"
 #include "models.h"
 #include "overlay_window.h"
-
-#define VAD_MODEL_NAME "ggml-silero-v6.2.0.bin"
-#define VAD_MODEL_URL                                                                    \
-    "https://huggingface.co/ggml-org/whisper-vad/resolve/main/" VAD_MODEL_NAME
-// Pinned SHA-256 (HuggingFace LFS oid). The download is over TLS, but pinning
-// defends against a compromised mirror handing a substituted GGUF to the ggml
-// parser, and rejects a truncated or oversized body before it is written.
-#define VAD_MODEL_SHA256                                                                 \
-    "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
 
 typedef struct {
     BooContext *ctx;
@@ -66,75 +56,36 @@ static char *model_install_hint(void) {
         dir, dir, dir);
 }
 
-// Fetch the Silero VAD model in the background on first run, mirroring the
-// macOS frontend. It is under 1 MB and carries no size/language decision the
+// Fetch the Silero VAD model in the background on first run, the same on
+// every frontend. It is under 1 MB and carries no size/language decision the
 // user needs to make (unlike the speech models), so streaming transcription
 // just starts working; batch mode covers the seconds until it lands, and any
 // failure (offline, sandbox without network) leaves batch mode as before.
-static void on_vad_downloaded(GObject *source, GAsyncResult *result, gpointer user_data) {
+// The pinned entry comes from the core (boo_vad_model) and the transfer runs
+// through the same verified downloader the model switcher uses.
+static void on_vad_done(const char *path, gpointer user_data) {
     AppState *state = user_data;
-    SoupSession *session = SOUP_SESSION(source);
+    // Runs on the main loop; the shutdown handler also runs there, so ctx
+    // cannot be torn down beneath us mid-call.
+    if (state->ctx && boo_load_vad(state->ctx, path))
+        g_print("Streaming transcription enabled: %s\n", path);
+}
 
-    g_autoptr(GError) error = NULL;
-    g_autoptr(GBytes) bytes = soup_session_send_and_read_finish(session, result, &error);
-    SoupMessage *msg = soup_session_get_async_result_message(session, result);
-    guint status = msg ? soup_message_get_status(msg) : 0;
-
-    if (!bytes || status != SOUP_STATUS_OK) {
-        g_warning("Boo: VAD model download failed (%s); staying in batch mode",
-                  error ? error->message : soup_status_get_phrase(status));
-        g_object_unref(session);
-        return;
-    }
-
-    // Verify integrity before trusting the bytes: a mismatch means a corrupt,
-    // truncated, or substituted file, so drop it and stay in batch mode.
-    g_autofree char *digest = g_compute_checksum_for_bytes(G_CHECKSUM_SHA256, bytes);
-    if (!digest || g_strcmp0(digest, VAD_MODEL_SHA256) != 0) {
-        g_warning("Boo: VAD model failed checksum; staying in batch mode");
-        g_object_unref(session);
-        return;
-    }
-
-    g_autofree char *dir = g_build_filename(g_get_user_data_dir(), "boo", "models", NULL);
-    g_autofree char *dest = g_build_filename(dir, VAD_MODEL_NAME, NULL);
-    gsize size = 0;
-    const char *data = g_bytes_get_data(bytes, &size);
-
-    g_mkdir_with_parents(dir, 0755);
-    // g_file_set_contents writes to a temp file and renames, so a crash
-    // mid-download never leaves a truncated model for the next launch.
-    if (!g_file_set_contents(dest, data, (gssize)size, &error)) {
-        g_warning("Boo: could not save the VAD model: %s", error->message);
-        g_object_unref(session);
-        return;
-    }
-
-    // This callback runs on the main loop; the shutdown handler also runs
-    // there, so ctx cannot be torn down beneath us mid-call.
-    if (state->ctx && boo_load_vad(state->ctx, dest)) {
-        g_print("Streaming transcription enabled: %s\n", dest);
-    }
-    g_object_unref(session);
+static void on_vad_fail(const char *why, gpointer user_data) {
+    (void)user_data;
+    g_warning("Boo: VAD model download failed (%s); staying in batch mode", why);
 }
 
 static void download_vad_model(AppState *state) {
     g_print("Fetching the VAD model to enable streaming transcription\n");
-    SoupSession *session = soup_session_new();
-    g_autoptr(SoupMessage) msg = soup_message_new(SOUP_METHOD_GET, VAD_MODEL_URL);
-    soup_session_send_and_read_async(session, msg, G_PRIORITY_DEFAULT, NULL,
-                                     on_vad_downloaded, state);
+    boo_model_download(boo_vad_model(), NULL, on_vad_done, on_vad_fail, state);
 }
 
 // Open the diagnostic log file at $XDG_STATE_HOME/boo/boo.log (else
 // ~/.local/state/boo/boo.log). Best-effort; on failure boo_log falls back to
 // stderr only. Never logs transcript text (see docs/logging-and-crash-reporting.md).
 static void init_logging(void) {
-    const char *state = g_getenv("XDG_STATE_HOME");
-    g_autofree const char *dir =
-        (state && *state)
-            ? g_build_filename(state, "boo", NULL)
-            : g_build_filename(g_get_home_dir(), ".local", "state", "boo", NULL);
+    g_autofree const char *dir = g_build_filename(g_get_user_state_dir(), "boo", NULL);
     g_mkdir_with_parents(dir, 0700);
     g_autofree const char *path = g_build_filename(dir, "boo.log", NULL);
     boo_log_init(path, BOO_LOG_INFO);
@@ -160,11 +111,7 @@ static void on_crash_response(AdwAlertDialog *dialog, const char *response,
 }
 
 static void surface_previous_crash(void) {
-    const char *state_env = g_getenv("XDG_STATE_HOME");
-    g_autofree char *dir =
-        (state_env && *state_env)
-            ? g_build_filename(state_env, "boo", NULL)
-            : g_build_filename(g_get_home_dir(), ".local", "state", "boo", NULL);
+    g_autofree char *dir = g_build_filename(g_get_user_state_dir(), "boo", NULL);
     g_autofree char *report = g_build_filename(dir, "boo-crash.txt", NULL);
     if (!g_file_test(report, G_FILE_TEST_EXISTS)) return;
     g_autofree char *prev = g_build_filename(dir, "boo-crash-prev.txt", NULL);

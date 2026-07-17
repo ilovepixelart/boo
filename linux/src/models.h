@@ -18,6 +18,11 @@ char *boo_find_vad_model_path(void);
 // The writable models directory (created if missing). Caller frees.
 char *boo_models_write_dir(void);
 
+// The layered per-subdir search: ./<subdir> for a source run, the XDG data
+// dir, the Flatpak share, then the system share. Shared by models and themes
+// so the layers cannot drift. Free with g_ptr_array_unref.
+GPtrArray *boo_data_dirs(const char *subdir);
+
 // Every usable speech model on disk (full paths), ranked most capable first
 // (boo_model_rank, alphabetical tiebreak), deduplicated by filename so the
 // first search directory shadows later ones, truncated files skipped.

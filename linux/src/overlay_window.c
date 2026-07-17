@@ -460,18 +460,14 @@ static const BooThemeColors DEFAULT_THEME = {
     .palette = {[8] = 0x666666, [9] = 0xD54E53, [11] = 0xE7C547, [14] = 0x70C0B1},
 };
 
-// ./themes for a source run, then the XDG data dir, the Flatpak share, and the
-// system share, mirroring the model search.
+// The same layered search the models use (boo_data_dirs), so the two lists
+// cannot drift; the first existing directory wins.
 static char *find_themes_dir(void) {
-    const char *xdg_env = g_getenv("XDG_DATA_HOME");
-    g_autofree const char *xdg = (xdg_env && *xdg_env)
-                                     ? g_build_filename(xdg_env, "boo", "themes", NULL)
-                                     : g_build_filename(g_get_home_dir(), ".local",
-                                                        "share", "boo", "themes", NULL);
-    const char *dirs[] = {"themes", xdg, "/app/share/boo/themes", "/usr/share/boo/themes",
-                          NULL};
-    for (int i = 0; dirs[i]; i++)
-        if (g_file_test(dirs[i], G_FILE_TEST_IS_DIR)) return g_strdup(dirs[i]);
+    g_autoptr(GPtrArray) dirs = boo_data_dirs("themes");
+    for (guint i = 0; i < dirs->len; i++) {
+        const char *dir = g_ptr_array_index(dirs, i);
+        if (g_file_test(dir, G_FILE_TEST_IS_DIR)) return g_strdup(dir);
+    }
     return NULL;
 }
 
@@ -530,10 +526,9 @@ static void load_theme_list(WindowState *st) {
 // ── settings persistence (XDG config keyfile) ──
 
 static char *settings_path(void) {
-    const char *cfg = g_getenv("XDG_CONFIG_HOME");
-    g_autofree const char *dir =
-        (cfg && *cfg) ? g_build_filename(cfg, "boo", NULL)
-                      : g_build_filename(g_get_home_dir(), ".config", "boo", NULL);
+    // g_get_user_config_dir already honors XDG_CONFIG_HOME with the
+    // ~/.config fallback.
+    g_autofree const char *dir = g_build_filename(g_get_user_config_dir(), "boo", NULL);
     g_mkdir_with_parents(dir, 0700);
     return g_build_filename(dir, "settings.ini", NULL);
 }

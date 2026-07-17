@@ -466,6 +466,23 @@ export fn boo_models(out_count: ?*usize) [*]const BooModelInfo {
     return &models_list;
 }
 
+// The Silero VAD model: deliberately not in boo_models (it is not a speech
+// model the pickers should offer), but every frontend auto-fetches it with
+// the same download machinery, so the pinned entry lives here once instead
+// of three constant triplets drifting apart.
+const vad_model = BooModelInfo{
+    .filename = "ggml-silero-v6.2.0.bin",
+    .url = hf ++ "ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+    .sha256 = "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+    .label = "Silero VAD",
+    .note = "under 1 MB, enables streaming transcription",
+    .size = 885098,
+};
+
+export fn boo_vad_model() *const BooModelInfo {
+    return &vad_model;
+}
+
 // Completeness check for a model file already on disk. Our own downloads
 // verify SHA-256 and move into place atomically, but a hand-run curl can be
 // interrupted and leave a truncated file that lists as usable and only fails
@@ -488,7 +505,7 @@ extern "c" fn remove(path: [*:0]const u8) c_int;
 
 export fn boo_model_verify(path: [*:0]const u8) c_int {
     const basename = std.fs.path.basename(std.mem.span(path));
-    const expected: u64 = for (models_list) |m| {
+    const expected: u64 = for (models_list ++ [_]BooModelInfo{vad_model}) |m| {
         if (std.mem.eql(u8, basename, std.mem.span(m.filename))) break m.size;
     } else return BOO_MODEL_FILE_UNKNOWN;
 
@@ -568,6 +585,18 @@ test "the download manifest is well-formed" {
     }
     // Recommended first: Parakeet also tops boo_model_rank.
     try testing.expectEqual(@as(u32, 0), boo_model_rank(list[0].filename));
+
+    // The VAD entry holds itself to the same manifest standards, and the
+    // completeness check must recognize it (a truncated silero would
+    // otherwise load-fail with no explanation).
+    const vad = boo_vad_model();
+    try testing.expectEqual(@as(usize, 64), std.mem.span(vad.sha256).len);
+    try testing.expect(vad.size > 0);
+    try testing.expect(std.mem.startsWith(u8, std.mem.span(vad.url), "https://"));
+    try testing.expectEqual(
+        BOO_MODEL_FILE_TRUNCATED,
+        boo_model_verify("/nonexistent/ggml-silero-v6.2.0.bin"),
+    );
 }
 
 test "a failed init frees everything it had already allocated" {

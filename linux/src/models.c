@@ -9,21 +9,19 @@
 #include <glib/gstdio.h>
 #include <libsoup/soup.h>
 
-// The model search directories, most specific first: ./models, then
-// $XDG_DATA_HOME/boo/models (falling back to ~/.local/share/boo/models),
-// then /usr/share/boo/models. Free with g_ptr_array_unref.
-static GPtrArray *model_dirs(void) {
+GPtrArray *boo_data_dirs(const char *subdir) {
     GPtrArray *dirs = g_ptr_array_new_with_free_func(g_free);
-    g_ptr_array_add(dirs, g_strdup("models"));
-    const char *xdg_env = g_getenv("XDG_DATA_HOME");
-    if (xdg_env && *xdg_env) {
-        g_ptr_array_add(dirs, g_build_filename(xdg_env, "boo", "models", NULL));
-    } else {
-        g_ptr_array_add(dirs, g_build_filename(g_get_home_dir(), ".local", "share", "boo",
-                                               "models", NULL));
-    }
-    g_ptr_array_add(dirs, g_strdup("/usr/share/boo/models"));
+    g_ptr_array_add(dirs, g_strdup(subdir));
+    // g_get_user_data_dir already honors XDG_DATA_HOME with the
+    // ~/.local/share fallback; no hand-rolled env check needed.
+    g_ptr_array_add(dirs, g_build_filename(g_get_user_data_dir(), "boo", subdir, NULL));
+    g_ptr_array_add(dirs, g_build_filename("/app/share/boo", subdir, NULL));
+    g_ptr_array_add(dirs, g_build_filename("/usr/share/boo", subdir, NULL));
     return dirs;
+}
+
+static GPtrArray *model_dirs(void) {
+    return boo_data_dirs("models");
 }
 
 // Whether `name` in `dir` is a usable speech model: any ggml-*.bin except the
@@ -131,10 +129,7 @@ char *boo_find_vad_model_path(void) {
 }
 
 char *boo_models_write_dir(void) {
-    const char *xdg = g_getenv("XDG_DATA_HOME");
-    char *dir = (xdg && *xdg) ? g_build_filename(xdg, "boo", "models", NULL)
-                              : g_build_filename(g_get_home_dir(), ".local", "share",
-                                                 "boo", "models", NULL);
+    char *dir = g_build_filename(g_get_user_data_dir(), "boo", "models", NULL);
     g_mkdir_with_parents(dir, 0700);
     return dir;
 }
@@ -262,8 +257,9 @@ static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_d
         download_fail(dc, "The download is larger than the model. Try again.");
         return;
     }
-    gtk_progress_bar_set_fraction(dc->progress,
-                                  (double)dc->received / (double)dc->model->size);
+    if (dc->progress)
+        gtk_progress_bar_set_fraction(dc->progress,
+                                      (double)dc->received / (double)dc->model->size);
     read_chunk(dc, stream);
 }
 
@@ -309,7 +305,7 @@ void boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
                         gpointer user_data) {
     DownloadCtx *dc = g_new0(DownloadCtx, 1);
     dc->model = model;
-    dc->progress = g_object_ref(progress);
+    dc->progress = progress ? g_object_ref(progress) : NULL;
     dc->on_done = on_done;
     dc->on_fail = on_fail;
     dc->user_data = user_data;
