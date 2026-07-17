@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const engine_mod = @import("engine.zig");
 const whisper_mod = engine_mod.whisper;
 const Engine = engine_mod.Engine;
@@ -310,6 +311,8 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     c.freeTranscript();
     c.last_transcript = buf;
 
+    // Metadata only, never the text (see src/log.zig privacy note).
+    log.logf(.info, "transcribed {d} chars", .{buf.len - 1});
     return @ptrCast(buf.ptr);
 }
 
@@ -354,6 +357,19 @@ export fn boo_model_rank(name: [*:0]const u8) u32 {
     return recommended_models.len;
 }
 
+// ── diagnostic logging ────────────────────────────────────────────────────────
+// See src/log.zig. The frontend passes the per-OS log file path (or null for
+// stderr only) and the minimum level (0=error 1=warn 2=info 3=debug). Never log
+// recognized text; the core's own points log metadata only.
+
+export fn boo_log_init(path: ?[*:0]const u8, min_level: c_int) void {
+    log.init(path, min_level);
+}
+
+export fn boo_log(level: c_int, msg: [*:0]const u8) void {
+    log.write(level, std.mem.span(msg));
+}
+
 // ── tests ────────────────────────────────────────────────────────────────────
 
 test {
@@ -369,6 +385,7 @@ test {
     // even though the backend itself is only selected on Windows.
     _ = @import("audio/wasapi.zig");
     _ = @import("wer.zig");
+    _ = @import("log.zig");
 }
 
 const testing = std.testing;

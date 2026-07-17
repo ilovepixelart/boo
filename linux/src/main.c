@@ -225,11 +225,27 @@ static void download_vad_model(AppState *state) {
                                      on_vad_downloaded, state);
 }
 
+// Open the diagnostic log file at $XDG_STATE_HOME/boo/boo.log (else
+// ~/.local/state/boo/boo.log). Best-effort; on failure boo_log falls back to
+// stderr only. Never logs transcript text (see docs/logging-and-crash-reporting.md).
+static void init_logging(void) {
+    const char *state = g_getenv("XDG_STATE_HOME");
+    g_autofree char *dir =
+        (state && *state)
+            ? g_build_filename(state, "boo", NULL)
+            : g_build_filename(g_get_home_dir(), ".local", "state", "boo", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    g_autofree char *path = g_build_filename(dir, "boo.log", NULL);
+    boo_log_init(path, BOO_LOG_INFO);
+}
+
 static void on_activate(AdwApplication *app, gpointer user_data) {
     AppState *state = user_data;
+    init_logging();
 
     g_autofree char *model_path = find_model_path();
     if (!model_path) {
+        boo_log(BOO_LOG_ERROR, "no speech model found");
         g_autofree char *hint = model_install_hint();
         show_error(GTK_APPLICATION(app), "No speech model found", hint);
         return;
@@ -238,6 +254,7 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
 
     state->ctx = boo_init(model_path);
     if (!state->ctx) {
+        boo_log(BOO_LOG_ERROR, "speech model failed to load");
         g_autofree char *body = g_strdup_printf(
             "%s\n\nThe file exists but whisper could not read it. It may be "
             "corrupt or truncated, try downloading it again.",
@@ -246,6 +263,7 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
         return;
     }
     g_print("Model loaded.\n");
+    boo_log(BOO_LOG_INFO, "speech model loaded");
 
     // Optional streaming VAD: with a Silero model present, utterances are
     // transcribed at natural pauses while still recording, and only the final
