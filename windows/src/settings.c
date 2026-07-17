@@ -5,6 +5,8 @@
 
 #include "settings.h"
 
+#include "model.h"
+
 #include <commctrl.h>
 #include <shlwapi.h>
 #include <stdio.h>
@@ -16,6 +18,7 @@
 #define IDC_AUTOTYPE       2002
 #define IDC_THEMES         2003
 #define IDC_OPACITY_VAL    2004
+#define IDC_MODEL          2005
 
 // Live opacity readout, the reference's "1.00" label (shown as a percentage).
 static void set_opacity_label(HWND dlg, int pct) {
@@ -35,6 +38,15 @@ static char *to_utf8(const WCHAR *wide) {
     if (!utf8) return NULL;
     WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, len, NULL, NULL);
     return utf8;
+}
+
+static WCHAR *to_wide(const char *utf8) {
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (len <= 0) return NULL;
+    WCHAR *wide = malloc((size_t)len * sizeof(WCHAR));
+    if (!wide) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
+    return wide;
 }
 
 // ── theme discovery ──
@@ -164,6 +176,22 @@ static void save_prefs(BooApp *app) {
     RegCloseKey(key);
 }
 
+// Persist an explicit model switch (and only that: auto-discovered models are
+// never written, so a newly downloaded better model still wins by default).
+// boo_model_find honors this key on later launches.
+static void save_model_choice(const char *path) {
+    WCHAR *model = to_wide(path);
+    if (!model) return;
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Boo", 0, NULL, 0, KEY_WRITE, NULL,
+                        &key, NULL) == ERROR_SUCCESS) {
+        RegSetValueExW(key, L"Model", 0, REG_SZ, (const BYTE *)model,
+                       (DWORD)((wcslen(model) + 1) * sizeof(WCHAR)));
+        RegCloseKey(key);
+    }
+    free(model);
+}
+
 // ── public: init / apply / free ──
 
 void boo_settings_init(BooApp *app) {
@@ -187,11 +215,107 @@ void boo_settings_apply(BooApp *app) {
 }
 
 void boo_settings_free(BooApp *app) {
+    free(app->settings.model_current);
+    app->settings.model_current = NULL;
     for (int i = 0; i < app->settings.theme_count; i++)
         free(app->settings.themes[i].name);
     free(app->settings.themes);
     app->settings.themes = NULL;
     app->settings.theme_count = 0;
+}
+
+// ── model switcher ──
+// One dropdown of the usable models on disk (boo_model_installed). Selecting
+// one swaps it in place off the UI thread via boo_reload_model, which keeps
+// the old model serving on a failed load; the explicit choice persists in the
+// registry and wins over ranked auto-discovery on later launches. In-app
+// download of missing manifest models arrives with the Windows onboarding.
+
+typedef struct {
+    BooApp *app;
+    HWND dlg;
+    char *path; // malloc'd; the handler takes ownership on success
+} ModelSwap;
+
+static DWORD WINAPI model_swap_worker(LPVOID param) {
+    ModelSwap *job = param;
+    const bool ok = boo_reload_model(job->app->ctx, job->path);
+    PostMessageW(job->dlg, BOO_MSG_MODEL_SWAPPED, ok, (LPARAM)job);
+    return 0;
+}
+
+// Point the combo selection back at the loaded model (or clear it).
+static void model_combo_select_current(BooApp *app, HWND combo) {
+    for (int i = 0; i < app->settings.model_count; i++)
+        if (app->settings.model_current &&
+            strcmp(app->settings.model_paths[i], app->settings.model_current) == 0) {
+            SendMessageW(combo, CB_SETCURSEL, (WPARAM)i, 0);
+            return;
+        }
+    SendMessageW(combo, CB_SETCURSEL, (WPARAM)-1, 0);
+}
+
+static void model_switch(BooApp *app, HWND dlg, HWND combo) {
+    const int idx = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
+    if (idx < 0 || idx >= app->settings.model_count) return;
+    const char *path = app->settings.model_paths[idx];
+    if (app->settings.model_current && strcmp(path, app->settings.model_current) == 0)
+        return;
+    if (boo_is_recording(app->ctx) || boo_is_transcribing(app->ctx)) {
+        MessageBoxW(dlg, L"Stop recording first.", L"Boo", MB_ICONINFORMATION);
+        model_combo_select_current(app, combo);
+        return;
+    }
+
+    ModelSwap *job = malloc(sizeof(*job));
+    if (!job) return;
+    job->app = app;
+    job->dlg = dlg;
+    job->path = _strdup(path);
+    if (!job->path) {
+        free(job);
+        return;
+    }
+
+    // Loading takes seconds: hand it to a thread, freeze the combo and the
+    // close button so the dialog (the message target) stays alive.
+    EnableWindow(combo, FALSE);
+    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+    HANDLE worker = CreateThread(NULL, 0, model_swap_worker, job, 0, NULL);
+    if (!worker) {
+        EnableWindow(combo, TRUE);
+        EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+        free(job->path);
+        free(job);
+        return;
+    }
+    CloseHandle(worker);
+}
+
+static void model_swapped(BooApp *app, HWND dlg, bool ok, ModelSwap *job) {
+    HWND combo = GetDlgItem(dlg, IDC_MODEL);
+    EnableWindow(combo, TRUE);
+    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+    if (ok) {
+        free(app->settings.model_current);
+        app->settings.model_current = job->path; // ownership moves
+        save_model_choice(job->path);
+        boo_log(BOO_LOG_INFO, "model switched");
+    } else {
+        free(job->path);
+        MessageBoxW(dlg, L"Could not load that model; keeping the previous one.", L"Boo",
+                    MB_ICONWARNING);
+    }
+    model_combo_select_current(app, combo);
+    free(job);
+}
+
+static void model_paths_free(BooApp *app) {
+    for (int i = 0; i < app->settings.model_count; i++)
+        free(app->settings.model_paths[i]);
+    free(app->settings.model_paths);
+    app->settings.model_paths = NULL;
+    app->settings.model_count = 0;
 }
 
 // ── dialog ──
@@ -237,20 +361,40 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         SendMessageW(chk, BM_SETCHECK,
                      app->settings.auto_type ? BST_CHECKED : BST_UNCHECKED, 0);
 
+        HWND lm =
+            CreateWindowW(L"STATIC", L"Model", WS_CHILD | WS_VISIBLE, m, scale(112, dpi),
+                          w, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+        // Dropdown of the usable models on disk; the loaded one is selected.
+        // The height covers the open list, per the combo box contract.
+        HWND combo = CreateWindowW(L"COMBOBOX", NULL,
+                                   WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST |
+                                       CBS_HASSTRINGS,
+                                   m, scale(134, dpi), w, scale(160, dpi), hwnd,
+                                   (HMENU)IDC_MODEL, cs->hInstance, NULL);
+        model_paths_free(app); // a reopened dialog re-enumerates
+        app->settings.model_count = boo_model_installed(&app->settings.model_paths);
+        for (int i = 0; i < app->settings.model_count; i++) {
+            WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
+            if (!base) continue;
+            SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
+            free(base);
+        }
+        model_combo_select_current(app, combo);
+
         HWND l2 =
-            CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(112, dpi),
+            CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(176, dpi),
                           w, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
         HWND list = CreateWindowW(L"LISTBOX", NULL,
                                   WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER |
                                       LBS_NOTIFY | LBS_HASSTRINGS,
-                                  m, scale(136, dpi), w, scale(280, dpi), hwnd,
+                                  m, scale(200, dpi), w, scale(280, dpi), hwnd,
                                   (HMENU)IDC_THEMES, cs->hInstance, NULL);
         for (int i = 0; i < app->settings.theme_count; i++)
             SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)app->settings.themes[i].name);
         if (app->settings.current_theme >= 0)
             SendMessageW(list, LB_SETCURSEL, app->settings.current_theme, 0);
 
-        HWND kids[] = {l1, val, bar, chk, l2, list};
+        HWND kids[] = {l1, val, bar, chk, lm, combo, l2, list};
         for (size_t i = 0; i < ARRAYSIZE(kids); i++)
             SendMessageW(kids[i], WM_SETFONT, (WPARAM)font, TRUE);
         return 0;
@@ -271,13 +415,21 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
             save_prefs(app);
         } else if (LOWORD(wparam) == IDC_THEMES && HIWORD(wparam) == LBN_SELCHANGE) {
             select_theme(app, (int)SendMessageW((HWND)lparam, LB_GETCURSEL, 0, 0));
+        } else if (LOWORD(wparam) == IDC_MODEL && HIWORD(wparam) == CBN_SELCHANGE) {
+            model_switch(app, hwnd, (HWND)lparam);
         }
+        return 0;
+    case BOO_MSG_MODEL_SWAPPED:
+        if (app) model_swapped(app, hwnd, wparam != 0, (ModelSwap *)lparam);
         return 0;
     case WM_CLOSE:
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
-        if (app) app->settings.win = NULL;
+        if (app) {
+            app->settings.win = NULL;
+            model_paths_free(app);
+        }
         return 0;
     default:
         return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -307,7 +459,7 @@ void boo_settings_open(BooApp *app) {
     }
 
     const UINT dpi = GetDpiForWindow(app->overlay);
-    RECT wr = {0, 0, scale(320, dpi), scale(432, dpi)};
+    RECT wr = {0, 0, scale(320, dpi), scale(496, dpi)};
     AdjustWindowRectExForDpi(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
     app->settings.win =
         CreateWindowExW(0, BOO_SETTINGS_CLASS, L"Boo Settings",

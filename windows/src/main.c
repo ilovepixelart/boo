@@ -69,8 +69,8 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     }
 
     BooContext *ctx = boo_init(model_path);
-    free(model_path);
     if (!ctx) {
+        free(model_path);
         boo_log(BOO_LOG_ERROR, "speech model failed to load");
         return fail_dialog(
             L"Could not start Boo",
@@ -86,6 +86,7 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     static BooApp app; // zero-initialized
     app.ctx = ctx;
     app.hinst = hinst;
+    app.settings.model_current = model_path; // takes ownership; settings shows it
 
     if (!boo_overlay_create(&app)) {
         boo_deinit(ctx);

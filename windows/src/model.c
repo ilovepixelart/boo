@@ -24,6 +24,19 @@ static unsigned rank_of(const WCHAR *name) {
     return r;
 }
 
+// Whether the model at dir\name is usable: not a truncated partial download
+// (an interrupted hand-run curl), judged by the core against the pinned
+// manifest size.
+static bool usable_model(const WCHAR *dir, const WCHAR *name) {
+    WCHAR full[MAX_PATH];
+    if (swprintf(full, MAX_PATH, L"%ls\\%ls", dir, name) < 0) return false;
+    char *ufull = to_utf8(full);
+    if (!ufull) return false;
+    const bool ok = boo_model_verify(ufull) != BOO_MODEL_FILE_TRUNCATED;
+    free(ufull);
+    return ok;
+}
+
 // Pick a model out of `dir`, or NULL. Returned path is malloc'd, wide.
 static WCHAR *find_model_in(const WCHAR *dir) {
     WCHAR pattern[MAX_PATH];
@@ -39,6 +52,7 @@ static WCHAR *find_model_in(const WCHAR *dir) {
         if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         // ggml-silero-* is the VAD model, not a speech model.
         if (wcsncmp(entry.cFileName, L"ggml-silero", 11) == 0) continue;
+        if (!usable_model(dir, entry.cFileName)) continue;
 
         const unsigned rank = rank_of(entry.cFileName);
         if (best[0] == 0 || rank < best_rank ||
@@ -80,6 +94,37 @@ static char *to_utf8(const WCHAR *wide) {
     return utf8;
 }
 
+// Fill the ordered candidate model directories; returns how many are usable.
+#define BOO_MODEL_DIRS 3
+static size_t model_dirs(WCHAR dirs[][MAX_PATH]) {
+    size_t n = 0;
+    if (primary_model_dir(dirs[n], MAX_PATH)) n++;
+    wcscpy(dirs[n++], L"models");
+    WCHAR localappdata[MAX_PATH];
+    const DWORD lad_len =
+        GetEnvironmentVariableW(L"LOCALAPPDATA", localappdata, MAX_PATH);
+    if (lad_len > 0 && lad_len < MAX_PATH &&
+        swprintf(dirs[n], MAX_PATH, L"%ls\\boo\\models", localappdata) >= 0)
+        n++;
+    return n;
+}
+
+// The model the user explicitly picked in Settings (HKCU\Software\Boo\Model),
+// as a malloc'd UTF-8 path, or NULL. A stale choice (file deleted or
+// truncated since) is treated as absent so discovery falls through.
+static char *saved_model_choice(void) {
+    WCHAR saved[MAX_PATH];
+    DWORD size = sizeof(saved);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Boo", L"Model", RRF_RT_REG_SZ, NULL,
+                     saved, &size) != ERROR_SUCCESS)
+        return NULL;
+    if (GetFileAttributesW(saved) == INVALID_FILE_ATTRIBUTES) return NULL;
+    char *utf8 = to_utf8(saved);
+    if (utf8 && boo_model_verify(utf8) != BOO_MODEL_FILE_TRUNCATED) return utf8;
+    free(utf8);
+    return NULL;
+}
+
 char *boo_model_find(void) {
     // $BOO_MODEL points at one file directly. A length at or past MAX_PATH
     // means truncation, and truncated buffers are undefined, so skip those.
@@ -89,21 +134,12 @@ char *boo_model_find(void) {
         if (GetFileAttributesW(env) != INVALID_FILE_ATTRIBUTES) return to_utf8(env);
     }
 
-    WCHAR primary[MAX_PATH];
-    WCHAR local[MAX_PATH] = L"";
-    WCHAR localappdata[MAX_PATH];
-    const DWORD lad_len =
-        GetEnvironmentVariableW(L"LOCALAPPDATA", localappdata, MAX_PATH);
-    if (lad_len > 0 && lad_len < MAX_PATH)
-        swprintf(local, MAX_PATH, L"%ls\\boo\\models", localappdata);
+    char *saved = saved_model_choice();
+    if (saved) return saved;
 
-    const WCHAR *dirs[] = {
-        primary_model_dir(primary, MAX_PATH) ? primary : NULL,
-        L"models",
-        local[0] ? local : NULL,
-    };
-    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
-        if (!dirs[i]) continue;
+    WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
+    const size_t ndirs = model_dirs(dirs);
+    for (size_t i = 0; i < ndirs; i++) {
         WCHAR *found = find_model_in(dirs[i]);
         if (found) {
             char *utf8 = to_utf8(found);
@@ -112,6 +148,76 @@ char *boo_model_find(void) {
         }
     }
     return NULL;
+}
+
+const char *boo_model_basename(const char *path) {
+    const char *base = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '\\' || *p == '/') base = p + 1;
+    return base;
+}
+
+// Ranked compare of two full UTF-8 model paths by basename.
+static int cmp_installed(const void *a, const void *b) {
+    const char *na = boo_model_basename(*(const char *const *)a);
+    const char *nb = boo_model_basename(*(const char *const *)b);
+    const unsigned ra = boo_model_rank(na);
+    const unsigned rb = boo_model_rank(nb);
+    if (ra != rb) return ra < rb ? -1 : 1;
+    return strcmp(na, nb);
+}
+
+static bool already_listed(char **paths, int count, const char *basename) {
+    for (int i = 0; i < count; i++)
+        if (strcmp(boo_model_basename(paths[i]), basename) == 0) return true;
+    return false;
+}
+
+int boo_model_installed(char ***out) {
+    *out = NULL;
+    WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
+    const size_t ndirs = model_dirs(dirs);
+
+    char **paths = NULL;
+    int count = 0;
+    int cap = 0;
+    for (size_t i = 0; i < ndirs; i++) {
+        WCHAR pattern[MAX_PATH];
+        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dirs[i]) < 0) continue;
+        WIN32_FIND_DATAW e;
+        HANDLE it = FindFirstFileW(pattern, &e);
+        if (it == INVALID_HANDLE_VALUE) continue;
+        do {
+            if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            if (wcsncmp(e.cFileName, L"ggml-silero", 11) == 0) continue;
+            if (!usable_model(dirs[i], e.cFileName)) continue;
+            WCHAR full[MAX_PATH];
+            if (swprintf(full, MAX_PATH, L"%ls\\%ls", dirs[i], e.cFileName) < 0) continue;
+            char *ufull = to_utf8(full);
+            if (!ufull) continue;
+            // First directory wins: ~\.boo\models shadows a bundled copy.
+            if (already_listed(paths, count, boo_model_basename(ufull))) {
+                free(ufull);
+                continue;
+            }
+            if (count == cap) {
+                const int ncap = cap ? cap * 2 : 8;
+                char **grown = realloc(paths, (size_t)ncap * sizeof(*grown));
+                if (!grown) {
+                    free(ufull);
+                    break;
+                }
+                paths = grown;
+                cap = ncap;
+            }
+            paths[count++] = ufull;
+        } while (FindNextFileW(it, &e));
+        FindClose(it);
+    }
+
+    if (paths) qsort(paths, (size_t)count, sizeof(*paths), cmp_installed);
+    *out = paths;
+    return count;
 }
 
 void boo_model_missing_hint(wchar_t *buf, size_t len) {

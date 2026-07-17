@@ -20,6 +20,9 @@
 #define BOO_MSG_TRAY        (WM_APP + 1) // tray callback (NOTIFYICON_VERSION_4)
 #define BOO_MSG_TRANSCRIBED (WM_APP + 2) // worker -> UI; lParam = malloc'd UTF-8
 #define BOO_MSG_LIVE        (WM_APP + 3) // stream tick -> UI; lParam = malloc'd UTF-8
+#define BOO_MSG_MODEL_SWAPPED                                                            \
+    (WM_APP + 4) // model switch worker -> settings dialog; wParam = ok,
+                 // lParam = the malloc'd ModelSwap job (settings.c)
 
 // Transcript history depth (the macOS reference keeps a session-long stack; a
 // bounded one keeps the unscrolled card list honest).
@@ -73,8 +76,11 @@ typedef struct BooApp {
         int theme_count;
         int current_theme;
         int opacity_pct;
-        bool auto_type; // paste into the focused app vs clipboard-only
-        HWND win;       // modeless Settings dialog, NULL when closed
+        bool auto_type;      // paste into the focused app vs clipboard-only
+        HWND win;            // modeless Settings dialog, NULL when closed
+        char *model_current; // UTF-8 path of the loaded model (malloc'd)
+        char **model_paths;  // model dropdown entries; dialog lifetime
+        int model_count;
     } settings;
 
     // Transcript history, chronological; cards[0] is the oldest. Each entry is
