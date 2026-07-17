@@ -173,7 +173,7 @@ class OverlayWindow: NSWindow {
     // MARK: - Traffic Lights
 
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeMain: Bool { canBecomeKey }
 
     private func startTrafficLightTimer() {
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in

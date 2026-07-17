@@ -260,15 +260,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// ~/.boo/models: where the README tells you to put models and where the
+    /// VAD download lands.
+    static var userModelsDir: String {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".boo")
+            .appendingPathComponent("models").path
+    }
+
     /// Directories Boo looks in for a model, most specific first.
     private var modelSearchDirs: [String] {
         let appDir = (Bundle.main.bundlePath as NSString).deletingLastPathComponent
         let projectDir = (appDir as NSString).deletingLastPathComponent
 
         return [
-            NSHomeDirectory() + "/.boo/models",  // where the README tells you to put it
+            AppDelegate.userModelsDir,
             "models",  // cwd, for `zig build run`
-            projectDir + "/models",  // source checkout: zig-out/Boo.app → ../models
+            (projectDir as NSString).appendingPathComponent("models"),  // source checkout
             Bundle.main.resourcePath ?? "",  // bundled alongside the app
         ].filter { !$0.isEmpty }
     }
@@ -412,12 +420,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private static let vadModelSHA256 =
         "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
 
+    private static let vadModelName = "ggml-silero-v6.2.0.bin"
+
+    /// The VAD download source. $BOO_VAD_MODEL_URL lets a mirror stand in for
+    /// Hugging Face; the SHA-256 pin applies to whatever the URL serves.
+    private static var vadModelURL: URL {
+        let fallback = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"
+            + vadModelName
+        let raw = ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"] ?? fallback
+        return URL(string: raw) ?? URL(string: fallback)!
+    }
+
     private func downloadVadModel() {
-        let dir = NSHomeDirectory() + "/.boo/models"
-        let dest = URL(fileURLWithPath: dir + "/ggml-silero-v6.2.0.bin")
-        let url = URL(
-            string: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
-        )!
+        let dir = AppDelegate.userModelsDir
+        let dest = URL(fileURLWithPath: dir)
+            .appendingPathComponent(AppDelegate.vadModelName)
+        let url = AppDelegate.vadModelURL
 
         NSLog("Boo: fetching the VAD model to enable streaming transcription")
         let task = URLSession.shared.downloadTask(with: url) { [weak self] tmp, response, error in

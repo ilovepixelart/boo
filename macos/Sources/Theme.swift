@@ -123,11 +123,13 @@ class ThemeManager {
         let projectDir = (bundleDir as NSString).deletingLastPathComponent  // boo/
 
         let candidates = [
-            projectDir + "/themes",
-            bundleDir + "/themes",
-            (Bundle.main.resourcePath ?? "") + "/themes",
-            NSHomeDirectory() + "/.boo/themes",
-            FileManager.default.currentDirectoryPath + "/themes",
+            (projectDir as NSString).appendingPathComponent("themes"),
+            (bundleDir as NSString).appendingPathComponent("themes"),
+            ((Bundle.main.resourcePath ?? "") as NSString).appendingPathComponent("themes"),
+            URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent(".boo").appendingPathComponent("themes").path,
+            (FileManager.default.currentDirectoryPath as NSString)
+                .appendingPathComponent("themes"),
         ]
 
         print("Searching for themes directory:")
