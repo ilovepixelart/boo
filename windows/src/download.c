@@ -128,6 +128,23 @@ static bool digest_matches(BCRYPT_HASH_HANDLE hash, const char *expected) {
     return _stricmp(hex, expected) == 0;
 }
 
+// Verify the finished .part against the manifest digest and rename it into
+// place. On failure points `why` at a user-facing reason.
+static bool finish_part(BCRYPT_HASH_HANDLE hash, const DownloadJob *job,
+                        const WCHAR *part_path, const WCHAR *final_path,
+                        const char **why) {
+    if (!digest_matches(hash, job->model->sha256)) {
+        *why = "Downloaded file failed its checksum. Try again.";
+        return false;
+    }
+    _wremove(final_path);
+    if (_wrename(part_path, final_path) != 0) {
+        *why = "Could not save the model file.";
+        return false;
+    }
+    return true;
+}
+
 static DWORD WINAPI download_worker(LPVOID param) {
     DownloadJob *job = param;
 
@@ -151,24 +168,19 @@ static DWORD WINAPI download_worker(LPVOID param) {
     bool ok = false;
     const char *why = "Download failed. Check your network and try again.";
 
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0 &&
-        BCryptCreateHash(alg, &hash, NULL, 0, NULL, 0, 0) == 0 &&
-        (out = _wfopen(part_path, L"wb")) != NULL) {
-        if (fetch(job, out, hash)) {
-            fclose(out);
-            out = NULL;
-            if (!digest_matches(hash, job->model->sha256)) {
-                why = "Downloaded file failed its checksum. Try again.";
-            } else {
-                _wremove(final_path);
-                if (_wrename(part_path, final_path) == 0)
-                    ok = true;
-                else
-                    why = "Could not save the model file.";
-            }
-        }
-    } else if (!out) {
-        why = "Could not create the model file.";
+    // One step per statement: each call has side effects (handles, the file),
+    // so none of them belongs on the right of a short-circuit operator.
+    bool ready = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0;
+    if (ready) ready = BCryptCreateHash(alg, &hash, NULL, 0, NULL, 0, 0) == 0;
+    if (ready) {
+        out = _wfopen(part_path, L"wb");
+        if (!out) why = "Could not create the model file.";
+    }
+    if (out) {
+        const bool fetched = fetch(job, out, hash);
+        fclose(out);
+        out = NULL;
+        if (fetched) ok = finish_part(hash, job, part_path, final_path, &why);
     }
 
     if (out) fclose(out);
