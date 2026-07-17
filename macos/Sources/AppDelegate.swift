@@ -17,13 +17,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Path of the model currently loaded into the core (Settings shows it).
     private(set) var currentModelPath: String?
 
-    /// Open the diagnostic log at ~/Library/Logs/Boo/boo.log. Never logs
-    /// recognized text (see docs/logging-and-crash-reporting.md).
+    /// Open the diagnostic log at ~/Library/Logs/Boo/boo.log and install the
+    /// crash capture (boo-crash.txt beside it; the system .ips still gets
+    /// written). Never logs recognized text (see
+    /// docs/logging-and-crash-reporting.md).
     private func initLogging() {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Boo", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         boo_log_init(dir.appendingPathComponent("boo.log").path, Int32(BOO_LOG_INFO))
+        boo_crash_init(dir.path)
     }
 
     func applicationDidFinishLaunching(_: Notification) {

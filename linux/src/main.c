@@ -138,6 +138,9 @@ static void init_logging(void) {
     g_mkdir_with_parents(dir, 0700);
     g_autofree const char *path = g_build_filename(dir, "boo.log", NULL);
     boo_log_init(path, BOO_LOG_INFO);
+    // Crash capture beside the log (boo-crash.txt); the OS default (core
+    // dump / systemd-coredump) still runs afterwards.
+    boo_crash_init(dir);
 }
 
 // Load `model_path`, wire optional VAD, and open the overlay. On a load failure

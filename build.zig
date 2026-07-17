@@ -397,7 +397,7 @@ pub fn build(b: *std.Build) void {
         // PathRemoveFileSpec for the exe-relative themes dir. advapi32: the
         // settings registry keys. winhttp + bcrypt: the model download and
         // its SHA-256 verification. comdlg32: the onboarding file picker.
-        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32", "comctl32", "shlwapi", "winhttp", "bcrypt", "comdlg32" }) |lib| {
+        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32", "comctl32", "shlwapi", "winhttp", "bcrypt", "comdlg32", "dbghelp" }) |lib| {
             win_app.root_module.linkSystemLibrary(lib, .{});
         }
         win_app.root_module.addIncludePath(b.path("include"));
@@ -409,6 +409,7 @@ pub fn build(b: *std.Build) void {
                 "model.c",
                 "download.c",
                 "onboarding.c",
+                "crash.c",
                 "overlay.c",
                 "settings.c",
                 "waveform.c",

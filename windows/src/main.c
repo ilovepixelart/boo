@@ -9,6 +9,7 @@
 // where to look.
 
 #include "app.h"
+#include "crash.h"
 #include "hotkey.h"
 #include "model.h"
 #include "onboarding.h"
@@ -104,6 +105,7 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     }
 
     init_logging();
+    boo_crash_install();
 
     static BooApp app; // zero-initialized
     app.hinst = hinst;

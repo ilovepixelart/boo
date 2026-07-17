@@ -127,6 +127,13 @@ enum {
 void boo_log_init(const char *path, int min_level);
 void boo_log(int level, const char *msg);
 
+// Local crash capture: on a fatal signal, append a backtrace to
+// <dump_dir>/boo-crash.txt (use the log directory), then let the OS default
+// proceed so the system crash report still happens. Call once at startup,
+// after boo_log_init. Nothing is ever uploaded. No-op on Windows, whose
+// frontend writes an SEH minidump itself instead.
+void boo_crash_init(const char *dump_dir);
+
 #ifdef __cplusplus
 }
 #endif

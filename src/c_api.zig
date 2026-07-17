@@ -6,6 +6,7 @@ const Engine = engine_mod.Engine;
 const AudioCapture = @import("audio.zig").AudioCapture;
 const stream = @import("stream.zig");
 const postprocess = @import("postprocess.zig");
+const crash = @import("crash.zig");
 const common = @import("audio/common.zig");
 
 const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
@@ -501,6 +502,13 @@ export fn boo_log_init(path: ?[*:0]const u8, min_level: c_int) void {
     log.init(path, min_level);
 }
 
+// Local crash capture, see src/crash.zig. No-op on Windows, whose frontend
+// installs its own SEH minidump writer instead.
+export fn boo_crash_init(dump_dir: [*:0]const u8) void {
+    if (@import("builtin").os.tag == .windows) return;
+    crash.init(std.mem.span(dump_dir));
+}
+
 export fn boo_log(level: c_int, msg: [*:0]const u8) void {
     log.write(level, std.mem.span(msg));
 }
@@ -522,6 +530,7 @@ test {
     _ = @import("wer.zig");
     _ = @import("log.zig");
     _ = @import("postprocess.zig");
+    _ = @import("crash.zig");
 }
 
 const testing = std.testing;

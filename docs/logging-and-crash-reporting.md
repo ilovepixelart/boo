@@ -7,15 +7,17 @@ report**, with no debugger attached and no telemetry.
 
 | Layer | Logging today | Crash handling today |
 |---|---|---|
-| Core (Zig) | `src/log.zig`: leveled file sink + stderr, exposed as `boo_log_init` / `boo_log` | none |
-| macOS | core logger → `~/Library/Logs/Boo/boo.log` (plus legacy `NSLog` lines) | none |
-| Linux | core logger → `$XDG_STATE_HOME/boo/boo.log` (plus GLib warnings → journald) | none |
-| Windows | core logger → `%LOCALAPPDATA%\Boo\logs\boo.log` | none |
+| Core (Zig) | `src/log.zig`: leveled file sink + stderr, exposed as `boo_log_init` / `boo_log` | `src/crash.zig`: fatal-signal backtrace via `boo_crash_init` (POSIX) |
+| macOS | core logger → `~/Library/Logs/Boo/boo.log` (plus legacy `NSLog` lines) | `boo-crash.txt` beside the log; the system `.ips` still gets written |
+| Linux | core logger → `$XDG_STATE_HOME/boo/boo.log` (plus GLib warnings → journald) | `boo-crash.txt` beside the log; core dump still happens |
+| Windows | core logger → `%LOCALAPPDATA%\Boo\logs\boo.log` | `boo-crash.dmp` beside the log (`windows/src/crash.c`, SEH minidump); WER still runs |
 
-The logging half is built: one leveled logger in the core, one file per OS,
+Both halves are built: one leveled logger in the core, one file per OS,
 lifecycle events logged as metadata (never transcript text, see the privacy
-contract below). The crash half is not: nothing captures a segfault or silent
-exit yet, so that is the open work.
+contract below), and local crash capture on every platform. The handlers hand
+the failure back to the OS default afterwards, so system crash reports are
+additive, not replaced. Still open: surfacing a found crash report on the
+next launch with a reveal/copy affordance.
 
 ## Privacy contract (non-negotiable)
 
