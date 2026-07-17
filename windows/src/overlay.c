@@ -1,13 +1,15 @@
-// Overlay window. The one non-negotiable behavior: it must NEVER take focus,
-// or the transcript would land back in Boo instead of the app being dictated
-// into. Three layers enforce that: WS_EX_NOACTIVATE, MA_NOACTIVATE (mouse
-// "active window tracking" ignores the style, per Raymond Chen), and manual
-// dragging via SetCapture + SWP_NOACTIVATE (an HTCAPTION drag activates).
+// Overlay window. Per the spec, each OS dresses the overlay in its own native
+// window controls (mac traffic lights, GTK header bar); on Windows that is the
+// standard title bar with the system's native minimize and close buttons. A
+// titled window is activatable, so the transcript could land back in Boo if we
+// naively targeted the foreground; instead the dictation target is the last
+// window from another process to hold focus, tracked by a foreground WinEvent
+// hook (last_external_fg).
 //
-// Visual language mirrors the macOS reference (docs/ui-spec.md): 400x500 dark
-// overlay, 3-state waveform, a stack of transcript cards with copy/dismiss,
-// a persistent ctrl+shift+space hint, and the 40px record disc that morphs
-// from circle (radius 20) to rounded square (radius 6) while recording.
+// Visual language mirrors the macOS reference (docs/ui-spec.md): 400x500 client,
+// 3-state waveform, a stack of transcript cards with copy/dismiss, a persistent
+// ctrl+shift+space hint, and the 40px record disc that morphs from circle
+// (radius 20) to rounded square (radius 6) while recording.
 //
 // Transcription runs on a worker thread (boo_transcribe is synchronous) and
 // posts the result back as BOO_MSG_TRANSCRIBED; a second background thread
@@ -44,7 +46,6 @@
 #define WAVE_H      48
 #define STATUS_H    16
 #define BUTTON_SIZE 40
-#define CLOSE_SIZE  22
 #define CARD_RADIUS 10
 #define CARD_GAP    8
 #define CARD_PAD_X  12
@@ -76,8 +77,13 @@ static int drawn_count;
 // Copy feedback: which card's copy icon flashes, until this tick count.
 static int flash_card = -1;
 static ULONGLONG flash_until;
-// Close (hide) glyph hit region, top-right.
-static RECT close_box;
+// Dictation target tracking. The overlay is a normal, activatable window, so
+// clicking Record can bring Boo to the foreground; this holds the last
+// foreground window from another process (the real target), kept current by a
+// system-wide foreground WinEvent hook. WINEVENT_SKIPOWNPROCESS excludes Boo's
+// own foreground events, so this never becomes the overlay itself.
+static HWND last_external_fg;
+static HWINEVENTHOOK fg_hook;
 
 static int px(int base, UINT dpi) {
     return MulDiv(base, (int)dpi, 96);
@@ -284,10 +290,11 @@ void boo_overlay_toggle_recording(BooApp *app) {
         return;
     }
 
-    // The paste target is whatever the user is dictating into. The overlay
-    // never takes focus, so this is valid even for Record-button clicks.
-    app->paste_target = GetForegroundWindow();
-    if (app->paste_target == app->overlay) app->paste_target = NULL;
+    // The paste target is whatever the user is dictating into. A Record-button
+    // click brings Boo to the foreground, so trust the live foreground only when
+    // it is another app; otherwise use the last external window that held focus.
+    HWND fg = GetForegroundWindow();
+    app->paste_target = (fg && fg != app->overlay) ? fg : last_external_fg;
 
     boo_warm_up(app->ctx);
     boo_start_recording(app->ctx);
@@ -476,9 +483,10 @@ static int paint_card(HDC dc, const Palette *pal, UINT dpi, int top, int left, i
     return card_h;
 }
 
-// Stack cards chronologically with the newest ending just above `bottom`,
-// mirroring the reference's scroll-to-newest: newest cards win the space,
-// older ones fall off the top when the area is full.
+// Stack cards chronologically from the top of `area` downward, matching the
+// reference (a flipped scroll view with the stack pinned to the top): with room
+// to spare the cards sit just under the waveform. When the area is full the
+// newest still wins, older cards fall off the top, mirroring scroll-to-newest.
 static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT area) {
     drawn_count = 0;
     const int gap = px(CARD_GAP, dpi);
@@ -503,7 +511,7 @@ static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT 
         first = i;
     }
 
-    int y = area.bottom - used;
+    int y = area.top;
     for (int i = first; i < total; i++) {
         const bool live = app->live_text && i == total - 1;
         const WCHAR *text = live ? app->live_text : app->cards[i];
@@ -532,15 +540,6 @@ static void paint(BooApp *app, HWND hwnd) {
     FillRect(dc, &rc, bg);
     DeleteObject(bg);
     SetBkMode(dc, TRANSPARENT);
-
-    // Close (hide) glyph, top-right: the traffic-light analog on a borderless
-    // window. Paint-only, no child control, so it can never take focus.
-    const int close_s = px(CLOSE_SIZE, dpi);
-    close_box = (RECT){rc.right - margin - close_s, px(8, dpi), rc.right - margin,
-                       px(8, dpi) + close_s};
-    RECT close_glyph = close_box;
-    InflateRect(&close_glyph, -px(5, dpi), -px(5, dpi));
-    paint_icon_close(dc, close_glyph, pal.subtext, false);
 
     // Waveform: idle dim cyan, recording red, transcribing orange breathing.
     RECT wave = {margin, px(WAVE_TOP, dpi), rc.right - margin,
@@ -619,10 +618,6 @@ static void copy_card_to_clipboard(BooApp *app, int index) {
 
 // Returns true when the click landed on an interactive element.
 static bool handle_click(BooApp *app, HWND hwnd, POINT pt) {
-    if (PtInRect(&close_box, pt)) {
-        SendMessageW(hwnd, WM_CLOSE, 0, 0);
-        return true;
-    }
     for (int i = 0; i < drawn_count; i++) {
         if (PtInRect(&copy_hit[i], pt)) {
             copy_card_to_clipboard(app, drawn_card[i]);
@@ -639,7 +634,7 @@ static bool handle_click(BooApp *app, HWND hwnd, POINT pt) {
 
 static bool over_interactive(HWND hwnd, POINT pt) {
     const RECT button = button_rect(hwnd, GetDpiForWindow(hwnd));
-    if (PtInRect(&button, pt) || PtInRect(&close_box, pt)) return true;
+    if (PtInRect(&button, pt)) return true;
     for (int i = 0; i < drawn_count; i++)
         if (PtInRect(&copy_hit[i], pt) || PtInRect(&close_hit[i], pt)) return true;
     return false;
@@ -652,8 +647,8 @@ static void on_mouse_down(BooApp *app, HWND hwnd, LPARAM lparam) {
         SetCapture(hwnd);
         return;
     }
-    // Manual drag: HTCAPTION would enter the modal move loop, which activates
-    // a WS_EX_NOACTIVATE window and steals focus from the dictation target.
+    // Drag by the body too, not just the title bar: SWP_NOACTIVATE keeps the
+    // move from disturbing the z-order or focus.
     dragging = true;
     GetCursorPos(&drag_cursor);
     GetWindowRect(hwnd, &drag_window);
@@ -714,8 +709,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     }
 
     switch (msg) {
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE; // mouse hover "active tracking" ignores the style
     case WM_LBUTTONDOWN:
         on_mouse_down(app, hwnd, lparam);
         return 0;
@@ -773,6 +766,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         ShowWindow(hwnd, SW_HIDE); // tray apps hide; Quit lives in the tray menu
         return 0;
     case WM_DESTROY:
+        if (fg_hook) {
+            UnhookWinEvent(fg_hook);
+            fg_hook = NULL;
+        }
         KillTimer(hwnd, BOO_TIMER_WAVEFORM);
         KillTimer(hwnd, BOO_TIMER_AUTO_STOP);
         KillTimer(hwnd, BOO_TIMER_STATUS);
@@ -786,6 +783,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     }
 }
 
+static void CALLBACK on_foreground_changed(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
+                                           LONG obj, LONG child, DWORD thread, DWORD time) {
+    (void)hook, (void)event, (void)child, (void)thread, (void)time;
+    if (obj == OBJID_WINDOW && hwnd) last_external_fg = hwnd;
+}
+
 HWND boo_overlay_create(BooApp *app) {
     WNDCLASSEXW wc = {
         .cbSize = sizeof(wc),
@@ -796,14 +799,19 @@ HWND boo_overlay_create(BooApp *app) {
     };
     if (!RegisterClassExW(&wc)) return NULL;
 
-    // NOACTIVATE: never steal focus. TOOLWINDOW: no taskbar button, no
-    // Alt-Tab entry; the tray icon is the app's presence. TOPMOST: an overlay
-    // you can watch while dictating into another window.
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                                BOO_OVERLAY_CLASS, L"Boo", WS_POPUP, 0, 0, BASE_W, BASE_H,
-                                NULL, NULL, app->hinst, app);
+    // A normal top-level window, so it carries the platform's native title bar
+    // with minimize and close (the spec's per-OS window controls). TOPMOST
+    // keeps the overlay watchable over the app you dictate into. It is
+    // activatable now, so the dictation target is tracked separately (see
+    // last_external_fg) instead of relying on the window never taking focus.
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, BOO_OVERLAY_CLASS, L"Boo",
+                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0, 0, BASE_W,
+                                BASE_H, NULL, NULL, app->hinst, app);
     if (!hwnd) return NULL;
     app->overlay = hwnd;
+    fg_hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL,
+                              on_foreground_changed, 0, 0,
+                              WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     app->dark = system_dark();
     set_status_idle(app);
 
@@ -816,11 +824,15 @@ HWND boo_overlay_create(BooApp *app) {
     const DWORD corner = DWMWCP_ROUND;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
-    // Top-right of the primary work area, like the reference.
+    // Top-right of the primary work area, like the reference. Grow the window
+    // by the title bar so the CLIENT area stays BASE_W x BASE_H.
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    const int w = px(BASE_W, dpi);
-    const int h = px(BASE_H, dpi);
+    RECT wr = {0, 0, px(BASE_W, dpi), px(BASE_H, dpi)};
+    AdjustWindowRectExForDpi(&wr, WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE,
+                             WS_EX_TOPMOST, dpi);
+    const int w = wr.right - wr.left;
+    const int h = wr.bottom - wr.top;
     SetWindowPos(hwnd, NULL, work.right - w - px(20, dpi), work.top + px(50, dpi), w, h,
                  SWP_NOACTIVATE | SWP_NOZORDER);
 
