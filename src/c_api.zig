@@ -11,7 +11,10 @@ const MIN_AUDIO_SAMPLES = 8000; // ~0.5s at 16kHz
 
 const BooContext = struct {
     engine: Engine,
-    audio: *AudioCapture,
+    // null when no microphone/audio backend could be acquired: Boo still runs
+    // (the model is loaded, the UI shows), recording is just a no-op. See
+    // boo_has_microphone.
+    audio: ?*AudioCapture,
     allocator: std.mem.Allocator,
     /// Atomic: boo_transcribe runs on a worker thread (it blocks for seconds),
     /// while the UI polls boo_is_transcribing from the main thread. A plain bool
@@ -101,9 +104,10 @@ fn initContext(allocator: std.mem.Allocator, model_path: [:0]const u8) !*BooCont
     var engine = try Engine.init(model_path, .{});
     errdefer engine.deinit();
 
-    // If this fails, the errdefer above frees the model, otherwise a missing
-    // microphone would strand the whole (hundreds of MB) model context.
-    const audio = try AudioCapture.init(allocator);
+    // Best-effort: an unavailable microphone/audio backend must not strand the
+    // model. Run without capture (audio = null) if it fails; the frontend checks
+    // boo_has_microphone and says so rather than refusing to start.
+    const audio = AudioCapture.init(allocator) catch null;
 
     ctx.* = .{
         .engine = engine,
@@ -130,7 +134,7 @@ export fn boo_deinit(ctx: ?*BooContext) void {
     if (c.chunker) |*ch| ch.deinit();
     if (c.vad) |*v| v.deinit();
     c.whisper_mutex.unlock();
-    c.audio.deinit();
+    if (c.audio) |a| a.deinit();
     c.engine.deinit();
     c.allocator.destroy(c);
 }
@@ -179,22 +183,30 @@ export fn boo_start_recording(ctx: ?*BooContext) void {
     // a frontend worker still copying it cannot race a fresh recording.
     c.retireLiveTranscript();
     if (c.chunker) |*ch| ch.reset();
-    c.audio.startRecording();
+    if (c.audio) |a| a.startRecording();
 }
 
 export fn boo_warm_up(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    c.audio.warmUp();
+    if (c.audio) |a| a.warmUp();
 }
 
 export fn boo_stop_recording(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    c.audio.stopRecording();
+    if (c.audio) |a| a.stopRecording();
 }
 
 export fn boo_is_recording(ctx: ?*BooContext) bool {
     const c = ctx orelse return false;
-    return c.audio.isRecording();
+    return if (c.audio) |a| a.isRecording() else false;
+}
+
+/// Whether a working microphone/audio backend was acquired at init. When false,
+/// recording is a no-op; the frontend should say "no microphone" rather than
+/// pretend to record.
+export fn boo_has_microphone(ctx: ?*BooContext) bool {
+    const c = ctx orelse return false;
+    return c.audio != null;
 }
 
 export fn boo_is_transcribing(ctx: ?*BooContext) bool {
@@ -204,19 +216,19 @@ export fn boo_is_transcribing(ctx: ?*BooContext) bool {
 
 export fn boo_get_waveform(ctx: ?*BooContext, out_bars: ?*c_int) ?[*]const f32 {
     const c = ctx orelse return null;
-    c.waveform_buf = c.audio.getWaveform();
+    c.waveform_buf = if (c.audio) |a| a.getWaveform() else .{0.0} ** WAVEFORM_BARS;
     if (out_bars) |p| p.* = WAVEFORM_BARS;
     return &c.waveform_buf;
 }
 
 export fn boo_get_peak_rms(ctx: ?*BooContext) f32 {
     const c = ctx orelse return 0;
-    return c.audio.getPeakRms();
+    return if (c.audio) |a| a.getPeakRms() else 0;
 }
 
 export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
     const c = ctx orelse return 0;
-    return @intCast(c.audio.sampleCount());
+    return if (c.audio) |a| @intCast(a.sampleCount()) else 0;
 }
 
 /// Detect and transcribe finished utterances while recording. Call every
@@ -225,7 +237,8 @@ export fn boo_get_audio_samples(ctx: ?*BooContext) c_int {
 /// when new text was committed (see boo_get_live_transcript).
 export fn boo_stream_tick(ctx: ?*BooContext) bool {
     const c = ctx orelse return false;
-    if (!c.audio.isRecording()) return false;
+    const a = c.audio orelse return false;
+    if (!a.isRecording()) return false;
     if (c.transcribing.load(.acquire)) return false;
 
     c.whisper_mutex.lock();
@@ -235,7 +248,7 @@ export fn boo_stream_tick(ctx: ?*BooContext) bool {
     // moment (the frontend downloads the VAD model in the background).
     const ch = if (c.chunker) |*it| it else return false;
 
-    const pending = c.audio.copyAudioFrom(c.allocator, ch.consumed) catch return false;
+    const pending = a.copyAudioFrom(c.allocator, ch.consumed) catch return false;
     defer c.allocator.free(pending);
 
     const committed = ch.tick(pending) catch return false;
@@ -254,6 +267,7 @@ export fn boo_get_live_transcript(ctx: ?*BooContext) ?[*:0]const u8 {
 
 export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     const c = ctx orelse return null;
+    const a = c.audio orelse return null; // no mic: nothing was captured
     c.transcribing.store(true, .release);
     defer c.transcribing.store(false, .release);
 
@@ -263,13 +277,13 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     const text: []const u8 = blk: {
         // Streaming path: everything but the tail is already transcribed.
         if (c.chunker) |*ch| {
-            const tail = c.audio.copyAudioFrom(c.allocator, ch.consumed) catch return null;
+            const tail = a.copyAudioFrom(c.allocator, ch.consumed) catch return null;
             defer c.allocator.free(tail);
             break :blk ch.finalize(tail, MIN_AUDIO_SAMPLES) catch return null;
         }
 
         // Batch path: no VAD model loaded, transcribe the whole take.
-        const samples = c.audio.getAudioData(c.allocator) catch return null;
+        const samples = a.getAudioData(c.allocator) catch return null;
         defer c.allocator.free(samples);
         if (samples.len < MIN_AUDIO_SAMPLES) return null;
         // Decoding a silent take hallucinates filler, see SILENCE_RMS_FLOOR.

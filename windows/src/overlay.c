@@ -290,6 +290,14 @@ void boo_overlay_toggle_recording(BooApp *app) {
         return;
     }
 
+    // No microphone: Boo still runs, but recording is a no-op. Say so instead
+    // of faking a take the core will not capture.
+    if (!boo_has_microphone(app->ctx)) {
+        set_status(app, L"no microphone");
+        InvalidateRect(app->overlay, NULL, FALSE);
+        return;
+    }
+
     // The paste target is whatever the user is dictating into. A Record-button
     // click brings Boo to the foreground, so trust the live foreground only when
     // it is another app; otherwise use the last external window that held focus.

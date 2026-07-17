@@ -314,6 +314,12 @@ class OverlayWindow: NSWindow {
         // transcription that follows a stop; the core ignores the start then,
         // so starting the UI too would desync it into a phantom recording.
         guard !boo_is_transcribing(booCtx) else { return }
+        // No microphone: Boo still runs, but recording is a no-op. Say so
+        // rather than faking a take the core will not actually capture.
+        guard boo_has_microphone(booCtx) else {
+            statusLabel.stringValue = "no microphone"
+            return
+        }
         startedViaHotkey = viaHotkey
 
         // Pin the destination now. `previousApp` tracks the last non-Boo app to
