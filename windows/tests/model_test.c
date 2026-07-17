@@ -80,7 +80,7 @@ int main(void) {
               "unknown-name file cannot be judged, stays usable");
 
         WCHAR *found = find_model_in(dir);
-        char *found_u8 = found ? to_utf8(found) : NULL;
+        char *found_u8 = found ? boo_to_utf8(found) : NULL;
         check(found_u8 && strcmp(boo_model_basename(found_u8), "ggml-unknown.bin") == 0,
               "discovery skips the truncated file");
         free(found_u8);

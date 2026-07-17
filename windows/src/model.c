@@ -5,19 +5,19 @@
 
 #include "model.h"
 
+#include "strconv.h"
+
 #include "app.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static char *to_utf8(const WCHAR *wide);
-
 // Rank of a model filename via the shared core order (boo_model_rank), which
 // takes UTF-8; the names are ASCII so the conversion is cheap. Unknown or
 // unconvertible names rank worst.
 static unsigned rank_of(const WCHAR *name) {
-    char *u = to_utf8(name);
+    char *u = boo_to_utf8(name);
     if (!u) return (unsigned)-1;
     const unsigned r = boo_model_rank(u);
     free(u);
@@ -30,7 +30,7 @@ static unsigned rank_of(const WCHAR *name) {
 static bool usable_model(const WCHAR *dir, const WCHAR *name) {
     WCHAR full[MAX_PATH];
     if (swprintf(full, MAX_PATH, L"%ls\\%ls", dir, name) < 0) return false;
-    char *ufull = to_utf8(full);
+    char *ufull = boo_to_utf8(full);
     if (!ufull) return false;
     const bool ok = boo_model_verify(ufull) != BOO_MODEL_FILE_TRUNCATED;
     free(ufull);
@@ -85,15 +85,6 @@ static bool primary_model_dir(WCHAR *buf, size_t len) {
     return swprintf(buf, len, L"%ls\\.boo\\models", home) >= 0;
 }
 
-static char *to_utf8(const WCHAR *wide) {
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-    if (len <= 0) return NULL;
-    char *utf8 = malloc((size_t)len);
-    if (!utf8) return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, len, NULL, NULL);
-    return utf8;
-}
-
 // Fill the ordered candidate model directories; returns how many are usable.
 #define BOO_MODEL_DIRS 3
 static size_t model_dirs(WCHAR dirs[][MAX_PATH]) {
@@ -115,11 +106,11 @@ static size_t model_dirs(WCHAR dirs[][MAX_PATH]) {
 static char *saved_model_choice(void) {
     WCHAR saved[MAX_PATH];
     DWORD size = sizeof(saved);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Boo", L"Model", RRF_RT_REG_SZ, NULL,
-                     saved, &size) != ERROR_SUCCESS)
+    if (RegGetValueW(HKEY_CURRENT_USER, BOO_REG_KEY, L"Model", RRF_RT_REG_SZ, NULL, saved,
+                     &size) != ERROR_SUCCESS)
         return NULL;
     if (GetFileAttributesW(saved) == INVALID_FILE_ATTRIBUTES) return NULL;
-    char *utf8 = to_utf8(saved);
+    char *utf8 = boo_to_utf8(saved);
     if (utf8 && boo_model_verify(utf8) != BOO_MODEL_FILE_TRUNCATED) return utf8;
     free(utf8);
     return NULL;
@@ -131,7 +122,7 @@ char *boo_model_find(void) {
     WCHAR env[MAX_PATH];
     const DWORD env_len = GetEnvironmentVariableW(L"BOO_MODEL", env, MAX_PATH);
     if (env_len > 0 && env_len < MAX_PATH) {
-        if (GetFileAttributesW(env) != INVALID_FILE_ATTRIBUTES) return to_utf8(env);
+        if (GetFileAttributesW(env) != INVALID_FILE_ATTRIBUTES) return boo_to_utf8(env);
     }
 
     char *saved = saved_model_choice();
@@ -142,7 +133,7 @@ char *boo_model_find(void) {
     for (size_t i = 0; i < ndirs; i++) {
         WCHAR *found = find_model_in(dirs[i]);
         if (found) {
-            char *utf8 = to_utf8(found);
+            char *utf8 = boo_to_utf8(found);
             free(found);
             return utf8;
         }
@@ -204,7 +195,7 @@ static void scan_model_dir(const WCHAR *dir, char ***paths, int *count, int *cap
         if (!usable_model(dir, e.cFileName)) continue;
         WCHAR full[MAX_PATH];
         if (swprintf(full, MAX_PATH, L"%ls\\%ls", dir, e.cFileName) < 0) continue;
-        char *ufull = to_utf8(full);
+        char *ufull = boo_to_utf8(full);
         if (!ufull) continue;
         if (already_listed(*paths, *count, boo_model_basename(ufull))) {
             free(ufull);

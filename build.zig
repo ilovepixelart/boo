@@ -418,6 +418,7 @@ pub fn build(b: *std.Build) void {
             .files = &.{
                 "main.c",
                 "model.c",
+                "strconv.c",
                 "download.c",
                 "onboarding.c",
                 "crash.c",
@@ -469,6 +470,12 @@ pub fn build(b: *std.Build) void {
             t.root_module.addCSourceFiles(.{
                 .root = b.path("windows/tests"),
                 .files = &.{b.fmt("{s}.c", .{test_name})},
+                .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
+            });
+            // The included sources under test call the shared converters.
+            t.root_module.addCSourceFiles(.{
+                .root = b.path("windows/src"),
+                .files = &.{"strconv.c"},
                 .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
             });
             // Cross-compiling hosts only build the tests (compile check);

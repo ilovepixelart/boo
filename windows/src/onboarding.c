@@ -4,6 +4,7 @@
 #include "onboarding.h"
 
 #include "download.h"
+#include "strconv.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -17,30 +18,8 @@
 #define IDC_OB_DOWNLOAD      3004
 #define IDC_OB_BROWSE        3005
 
-static int scale(int base, UINT dpi) {
-    return MulDiv(base, (int)dpi, 96);
-}
-
-static WCHAR *to_wide(const char *utf8) {
-    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-    if (len <= 0) return NULL;
-    WCHAR *wide = malloc((size_t)len * sizeof(WCHAR));
-    if (!wide) return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
-    return wide;
-}
-
-static char *to_utf8(const WCHAR *wide) {
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-    if (len <= 0) return NULL;
-    char *utf8 = malloc((size_t)len);
-    if (!utf8) return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, len, NULL, NULL);
-    return utf8;
-}
-
 static void set_status(HWND dlg, const char *text) {
-    WCHAR *wide = to_wide(text);
+    WCHAR *wide = boo_to_wide(text);
     if (!wide) return;
     SetDlgItemTextW(dlg, IDC_OB_STATUS, wide);
     free(wide);
@@ -49,11 +28,8 @@ static void set_status(HWND dlg, const char *text) {
 // Freeze or thaw the interactive controls; frozen while a download runs so
 // the dialog (the worker's message target) cannot die under it.
 static void set_frozen(HWND dlg, bool frozen) {
-    EnableWindow(GetDlgItem(dlg, IDC_OB_MODELS), !frozen);
-    EnableWindow(GetDlgItem(dlg, IDC_OB_DOWNLOAD), !frozen);
-    EnableWindow(GetDlgItem(dlg, IDC_OB_BROWSE), !frozen);
-    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE,
-                   MF_BYCOMMAND | (frozen ? MF_GRAYED : MF_ENABLED));
+    static const int ids[] = {IDC_OB_MODELS, IDC_OB_DOWNLOAD, IDC_OB_BROWSE};
+    boo_dialog_freeze(dlg, ids, 3, frozen);
 }
 
 // Boot the app with a model that just landed, then retire the dialog.
@@ -96,26 +72,26 @@ static void browse_for_model(BooApp *app, HWND dlg) {
         .Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR,
     };
     if (!GetOpenFileNameW(&ofn)) return;
-    char *path = to_utf8(file);
+    char *path = boo_to_utf8(file);
     if (path) finish_with_model(app, dlg, path);
 }
 
 static void create_controls(HWND hwnd, const CREATESTRUCTW *cs) {
     const UINT dpi = GetDpiForWindow(hwnd);
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    const int m = scale(16, dpi);
-    const int w = scale(388, dpi);
+    const int m = boo_px(16, dpi);
+    const int w = boo_px(388, dpi);
 
     HWND combo = CreateWindowW(
         L"COMBOBOX", NULL,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_HASSTRINGS, m, m, w,
-        scale(160, dpi), hwnd, (HMENU)IDC_OB_MODELS, cs->hInstance, NULL);
+        boo_px(160, dpi), hwnd, (HMENU)IDC_OB_MODELS, cs->hInstance, NULL);
     size_t count = 0;
     const BooModelInfo *models = boo_models(&count);
     for (size_t i = 0; i < count; i++) {
         char label[256];
         snprintf(label, sizeof(label), "%s  (%s)", models[i].label, models[i].note);
-        WCHAR *wide = to_wide(label);
+        WCHAR *wide = boo_to_wide(label);
         if (!wide) continue;
         SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)wide);
         free(wide);
@@ -123,23 +99,23 @@ static void create_controls(HWND hwnd, const CREATESTRUCTW *cs) {
     SendMessageW(combo, CB_SETCURSEL, 0, 0);
 
     HWND bar =
-        CreateWindowW(PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE, m, scale(48, dpi), w,
-                      scale(16, dpi), hwnd, (HMENU)IDC_OB_PROGRESS, cs->hInstance, NULL);
+        CreateWindowW(PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE, m, boo_px(48, dpi), w,
+                      boo_px(16, dpi), hwnd, (HMENU)IDC_OB_PROGRESS, cs->hInstance, NULL);
     SendMessageW(bar, PBM_SETRANGE32, 0, 100);
 
     HWND status = CreateWindowW(
         L"STATIC", L"Downloads to %USERPROFILE%\\.boo\\models, then opens Boo.",
-        WS_CHILD | WS_VISIBLE, m, scale(72, dpi), w, scale(18, dpi), hwnd,
+        WS_CHILD | WS_VISIBLE, m, boo_px(72, dpi), w, boo_px(18, dpi), hwnd,
         (HMENU)IDC_OB_STATUS, cs->hInstance, NULL);
 
-    const int bw = scale(120, dpi);
+    const int bw = boo_px(120, dpi);
     HWND browse =
         CreateWindowW(L"BUTTON", L"Choose a File…", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                      m, scale(100, dpi), bw, scale(28, dpi), hwnd, (HMENU)IDC_OB_BROWSE,
-                      cs->hInstance, NULL);
+                      m, boo_px(100, dpi), bw, boo_px(28, dpi), hwnd,
+                      (HMENU)IDC_OB_BROWSE, cs->hInstance, NULL);
     HWND button =
         CreateWindowW(L"BUTTON", L"Download", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                      m + w - bw, scale(100, dpi), bw, scale(28, dpi), hwnd,
+                      m + w - bw, boo_px(100, dpi), bw, boo_px(28, dpi), hwnd,
                       (HMENU)IDC_OB_DOWNLOAD, cs->hInstance, NULL);
 
     HWND kids[] = {combo, bar, status, browse, button};
@@ -205,7 +181,7 @@ bool boo_onboarding_open(BooApp *app) {
     if (!RegisterClassExW(&wc)) return false;
 
     const UINT dpi = GetDpiForSystem();
-    RECT wr = {0, 0, scale(420, dpi), scale(144, dpi)};
+    RECT wr = {0, 0, boo_px(420, dpi), boo_px(144, dpi)};
     AdjustWindowRectExForDpi(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
     HWND win = CreateWindowExW(0, BOO_ONBOARDING_CLASS, L"Download a Model",
                                WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_THICKFRAME),

@@ -424,7 +424,7 @@ static void on_shortcut_activated(gpointer user_data) {
 static void on_shortcut_unavailable(const char *reason, gpointer user_data) {
     WindowState *state = user_data;
 
-    g_autofree char *msg =
+    g_autofree const char *msg =
         g_strdup_printf("Hotkey unavailable: %s. Use the Record button.", reason);
     show_toast(state, msg);
 
@@ -786,10 +786,10 @@ static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer 
         ui->st->settings.model_choice = g_strdup(job->path);
         settings_save(ui->st);
         boo_log(BOO_LOG_INFO, "model switched");
-        g_autofree char *msg = g_strdup_printf("Loaded %s.", base);
+        g_autofree const char *msg = g_strdup_printf("Loaded %s.", base);
         gtk_label_set_text(ui->model_status, msg);
     } else {
-        g_autofree char *msg =
+        g_autofree const char *msg =
             g_strdup_printf("Could not load %s; keeping the previous model.", base);
         gtk_label_set_text(ui->model_status, msg);
     }
@@ -804,7 +804,7 @@ static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer 
 static void model_switch_start(SettingsUI *ui, const char *path) {
     settings_set_busy(ui, TRUE);
     g_autofree char *base = g_path_get_basename(path);
-    g_autofree char *msg = g_strdup_printf("Loading %s…", base);
+    g_autofree const char *msg = g_strdup_printf("Loading %s…", base);
     gtk_label_set_text(ui->model_status, msg);
 
     ModelSwitchJob *job = g_new0(ModelSwitchJob, 1);
@@ -834,7 +834,7 @@ static void model_download_start(SettingsUI *ui, const BooModelInfo *model) {
     settings_set_busy(ui, TRUE);
     gtk_progress_bar_set_fraction(ui->model_progress, 0);
     gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), TRUE);
-    g_autofree char *msg = g_strdup_printf("Downloading %s…", model->filename);
+    g_autofree const char *msg = g_strdup_printf("Downloading %s…", model->filename);
     gtk_label_set_text(ui->model_status, msg);
     boo_model_download(model, ui->model_progress, on_model_download_done,
                        on_model_download_fail, ui);

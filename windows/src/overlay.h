@@ -18,4 +18,7 @@ void boo_overlay_toggle_recording(BooApp *app);
 // main once hotkey registration has settled hotkey_ok.
 void boo_overlay_status_idle(BooApp *app);
 
+// Set the one-line status under the record button (truncating safely).
+void boo_overlay_set_status(BooApp *app, const WCHAR *text);
+
 #endif // BOO_OVERLAY_H

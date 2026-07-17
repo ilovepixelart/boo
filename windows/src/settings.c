@@ -7,6 +7,7 @@
 
 #include "download.h"
 #include "model.h"
+#include "strconv.h"
 
 #include <commctrl.h>
 #include <shlwapi.h>
@@ -27,28 +28,6 @@ static void set_opacity_label(HWND dlg, int pct) {
     WCHAR text[8];
     swprintf(text, ARRAYSIZE(text), L"%d%%", pct);
     SetDlgItemTextW(dlg, IDC_OPACITY_VAL, text);
-}
-
-static int scale(int base, UINT dpi) {
-    return MulDiv(base, (int)dpi, 96);
-}
-
-static char *to_utf8(const WCHAR *wide) {
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-    if (len <= 0) return NULL;
-    char *utf8 = malloc((size_t)len);
-    if (!utf8) return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, len, NULL, NULL);
-    return utf8;
-}
-
-static WCHAR *to_wide(const char *utf8) {
-    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-    if (len <= 0) return NULL;
-    WCHAR *wide = malloc((size_t)len * sizeof(WCHAR));
-    if (!wide) return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
-    return wide;
 }
 
 // ── theme discovery ──
@@ -98,7 +77,7 @@ static void load_themes(BooApp *app) {
         if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         WCHAR path[MAX_PATH];
         if (swprintf(path, MAX_PATH, L"%ls\\%ls", dir, e.cFileName) < 0) continue;
-        char *upath = to_utf8(path);
+        char *upath = boo_to_utf8(path);
         if (!upath) continue;
         BooThemeColors colors;
         const bool ok = boo_theme_parse_file(upath, &colors);
@@ -131,8 +110,7 @@ static void load_prefs(BooApp *app) {
     app->settings.auto_type = true;
 
     HKEY key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Boo", 0, KEY_READ, &key) !=
-        ERROR_SUCCESS)
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, BOO_REG_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
         return;
 
     DWORD val;
@@ -164,8 +142,8 @@ static void load_prefs(BooApp *app) {
 
 static void save_prefs(BooApp *app) {
     HKEY key;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Boo", 0, NULL, 0, KEY_WRITE, NULL,
-                        &key, NULL) != ERROR_SUCCESS)
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, BOO_REG_KEY, 0, NULL, 0, KEY_WRITE, NULL, &key,
+                        NULL) != ERROR_SUCCESS)
         return;
     const DWORD opacity = (DWORD)app->settings.opacity_pct;
     const DWORD autotype = app->settings.auto_type ? 1 : 0;
@@ -185,11 +163,11 @@ static void save_prefs(BooApp *app) {
 // never written, so a newly downloaded better model still wins by default).
 // boo_model_find honors this key on later launches.
 static void save_model_choice(const char *path) {
-    WCHAR *model = to_wide(path);
+    WCHAR *model = boo_to_wide(path);
     if (!model) return;
     HKEY key;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Boo", 0, NULL, 0, KEY_WRITE, NULL,
-                        &key, NULL) == ERROR_SUCCESS) {
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, BOO_REG_KEY, 0, NULL, 0, KEY_WRITE, NULL, &key,
+                        NULL) == ERROR_SUCCESS) {
         RegSetValueExW(key, L"Model", 0, REG_SZ, (const BYTE *)model,
                        (DWORD)((wcslen(model) + 1) * sizeof(WCHAR)));
         RegCloseKey(key);
@@ -268,9 +246,8 @@ static void model_combo_select_current(BooApp *app, HWND combo) {
 // the combo and the close button, so the worker's message target stays alive.
 static void model_set_frozen(BooApp *app, HWND dlg, bool frozen) {
     (void)app;
-    EnableWindow(GetDlgItem(dlg, IDC_MODEL), !frozen);
-    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE,
-                   MF_BYCOMMAND | (frozen ? MF_GRAYED : MF_ENABLED));
+    static const int ids[] = {IDC_MODEL};
+    boo_dialog_freeze(dlg, ids, 1, frozen);
 }
 
 // Swap to `path` on a worker thread; loading takes seconds.
@@ -320,7 +297,7 @@ static void model_combo_fill(BooApp *app, HWND combo) {
     model_paths_free(app);
     app->settings.model_count = boo_model_installed(&app->settings.model_paths);
     for (int i = 0; i < app->settings.model_count; i++) {
-        WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
+        WCHAR *base = boo_to_wide(boo_model_basename(app->settings.model_paths[i]));
         if (!base) continue;
         SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
         free(base);
@@ -340,7 +317,7 @@ static void model_combo_fill(BooApp *app, HWND combo) {
         char label[300];
         snprintf(label, sizeof(label), "%s  (download, %u MB)", manifest[i].filename,
                  (unsigned)(manifest[i].size / 1000000));
-        WCHAR *wide = to_wide(label);
+        WCHAR *wide = boo_to_wide(label);
         if (!wide) continue;
         SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)wide);
         free(wide);
@@ -383,7 +360,7 @@ static void model_downloaded(BooApp *app, HWND dlg, bool ok, char *text) {
     if (ok) {
         model_swap_begin(app, dlg, combo, text);
     } else {
-        WCHAR *wide = to_wide(text ? text : "Download failed.");
+        WCHAR *wide = boo_to_wide(text ? text : "Download failed.");
         if (wide) {
             MessageBoxW(dlg, wide, L"Boo", MB_ICONWARNING);
             free(wide);
@@ -438,52 +415,54 @@ static void select_theme(BooApp *app, int index) {
 static void settings_on_create(BooApp *app, HWND hwnd, const CREATESTRUCTW *cs) {
     const UINT dpi = GetDpiForWindow(hwnd);
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    const int m = scale(16, dpi);
-    const int w = scale(288, dpi);
+    const int m = boo_px(16, dpi);
+    const int w = boo_px(288, dpi);
 
-    const int vw = scale(44, dpi);
+    const int vw = boo_px(44, dpi);
     HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m, w - vw,
-                            scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+                            boo_px(18, dpi), hwnd, NULL, cs->hInstance, NULL);
     HWND val = CreateWindowW(L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_RIGHT,
-                             m + w - vw, m, vw, scale(18, dpi), hwnd,
+                             m + w - vw, m, vw, boo_px(18, dpi), hwnd,
                              (HMENU)IDC_OPACITY_VAL, cs->hInstance, NULL);
-    HWND bar = CreateWindowW(
-        TRACKBAR_CLASSW, NULL, WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m,
-        scale(38, dpi), w, scale(30, dpi), hwnd, (HMENU)IDC_OPACITY, cs->hInstance, NULL);
+    HWND bar =
+        CreateWindowW(TRACKBAR_CLASSW, NULL,
+                      WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m, boo_px(38, dpi),
+                      w, boo_px(30, dpi), hwnd, (HMENU)IDC_OPACITY, cs->hInstance, NULL);
     SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
     SendMessageW(bar, TBM_SETPOS, TRUE, app->settings.opacity_pct);
     set_opacity_label(hwnd, app->settings.opacity_pct);
 
     HWND chk =
         CreateWindowW(L"BUTTON", L"Auto-type into focused app",
-                      WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, m, scale(78, dpi), w,
-                      scale(24, dpi), hwnd, (HMENU)IDC_AUTOTYPE, cs->hInstance, NULL);
+                      WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, m, boo_px(78, dpi), w,
+                      boo_px(24, dpi), hwnd, (HMENU)IDC_AUTOTYPE, cs->hInstance, NULL);
     SendMessageW(chk, BM_SETCHECK, app->settings.auto_type ? BST_CHECKED : BST_UNCHECKED,
                  0);
 
     HWND lm =
-        CreateWindowW(L"STATIC", L"Model", WS_CHILD | WS_VISIBLE, m, scale(112, dpi), w,
-                      scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+        CreateWindowW(L"STATIC", L"Model", WS_CHILD | WS_VISIBLE, m, boo_px(112, dpi), w,
+                      boo_px(18, dpi), hwnd, NULL, cs->hInstance, NULL);
     // Dropdown of the usable models on disk; the loaded one is selected.
     // The height covers the open list, per the combo box contract.
-    HWND combo = CreateWindowW(
-        L"COMBOBOX", NULL,
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_HASSTRINGS, m,
-        scale(134, dpi), w, scale(160, dpi), hwnd, (HMENU)IDC_MODEL, cs->hInstance, NULL);
+    HWND combo = CreateWindowW(L"COMBOBOX", NULL,
+                               WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST |
+                                   CBS_HASSTRINGS,
+                               m, boo_px(134, dpi), w, boo_px(160, dpi), hwnd,
+                               (HMENU)IDC_MODEL, cs->hInstance, NULL);
     model_combo_fill(app, combo);
     // Download progress for tagged entries; hidden until one is picked.
-    HWND dlbar = CreateWindowW(PROGRESS_CLASSW, NULL, WS_CHILD, m, scale(162, dpi), w,
-                               scale(10, dpi), hwnd, (HMENU)IDC_MODEL_PROGRESS,
+    HWND dlbar = CreateWindowW(PROGRESS_CLASSW, NULL, WS_CHILD, m, boo_px(162, dpi), w,
+                               boo_px(10, dpi), hwnd, (HMENU)IDC_MODEL_PROGRESS,
                                cs->hInstance, NULL);
     SendMessageW(dlbar, PBM_SETRANGE32, 0, 100);
 
     HWND l2 =
-        CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(176, dpi), w,
-                      scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+        CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, boo_px(176, dpi), w,
+                      boo_px(18, dpi), hwnd, NULL, cs->hInstance, NULL);
     HWND list = CreateWindowW(L"LISTBOX", NULL,
                               WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER |
                                   LBS_NOTIFY | LBS_HASSTRINGS,
-                              m, scale(200, dpi), w, scale(280, dpi), hwnd,
+                              m, boo_px(200, dpi), w, boo_px(280, dpi), hwnd,
                               (HMENU)IDC_THEMES, cs->hInstance, NULL);
     for (int i = 0; i < app->settings.theme_count; i++)
         SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)app->settings.themes[i].name);
@@ -575,7 +554,7 @@ void boo_settings_open(BooApp *app) {
     }
 
     const UINT dpi = GetDpiForWindow(app->overlay);
-    RECT wr = {0, 0, scale(320, dpi), scale(496, dpi)};
+    RECT wr = {0, 0, boo_px(320, dpi), boo_px(496, dpi)};
     AdjustWindowRectExForDpi(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
     app->settings.win =
         CreateWindowExW(0, BOO_SETTINGS_CLASS, L"Boo Settings",

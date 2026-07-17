@@ -105,8 +105,7 @@ bool boo_app_start(BooApp *app, char *model_path) {
         // Record button stays the primary control, so say so, don't die.
         WCHAR status[160];
         swprintf(status, ARRAYSIZE(status), L"Hotkey unavailable: %ls", reason);
-        wcsncpy(app->status, status, ARRAYSIZE(app->status) - 1);
-        app->status[ARRAYSIZE(app->status) - 1] = 0;
+        boo_overlay_set_status(app, status);
     } else {
         // Rest on the visible hotkey hint now that registration settled.
         boo_overlay_status_idle(app);

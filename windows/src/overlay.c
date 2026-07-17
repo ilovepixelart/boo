@@ -104,10 +104,6 @@ static ULONGLONG flash_until;
 static HWND last_external_fg;
 static HWINEVENTHOOK fg_hook;
 
-static int px(int base, UINT dpi) {
-    return MulDiv(base, (int)dpi, 96);
-}
-
 static COLORREF mix(COLORREF fg, COLORREF bg, float alpha) {
     const int r = (int)(GetRValue(fg) * alpha + GetRValue(bg) * (1.0f - alpha));
     const int g = (int)(GetGValue(fg) * alpha + GetGValue(bg) * (1.0f - alpha));
@@ -187,11 +183,11 @@ static bool system_dark(void) {
 static void make_fonts(UINT dpi) {
     if (font_text) DeleteObject(font_text);
     if (font_mono) DeleteObject(font_mono);
-    font_text = CreateFontW(-px(15, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    font_text = CreateFontW(-boo_px(15, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     // The status/hint line is monospace in the reference.
-    font_mono = CreateFontW(-px(12, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    font_mono = CreateFontW(-boo_px(12, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
 }
@@ -199,9 +195,9 @@ static void make_fonts(UINT dpi) {
 static RECT button_rect(HWND hwnd, UINT dpi) {
     RECT rc;
     GetClientRect(hwnd, &rc);
-    const int s = px(BUTTON_SIZE, dpi);
+    const int s = boo_px(BUTTON_SIZE, dpi);
     const int x = (rc.right - s) / 2;
-    const int y = rc.bottom - px(MARGIN, dpi) - s;
+    const int y = rc.bottom - boo_px(MARGIN, dpi) - s;
     return (RECT){x, y, x + s, y + s};
 }
 
@@ -214,6 +210,10 @@ static void set_status(BooApp *app, const WCHAR *text) {
 // (reference: the idle status literally reads the hotkey).
 static void set_status_idle(BooApp *app) {
     set_status(app, app->hotkey_ok ? L"ctrl+shift+space" : L"click record to dictate");
+}
+
+void boo_overlay_set_status(BooApp *app, const WCHAR *text) {
+    set_status(app, text);
 }
 
 void boo_overlay_status_idle(BooApp *app) {
@@ -501,52 +501,52 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
     const UINT dpi = cc->dpi;
     const int left = cc->left;
     const int right = cc->right;
-    const int pad_x = px(CARD_PAD_X, dpi);
-    const int header_h = live ? 0 : px(HEADER_H, dpi);
+    const int pad_x = boo_px(CARD_PAD_X, dpi);
+    const int header_h = live ? 0 : boo_px(HEADER_H, dpi);
     RECT text_rc = {left + pad_x, 0, right - pad_x, 0};
     RECT measure = text_rc;
     HGDIOBJ old_font = SelectObject(dc, font_text);
     DrawTextW(dc, text, -1, &measure, DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
     const int text_h = measure.bottom - measure.top;
     const int card_h =
-        header_h + (live ? px(8, dpi) : px(11, dpi)) + text_h + px(10, dpi);
+        header_h + (live ? boo_px(8, dpi) : boo_px(11, dpi)) + text_h + boo_px(10, dpi);
     if (measure_only) {
         SelectObject(dc, old_font);
         return card_h;
     }
 
     RECT card = {left, top, right, top + card_h};
-    fill_round(dc, card, px(CARD_RADIUS, dpi), live ? pal->card_live : pal->card);
+    fill_round(dc, card, boo_px(CARD_RADIUS, dpi), live ? pal->card_live : pal->card);
 
     if (!live && hit >= 0 && drawn_count < BOO_HISTORY_MAX) {
-        const int icon = px(ICON_SIZE, dpi);
-        const int inset = px(8, dpi);
-        RECT copy_rc = {left + inset, top + px(5, dpi), left + inset + icon,
-                        top + px(5, dpi) + icon};
-        RECT close_rc = {right - inset - icon, top + px(5, dpi), right - inset,
-                         top + px(5, dpi) + icon};
+        const int icon = boo_px(ICON_SIZE, dpi);
+        const int inset = boo_px(8, dpi);
+        RECT copy_rc = {left + inset, top + boo_px(5, dpi), left + inset + icon,
+                        top + boo_px(5, dpi) + icon};
+        RECT close_rc = {right - inset - icon, top + boo_px(5, dpi), right - inset,
+                         top + boo_px(5, dpi) + icon};
         const bool flashing = hit == flash_card && GetTickCount64() < flash_until;
         // accent.confirm is the theme's palette[14], the same token the idle
         // waveform uses; a hardcoded color would ignore the picked theme.
         paint_icon_copy(dc, copy_rc, flashing ? pal->wave_idle : pal->subtext);
         paint_icon_close(dc, close_rc, pal->subtext, true);
         // Generous hit areas around the small glyphs.
-        InflateRect(&copy_rc, px(6, dpi), px(6, dpi));
-        InflateRect(&close_rc, px(6, dpi), px(6, dpi));
+        InflateRect(&copy_rc, boo_px(6, dpi), boo_px(6, dpi));
+        InflateRect(&close_rc, boo_px(6, dpi), boo_px(6, dpi));
         copy_hit[drawn_count] = copy_rc;
         close_hit[drawn_count] = close_rc;
         drawn_card[drawn_count] = hit;
         drawn_count++;
 
         // Hairline separator under the header.
-        RECT sep = {left + inset, top + header_h + px(2, dpi), right - inset,
-                    top + header_h + px(3, dpi)};
+        RECT sep = {left + inset, top + header_h + boo_px(2, dpi), right - inset,
+                    top + header_h + boo_px(3, dpi)};
         HBRUSH sep_brush = CreateSolidBrush(mix(pal->subtext, pal->card, 0.35f));
         FillRect(dc, &sep, sep_brush);
         DeleteObject(sep_brush);
     }
 
-    text_rc.top = top + header_h + (live ? px(8, dpi) : px(11, dpi));
+    text_rc.top = top + header_h + (live ? boo_px(8, dpi) : boo_px(11, dpi));
     text_rc.bottom = text_rc.top + text_h;
     SetTextColor(dc, live ? pal->subtext : pal->text);
     DrawTextW(dc, text, -1, &text_rc, DT_WORDBREAK | DT_NOPREFIX);
@@ -560,7 +560,7 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
 // newest still wins, older cards fall off the top, mirroring scroll-to-newest.
 static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT area) {
     drawn_count = 0;
-    const int gap = px(CARD_GAP, dpi);
+    const int gap = boo_px(CARD_GAP, dpi);
     const CardCtx cc = {dc, pal, dpi, area.left, area.right};
 
     int heights[BOO_HISTORY_MAX + 1];
@@ -605,7 +605,7 @@ static void paint(BooApp *app, HWND hwnd) {
 
     const UINT dpi = GetDpiForWindow(hwnd);
     const Palette pal = palette(app);
-    const int margin = px(MARGIN, dpi);
+    const int margin = boo_px(MARGIN, dpi);
 
     HBRUSH bg = CreateSolidBrush(pal.bg);
     FillRect(dc, &rc, bg);
@@ -613,8 +613,8 @@ static void paint(BooApp *app, HWND hwnd) {
     SetBkMode(dc, TRANSPARENT);
 
     // Waveform: idle dim cyan, recording red, transcribing orange breathing.
-    RECT wave = {margin, px(WAVE_TOP, dpi), rc.right - margin,
-                 px(WAVE_TOP, dpi) + px(WAVE_H, dpi)};
+    RECT wave = {margin, boo_px(WAVE_TOP, dpi), rc.right - margin,
+                 boo_px(WAVE_TOP, dpi) + boo_px(WAVE_H, dpi)};
     int bars = 0;
     const float *waveform = boo_get_waveform(app->ctx, &bars);
     BooWaveState wstate = BOO_WAVE_IDLE;
@@ -640,11 +640,11 @@ static void paint(BooApp *app, HWND hwnd) {
     const RECT button = button_rect(hwnd, dpi);
     const float target = app->ui_recording ? 6.0f : 20.0f;
     button_radius += (target - button_radius) * 0.4f;
-    fill_round(dc, button, px((int)(button_radius + 0.5f), dpi), pal.record);
+    fill_round(dc, button, boo_px((int)(button_radius + 0.5f), dpi), pal.record);
 
     // Status line above the button: hint / recording / elapsed / thinking.
-    RECT status = {margin, button.top - px(STATUS_H + 8, dpi), rc.right - margin,
-                   button.top - px(6, dpi)};
+    RECT status = {margin, button.top - boo_px(STATUS_H + 8, dpi), rc.right - margin,
+                   button.top - boo_px(6, dpi)};
     HGDIOBJ old_font = SelectObject(dc, font_mono);
     SetTextColor(dc, pal.subtext);
     DrawTextW(dc, app->status, -1, &status,
@@ -652,8 +652,8 @@ static void paint(BooApp *app, HWND hwnd) {
     SelectObject(dc, old_font);
 
     // Transcript cards fill the middle.
-    RECT cards = {margin, wave.bottom + px(CARD_GAP, dpi), rc.right - margin,
-                  status.top - px(CARD_GAP, dpi)};
+    RECT cards = {margin, wave.bottom + boo_px(CARD_GAP, dpi), rc.right - margin,
+                  status.top - boo_px(CARD_GAP, dpi)};
     paint_cards(dc, app, &pal, dpi, cards);
 
     BitBlt(win_dc, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
@@ -786,8 +786,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         // MIN_H..MAX_H and pin the width by making min and max agree.
         const UINT dpi = GetDpiForWindow(hwnd);
         MINMAXINFO *mmi = (MINMAXINFO *)lparam;
-        RECT min_rc = {0, 0, px(BASE_W, dpi), px(MIN_H, dpi)};
-        RECT max_rc = {0, 0, px(BASE_W, dpi), px(MAX_H, dpi)};
+        RECT min_rc = {0, 0, boo_px(BASE_W, dpi), boo_px(MIN_H, dpi)};
+        RECT max_rc = {0, 0, boo_px(BASE_W, dpi), boo_px(MAX_H, dpi)};
         AdjustWindowRectExForDpi(&min_rc, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
         AdjustWindowRectExForDpi(&max_rc, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
         mmi->ptMinTrackSize.x = min_rc.right - min_rc.left;
@@ -932,12 +932,12 @@ HWND boo_overlay_create(BooApp *app) {
     // by the title bar so the CLIENT area stays BASE_W x BASE_H.
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    RECT wr = {0, 0, px(BASE_W, dpi), px(BASE_H, dpi)};
+    RECT wr = {0, 0, boo_px(BASE_W, dpi), boo_px(BASE_H, dpi)};
     AdjustWindowRectExForDpi(&wr, BOO_OVERLAY_STYLE, FALSE, WS_EX_TOPMOST, dpi);
     const int w = wr.right - wr.left;
     const int h = wr.bottom - wr.top;
-    SetWindowPos(hwnd, NULL, work.right - w - px(20, dpi), work.top + px(50, dpi), w, h,
-                 SWP_NOACTIVATE | SWP_NOZORDER);
+    SetWindowPos(hwnd, NULL, work.right - w - boo_px(20, dpi), work.top + boo_px(50, dpi),
+                 w, h, SWP_NOACTIVATE | SWP_NOZORDER);
 
     return hwnd;
 }

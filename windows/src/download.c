@@ -6,6 +6,8 @@
 
 #include "download.h"
 
+#include "strconv.h"
+
 #include <bcrypt.h>
 #include <io.h>
 #include <stdio.h>
@@ -17,24 +19,6 @@ typedef struct {
     HWND notify;
     const BooModelInfo *model; // static core storage
 } DownloadJob;
-
-static WCHAR *to_wide(const char *utf8) {
-    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-    if (len <= 0) return NULL;
-    WCHAR *wide = malloc((size_t)len * sizeof(WCHAR));
-    if (!wide) return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
-    return wide;
-}
-
-static char *to_utf8(const WCHAR *wide) {
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-    if (len <= 0) return NULL;
-    char *utf8 = malloc((size_t)len);
-    if (!utf8) return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, len, NULL, NULL);
-    return utf8;
-}
 
 // %USERPROFILE%\.boo\models, created if missing.
 static bool ensure_models_dir(WCHAR *buf, size_t len) {
@@ -85,7 +69,7 @@ static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
 // The transfer proper: connect, GET, stream, hash. Splits out so the worker
 // owns setup/teardown and this owns the WinHTTP handles.
 static bool fetch(const DownloadJob *job, FILE *out, BCRYPT_HASH_HANDLE hash) {
-    WCHAR *url = to_wide(job->model->url);
+    WCHAR *url = boo_to_wide(job->model->url);
     if (!url) return false;
 
     URL_COMPONENTSW parts = {.dwStructSize = sizeof(parts)};
@@ -155,7 +139,7 @@ static DWORD WINAPI download_worker(LPVOID param) {
     WCHAR dir[MAX_PATH];
     WCHAR final_path[MAX_PATH];
     WCHAR part_path[MAX_PATH];
-    WCHAR *name = to_wide(job->model->filename);
+    WCHAR *name = boo_to_wide(job->model->filename);
     const bool paths_ok = name && ensure_models_dir(dir, MAX_PATH) &&
                           swprintf(final_path, MAX_PATH, L"%ls\\%ls", dir, name) >= 0 &&
                           swprintf(part_path, MAX_PATH, L"%ls\\%ls.part", dir, name) >= 0;
@@ -194,7 +178,7 @@ static DWORD WINAPI download_worker(LPVOID param) {
 
     if (ok) {
         boo_log(BOO_LOG_INFO, "model downloaded and verified");
-        char *upath = to_utf8(final_path);
+        char *upath = boo_to_utf8(final_path);
         if (upath) {
             post_done(job->notify, true, upath);
             free(upath);

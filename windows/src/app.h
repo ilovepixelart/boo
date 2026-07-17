@@ -42,6 +42,23 @@
 #define BOO_CMD_QUIT          101
 #define BOO_CMD_SETTINGS      102
 
+// The one registry home for preferences (settings.c, model.c).
+#define BOO_REG_KEY L"Software\\Boo"
+
+// One DPI scaler for every window; `base` is in 96-dpi pixels.
+static inline int boo_px(int base, UINT dpi) {
+    return MulDiv(base, (int)dpi, 96);
+}
+
+// Freeze or thaw a dialog around background work: the listed controls plus
+// the close button, which keeps the dialog (the worker's message target)
+// alive until the work reports back.
+static inline void boo_dialog_freeze(HWND dlg, const int *ids, size_t n, bool frozen) {
+    for (size_t i = 0; i < n; i++) EnableWindow(GetDlgItem(dlg, ids[i]), !frozen);
+    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE,
+                   MF_BYCOMMAND | (frozen ? (UINT)MF_GRAYED : (UINT)MF_ENABLED));
+}
+
 // A parsed theme (display name + colors) for the settings picker.
 typedef struct {
     WCHAR *name;
