@@ -32,14 +32,14 @@ with its native chrome, in that OS's conventional placement.
 | Controls | traffic lights **close · minimize · zoom**, top-left, kept visible over the transparent titlebar (`:35,175-186`) | native caption **minimize · close**, top-right (no maximize: width is fixed) | libadwaita header-bar **close** (+ minimize where the desktop offers it) |
 | Title area | titlebar transparent, title hidden, content to the top edge (`:44-45`) | minimal caption, no title text | header bar, no title text |
 | Move | drag anywhere on the body (`:46`) | drag the body | drag the header bar |
-| Resize | height **300–800**, width fixed **400** (`:39-40`) | same range | same range |
+| Resize | height **300-800**, width fixed **400** (`:39-40`) | same range | same range |
 | Close | hides the window; the app stays in the menu bar / tray | same (hide to tray) | same |
 | Minimize | miniaturize to the Dock (`:35`) | minimize to the taskbar | minimize where the desktop offers it |
 | Level | normal, not always-on-top; does not hide on deactivate (`:43,50`) | topmost, an overlay kept above the dictation target | normal window |
 
 Requirement: **native close and minimize at minimum**, placed by each OS's own
 convention, over a title-less minimal title area with content to the top edge,
-drag-to-move by the body, and height-only resize (300–800, width fixed 400).
+drag-to-move by the body, and height-only resize (300-800, width fixed 400).
 Delivery still targets the app focused at record start (§4), so the window may
 take focus like any normal window without misdirecting dictation.
 

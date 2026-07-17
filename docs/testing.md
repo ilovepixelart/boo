@@ -28,11 +28,11 @@ human UAT.**
 ### Zig (core, `src/`)
 - **Framework**: `std.testing`, `test "..." {}` blocks colocated with the code;
   `_ = @import("x.zig")` in a root test to pull a module's tests in.
-- **Run**: `zig build test`, and again with `-Doptimize=ReleaseSafe` — the
+- **Run**: `zig build test`, and again with `-Doptimize=ReleaseSafe`, the
   second keeps the safety checks while optimising, catching UB that only appears
   optimised.
 - **Best practice**: use `std.testing.allocator` (it fails the test on a single
-  leaked byte — this is what catches the init/errdefer leaks), assert with
+  leaked byte, this is what catches the init/errdefer leaks), assert with
   `try testing.expectEqual`/`expectError`, keep tests deterministic (no
   `Date.now`/`Math.random`; in this repo those are unavailable anyway).
 - **Beyond unit tests**: the `bench` suite runs real inference gated on realtime
@@ -43,7 +43,7 @@ human UAT.**
 - **Framework**: plain C test executables (assert + non-zero exit), compiled on
   the host, no test framework dependency. Model: `windows/tests/inject_plan_test.c`.
 - **Best practice**: split the **pure logic out of the OS glue** so it compiles
-  without `windows.h`/`gtk.h` — `inject_plan.c` is pure C and its test runs on
+  without `windows.h`/`gtk.h`, `inject_plan.c` is pure C and its test runs on
   the Linux CI runner with `cc -std=c11 -Wall -Wextra -Werror`. Only logic that
   can be isolated this way is unit-testable; anything touching the widget tree is
   not.
@@ -58,7 +58,7 @@ human UAT.**
 ### Swift (macOS, `macos/Sources`)
 - **Framework**: a plain-Swift harness (`macos/Tests/main.swift`), compiled
   together with the sources under test by `scripts/coverage.sh swift` via bare
-  `swiftc` — no Xcode project, mirroring the C harness style. Coverage comes
+  `swiftc`, no Xcode project, mirroring the C harness style. Coverage comes
   from `-profile-generate -profile-coverage-mapping` + `xcrun llvm-cov export
   --format=lcov`, converted by `scripts/lcov_to_sonar.py`.
 - **Best practice**: keep the **testable logic free of app state** so the

@@ -16,6 +16,7 @@
 #include "overlay.h"
 #include "tray.h"
 
+#include <shellapi.h>
 #include <stdlib.h>
 
 // Local\ (per-session), not Global\: a second user on the same machine gets
@@ -25,6 +26,30 @@ static const WCHAR SINGLETON_NAME[] = L"Local\\boo-app-single-instance";
 static int fail_dialog(const WCHAR *heading, const WCHAR *body) {
     MessageBoxW(NULL, body, heading, MB_OK | MB_ICONERROR);
     return 1;
+}
+
+// Surface a crash dump left behind by a previous run (windows/src/crash.c
+// writes boo-crash.dmp beside the log). The dump is renamed once shown, so
+// the next launch stays quiet unless a new crash happened. Nothing is ever
+// sent anywhere; opening the folder lets the user inspect or attach it.
+static void surface_previous_crash(void) {
+    WCHAR base[MAX_PATH];
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    WCHAR dir[MAX_PATH];
+    WCHAR report[MAX_PATH];
+    WCHAR prev[MAX_PATH];
+    if (swprintf(dir, MAX_PATH, L"%ls\\Boo\\logs", base) < 0) return;
+    if (swprintf(report, MAX_PATH, L"%ls\\boo-crash.dmp", dir) < 0) return;
+    if (GetFileAttributesW(report) == INVALID_FILE_ATTRIBUTES) return;
+    if (swprintf(prev, MAX_PATH, L"%ls\\boo-crash-prev.dmp", dir) < 0) return;
+    MoveFileExW(report, prev, MOVEFILE_REPLACE_EXISTING);
+
+    if (MessageBoxW(NULL,
+                    L"A crash dump from the previous run was saved next to the "
+                    L"log; nothing was sent anywhere.\n\nOpen the log folder?",
+                    L"Boo crashed last time", MB_YESNO | MB_ICONINFORMATION) == IDYES)
+        ShellExecuteW(NULL, L"open", dir, NULL, NULL, SW_SHOWNORMAL);
 }
 
 // Open the diagnostic log at %LOCALAPPDATA%\Boo\logs\boo.log. Best-effort; on
@@ -127,6 +152,8 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
             return fail_dialog(L"No speech model found", hint);
         }
     }
+
+    surface_previous_crash();
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

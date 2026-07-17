@@ -40,7 +40,7 @@ what already ships:
 So a speech-model download that is **user-initiated, checksum-verified against a
 pinned hash, and clearly disclosed** removes nothing the VAD fetch has not
 already spent. The honest claim was never "zero network"; it is **no telemetry,
-no uploads, transcription is fully local** — the only bytes that ever come *in*
+no uploads, transcription is fully local**, the only bytes that ever come *in*
 are optional models the user chooses, each verified against a hash we ship.
 Restate the guarantee that way (README already says the substance of it) and the
 downloader is consistent, not contradictory.

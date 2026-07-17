@@ -84,6 +84,7 @@ real-mic acceptance still runs on real hardware against this table.
 |---|---|---|---|---|
 | Audio and transcripts never leave the machine | Y | Y | Y | No outbound traffic during dictation |
 | Outbound requests are only pinned-hash model downloads (auto VAD fetch; speech models on request) | Y | Y | Y | First run fetches ~1MB silero; onboarding/Settings downloads verify against pinned SHA-256s |
+| Local crash capture, surfaced on next launch, never uploaded | Y | Y | Y | Kill the app with a fatal signal; next launch offers to reveal the report beside the log |
 | Text-injection capability documented (SECURITY.md) | Y | Y | Y | Review SECURITY.md |
 
 ## Priority gaps (the parity backlog)

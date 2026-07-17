@@ -16,8 +16,9 @@ Both halves are built: one leveled logger in the core, one file per OS,
 lifecycle events logged as metadata (never transcript text, see the privacy
 contract below), and local crash capture on every platform. The handlers hand
 the failure back to the OS default afterwards, so system crash reports are
-additive, not replaced. Still open: surfacing a found crash report on the
-next launch with a reveal/copy affordance.
+additive, not replaced. A report found on the next launch is surfaced once
+(dialog with a reveal/open-folder action, then renamed to *-prev so later
+launches stay quiet); nothing is ever sent anywhere.
 
 ## Privacy contract (non-negotiable)
 

@@ -143,6 +143,42 @@ static void init_logging(void) {
     boo_crash_init(dir);
 }
 
+// Surface a crash report left behind by a previous run (core crash capture
+// writes boo-crash.txt beside the log). The report is renamed once shown, so
+// the next launch stays quiet unless a new crash happened. Nothing is ever
+// sent anywhere; Open Folder lets the user inspect or attach it themselves.
+static void on_crash_response(AdwAlertDialog *dialog, const char *response,
+                              gpointer user_data) {
+    (void)dialog;
+    const char *dir = user_data; // freed by the closure notify
+    if (g_strcmp0(response, "reveal") == 0) {
+        g_autofree char *uri = g_strconcat("file://", dir, NULL);
+        g_app_info_launch_default_for_uri(uri, NULL, NULL);
+    }
+}
+
+static void surface_previous_crash(void) {
+    const char *state_env = g_getenv("XDG_STATE_HOME");
+    g_autofree char *dir =
+        (state_env && *state_env)
+            ? g_build_filename(state_env, "boo", NULL)
+            : g_build_filename(g_get_home_dir(), ".local", "state", "boo", NULL);
+    g_autofree char *report = g_build_filename(dir, "boo-crash.txt", NULL);
+    if (!g_file_test(report, G_FILE_TEST_EXISTS)) return;
+    g_autofree char *prev = g_build_filename(dir, "boo-crash-prev.txt", NULL);
+    g_rename(report, prev);
+
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        "Boo crashed last time",
+        "A crash report was saved next to the log. Nothing was sent anywhere."));
+    adw_alert_dialog_add_response(dialog, "reveal", "Open Folder");
+    adw_alert_dialog_add_response(dialog, "dismiss", "Dismiss");
+    adw_alert_dialog_set_default_response(dialog, "dismiss");
+    g_signal_connect_data(dialog, "response", G_CALLBACK(on_crash_response),
+                          g_strdup(dir), (GClosureNotify)g_free, 0);
+    adw_dialog_present(ADW_DIALOG(dialog), NULL);
+}
+
 // Load `model_path`, wire optional VAD, and open the overlay. On a load failure
 // shows the error dialog (which quits). Shared by auto-discovery and the picker.
 static void start_with_model(AppState *state, const char *model_path) {
@@ -178,6 +214,7 @@ static void start_with_model(AppState *state, const char *model_path) {
     }
 
     gtk_window_present(boo_overlay_window_new(app, state->ctx, model_path));
+    surface_previous_crash();
 }
 
 // ── in-app model download (docs/model-onboarding.md) ──

@@ -41,6 +41,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             boo_log(Int32(BOO_LOG_ERROR), "no speech model found")
             showModelOnboarding()  // Download… / Choose a File… / Quit
         }
+
+        // After the UI is up: mention a crash report from a previous run.
+        DispatchQueue.main.async { self.surfacePreviousCrash() }
+    }
+
+    /// Surface a crash report left behind by a previous run (crash capture
+    /// writes boo-crash.txt beside the log; see
+    /// docs/logging-and-crash-reporting.md). The report is renamed once
+    /// shown, so the next launch stays quiet unless a new crash happened.
+    /// Nothing is sent anywhere; Reveal opens Finder for the user to inspect
+    /// or attach it themselves.
+    private func surfacePreviousCrash() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Boo", isDirectory: true)
+        let report = dir.appendingPathComponent("boo-crash.txt")
+        guard FileManager.default.fileExists(atPath: report.path) else { return }
+        let seen = dir.appendingPathComponent("boo-crash-prev.txt")
+        try? FileManager.default.removeItem(at: seen)
+        try? FileManager.default.moveItem(at: report, to: seen)
+
+        let alert = NSAlert()
+        alert.messageText = "Boo crashed last time"
+        alert.informativeText =
+            "A crash report was saved next to the log. Nothing was sent anywhere."
+        alert.addButton(withTitle: "Reveal in Finder")
+        alert.addButton(withTitle: "Dismiss")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([seen])
+        }
     }
 
     /// Load the model at `path` and bring up the whole app. Shared by
