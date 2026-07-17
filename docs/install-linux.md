@@ -14,14 +14,22 @@ troubleshooting.
 flatpak install --user boo-<version>-x86_64.flatpak
 ```
 
-The model goes inside the sandbox's data dir:
+The model goes inside the sandbox's data dir. Parakeet is the best pick: near
+large-v3 accuracy at `base.en` speed, 25 languages, auto-detected (669 MB):
 
 ```sh
 mkdir -p ~/.var/app/com.boo.app/data/boo/models
-curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \
+  https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
 
 flatpak run com.boo.app
+```
+
+Want a smaller, faster first download? `base.en` is 148 MB, English-only:
+
+```sh
+curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
 Model alternatives, streaming, and non-English dictation:

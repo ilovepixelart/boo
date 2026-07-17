@@ -382,11 +382,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "No speech model found"
         alert.informativeText = """
-            Boo needs a whisper model, which isn't bundled, they're 140 MB+.
+            Boo needs a speech model, which isn't bundled.
 
-            Download one into ~/.boo/models/ and relaunch:
+            Download one into ~/.boo/models/ and relaunch.
 
+            Recommended, best accuracy, 25 languages (669 MB):
             mkdir -p ~/.boo/models
+            curl -L -o ~/.boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \\
+              https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
+
+            Lighter and faster, English only (148 MB):
             curl -L -o ~/.boo/models/ggml-base.en.bin \\
               https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 
@@ -399,8 +404,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if alert.runModal() == .alertFirstButtonReturn {
             let cmd = """
-                mkdir -p ~/.boo/models && curl -L -o ~/.boo/models/ggml-base.en.bin \
-                https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+                mkdir -p ~/.boo/models && curl -L -o ~/.boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \
+                https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
                 """
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(cmd, forType: .string)

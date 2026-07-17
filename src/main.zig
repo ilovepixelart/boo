@@ -21,7 +21,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("Loading model: {s}\n", .{model_path});
     var ctx = Engine.init(model_path, .{}) catch |err| {
         std.debug.print("Failed to load model: {}\n", .{err});
-        std.debug.print("\nDownload a model first:\n  mkdir -p models\n  curl -L -o models/ggml-base.en.bin \\\n    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n", .{});
+        std.debug.print("\nDownload a model first.\n\nRecommended, best accuracy, 25 languages (669 MB):\n  mkdir -p models\n  curl -L -o models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \\\n    https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin\n\nLighter and faster, English only (148 MB):\n  curl -L -o models/ggml-base.en.bin \\\n    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n", .{});
         return;
     };
     defer ctx.deinit();

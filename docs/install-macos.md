@@ -32,11 +32,18 @@ blocked launch, if you don't see it, double-click Boo again first.
 
 ## Get a model
 
-Boo needs a `whisper.cpp` GGML model, none is bundled (they're 140 MB+).
-`base.en` is a good default:
+Boo needs a GGML speech model, none is bundled. Parakeet is the best pick:
+near large-v3 accuracy at `base.en` speed, 25 languages, auto-detected (669 MB):
 
 ```sh
 mkdir -p ~/.boo/models
+curl -L -o ~/.boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \
+  https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
+```
+
+Want a smaller, faster first download? `base.en` is 148 MB, English-only:
+
+```sh
 curl -L -o ~/.boo/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
