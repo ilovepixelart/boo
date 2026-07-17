@@ -42,6 +42,9 @@ def add_line(files, src_root, source, lineno, covered):
     rel = os.path.relpath(os.path.abspath(source), src_root)
     if rel.startswith(".."):
         return
+    # The Windows slice runs gcov natively; Sonar merges the report on Linux,
+    # so the paths must stay forward-slashed to match the analysed ones.
+    rel = rel.replace(os.sep, "/")
     lines = files.setdefault(rel, {})
     lines[lineno] = lines.get(lineno, False) or covered
 

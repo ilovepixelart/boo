@@ -383,6 +383,20 @@ jobs:
           Write-Output "boo-app.exe launched and stayed up on native x86_64"
           Stop-Process -Id $p.Id -Force
 
+      - name: Coverage (instrumented tests + driven app smoke)
+        # gcov-instrumented rebuilds of the win-tests exes and of the app
+        # itself, the app poked from outside by windows/tests/drive_app.c
+        # (onboarding close, record toggle, Settings). Nice-to-have, never a
+        # gate: a missing toolchain writes an empty (valid) report.
+        shell: bash
+        run: bash scripts/coverage.sh windows-native
+
+      - name: Upload coverage (Windows native)
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-windows-native
+          path: coverage/windows-native.xml
+
   flatpak-metadata:
     name: Linux (flatpak metadata)
     runs-on: ubuntu-24.04
@@ -429,7 +443,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Waits for the per-platform coverage artifacts (scripts/coverage.sh run in
     # each job); the scan itself is what merges them.
-    needs: [macos, linux]
+    needs: [macos, linux, windows-native]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -448,7 +462,7 @@ jobs:
         # report is valid and simply contributes nothing.
         run: |
           mkdir -p coverage
-          for f in windows linux swift; do
+          for f in windows windows-native linux swift; do
             [ -f "coverage/$f.xml" ] || printf '<coverage version="1"/>\n' > "coverage/$f.xml"
           done
 

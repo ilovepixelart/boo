@@ -2,16 +2,19 @@
 # Generate coverage for everything SonarCloud can index, one generic-format
 # XML per platform, plus a kcov run over the Zig core:
 #
-#   coverage/windows.xml  Windows paste-chord planner unit test (pure C, any host)
-#   coverage/linux.xml    Linux portal payload suites (needs GTK4 headers)
-#   coverage/swift.xml    macOS Swift harness (needs macOS; macos/Tests/main.swift)
-#   coverage/core/        Zig core under kcov (Linux only) + core-summary.txt
+#   coverage/windows.xml         Windows paste-chord planner unit test (pure C, any host)
+#   coverage/windows-native.xml  Windows frontend: win-tests exes + the app itself
+#                                driven by drive_app.c (Windows runner only)
+#   coverage/linux.xml           Linux portal payload suites (needs GTK4 headers)
+#   coverage/swift.xml           macOS Swift harness (needs macOS; macos/Tests/main.swift)
+#   coverage/core/               Zig core under kcov (Linux only) + core-summary.txt
 #
 # The core's number cannot land in Sonar: the scanner skips generic-coverage
 # entries for files without a supported language, and Zig is not one. It goes
 # to the CI job summary and the coverage-core artifact instead.
 #
-# Usage: coverage.sh [windows|linux|swift|core ...]  (default: windows linux swift)
+# Usage: coverage.sh [windows|windows-native|linux|swift|core ...]
+#        (default: windows linux swift)
 #
 # Coverage is a nice-to-have, never a CI gate: a section whose toolchain is
 # missing writes an empty (valid) report and succeeds.
@@ -49,6 +52,145 @@ gen_windows() {
         fi
     )
     rm -rf "$work"
+}
+
+# The native Windows frontend, gcov-instrumented with a mingw gcc: the
+# win-tests exes (model, download, inject, crash, waveform; each #includes its
+# source, so lines land on windows/src) and then the real app, driven from
+# outside by drive_app.c (record toggle, Settings pokes, onboarding close),
+# the Windows twin of the Linux instrumented smoke. Objects are compiled by
+# gcc for the gcov counters but linked by `zig c++` against the zig-built
+# archives, whose whisper C++ uses zig's bundled libc++ (same ABI story as the
+# Linux slice); libgcov.a comes from the gcc that made the objects.
+win_gcc() {
+    for cand in gcc /c/msys64/mingw64/bin/gcc /c/Strawberry/c/bin/gcc; do
+        if command -v "$cand" >/dev/null; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# The real work, isolated so one broken sub-slice degrades to partial
+# coverage instead of failing the run (coverage is never a gate).
+windows_native_slice() {
+    local report=$1 gcc_bin=$2 py=$3
+    local gcov_bin="${gcc_bin%gcc}gcov"
+
+    # The zig-built archives for the release ABI. On the Windows target they
+    # install as boo-core.lib / whisper.lib.
+    (cd "$root" && zig build app -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast)
+
+    # Mixed-style (C:/...) paths: understood by the native gcc, python, and
+    # bash alike, and what ends up in the .gcov Source: headers.
+    local rootw
+    rootw=$(cygpath -m "$root" 2>/dev/null || echo "$root")
+    local cflags=(--coverage -O0 -std=c11 -I "$rootw/include" -I "$rootw/windows/src")
+    local libs=(-lole32 -luser32 -lgdi32 -lshell32 -ldwmapi -ladvapi32 -lcomctl32
+        -lshlwapi -lwinhttp -lbcrypt -lcomdlg32 -ldbghelp)
+    local archives=("$rootw/zig-out/lib/boo-core.lib" "$rootw/zig-out/lib/whisper.lib")
+    local gcov_lib
+    gcov_lib=$("$gcc_bin" -print-file-name=libgcov.a)
+
+    local work
+    work=$(mktemp -d)
+    cd "$work"
+    local all_covs=()
+
+    # Unit tests, one subdir per exe so the shared strconv/inject_plan
+    # counters cannot collide across tests.
+    local t
+    for t in model_test download_test inject_test crash_test waveform_test; do
+        mkdir -p "$t"
+        (
+            cd "$t"
+            "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/tests/$t.c" -o "$t.o"
+            "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/strconv.c" -o strconv.o
+            "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/inject_plan.c" \
+                -o inject_plan.o
+            zig c++ -target x86_64-windows-gnu ./*.o "${archives[@]}" "$gcov_lib" \
+                "${libs[@]}" -o "$t.exe"
+            "./$t.exe" >/dev/null
+            "$gcov_bin" ./*.gcda >/dev/null 2>&1 || true
+        ) || echo "coverage: windows-native: $t slice failed" >&2
+        for g in "$t"/*.gcov; do all_covs+=("$g"); done
+    done
+
+    # The app itself. gcc objects for every frontend TU plus the console entry
+    # shim; drive_app (uninstrumented) pokes the live windows, and the app's
+    # clean quit flushes the counters.
+    mkdir -p app
+    (
+        cd app
+        local src
+        for src in "$rootw"/windows/src/*.c; do
+            "$gcc_bin" "${cflags[@]}" -c "$src" -o "$(basename "${src%.c}").o"
+        done
+        "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/tests/coverage_entry.c" \
+            -o coverage_entry.o
+        zig c++ -target x86_64-windows-gnu ./*.o "${archives[@]}" "$gcov_lib" \
+            "${libs[@]}" -o boo-app-cov.exe
+        "$gcc_bin" -O2 -std=c11 -I "$rootw/include" -I "$rootw/windows/src" \
+            "$rootw/windows/tests/drive_app.c" -luser32 -o drive_app.exe
+
+        # Bound the app's lifetime: a hung quit must not hang the CI job.
+        local wrap=()
+        command -v timeout >/dev/null && wrap=(timeout 180)
+
+        # Scenario 1: first run in an isolated profile with no model on disk;
+        # the driver closes the onboarding dialog (quit-without-a-model).
+        local fixture
+        fixture=$(mktemp -d)
+        mkdir -p "$fixture/local"
+        USERPROFILE=$(cygpath -w "$fixture") LOCALAPPDATA=$(cygpath -w "$fixture/local") \
+            "${wrap[@]}" ./boo-app-cov.exe &
+        local app_pid=$!
+        ./drive_app.exe onboarding || kill "$app_pid" 2>/dev/null || true
+        wait "$app_pid" || true
+
+        # Scenario 2: the real profile (the CI job put a tiny model in
+        # ~/.boo/models); record toggle, Settings pokes, quit from the tray
+        # command.
+        "${wrap[@]}" ./boo-app-cov.exe &
+        app_pid=$!
+        ./drive_app.exe main || kill "$app_pid" 2>/dev/null || true
+        wait "$app_pid" || true
+
+        "$gcov_bin" ./*.gcda >/dev/null 2>&1 || true
+    ) || echo "coverage: windows-native: app slice failed; keeping partial counters" >&2
+    for g in app/*.gcov; do all_covs+=("$g"); done
+
+    if [[ ${#all_covs[@]} -eq 0 ]]; then
+        echo "coverage: windows-native: gcov produced no reports" >&2
+        return 1
+    fi
+    "$py" "$rootw/scripts/gcov_to_sonar.py" "$(cygpath -m "$report" 2>/dev/null ||
+        echo "$report")" "$rootw" "${all_covs[@]}"
+}
+
+gen_windows_native() {
+    local report="$out/windows-native.xml"
+    case "$(uname -s)" in
+        MINGW* | MSYS*) ;;
+        *)
+            echo "coverage: windows-native: not on Windows, skipping" >&2
+            empty_report "$report"
+            return
+            ;;
+    esac
+    local gcc_bin py
+    gcc_bin=$(win_gcc) || true
+    py=$(command -v python3 || command -v python) || true
+    if [[ -z "${gcc_bin:-}" || -z "${py:-}" ]] || ! command -v zig >/dev/null; then
+        echo "coverage: windows-native: needs a mingw gcc, python, and zig; skipping" >&2
+        empty_report "$report"
+        return
+    fi
+    if ! (windows_native_slice "$report" "$gcc_bin" "$py"); then
+        echo "coverage: windows-native: slice incomplete" >&2
+    fi
+    [[ -f "$report" ]] || empty_report "$report"
 }
 
 # The portal payload suites (linux/tests/run.sh, which also runs on macOS):
@@ -209,11 +351,12 @@ sections=("$@")
 for section in "${sections[@]}"; do
     case "$section" in
         windows) gen_windows ;;
+        windows-native) gen_windows_native ;;
         linux) gen_linux ;;
         swift) gen_swift ;;
         core) gen_core ;;
         *)
-            echo "unknown section: $section (want windows|linux|swift|core)" >&2
+            echo "unknown section: $section (want windows|windows-native|linux|swift|core)" >&2
             exit 2
             ;;
     esac
