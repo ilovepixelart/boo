@@ -277,6 +277,19 @@ gen_linux() {
             gcov ./*.gcda >/dev/null 2>&1 || true
             for g in *.gcov; do all_covs+=("app/$g"); done
             cd ..
+
+            # The overlay harness, instrumented: it reaches the handlers the
+            # pixel smoke cannot (transcription round-trip, tracked idles,
+            # the Settings dialog, the download engine).
+            mkdir -p harness
+            if BOO_HARNESS_WORK="$PWD/harness" BOO_HARNESS_CFLAGS="--coverage" \
+                BOO_HARNESS_LIBS="$(gcc -print-file-name=libgcov.a)" \
+                bash "$root/linux/tests/ui-harness.sh"; then
+                (cd harness && gcov ./*.gcda >/dev/null 2>&1 || true)
+                for g in harness/*.gcov; do all_covs+=("$g"); done
+            else
+                echo "coverage: linux: overlay harness failed; slice skipped" >&2
+            fi
         else
             echo "coverage: linux: app smoke slice skipped (needs zig-out libs, ImageMagick, a display/xvfb-run, and a model in models/)" >&2
         fi

@@ -156,6 +156,21 @@ sleep 1
 shot recording
 check_disc "$OUT/recording.png" "record disc while recording"
 
+# Single-instance handoff: a second launch must forward its activate to the
+# first instance and exit, not open a rival window (main.c's on_activate
+# guard). GApplication uniqueness rides on the session bus; skip without one.
+if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    GSK_RENDERER=cairo timeout 20 "$APP" </dev/null >"$OUT/second.log" 2>&1
+    second_rc=$?
+    if ((second_rc == 0)) && alive "$APP_PID"; then
+        pass "second launch hands off to the first instance"
+    else
+        bad "second launch rc=$second_rc, first alive: $(alive "$APP_PID" && echo yes || echo no)"
+    fi
+else
+    echo "  skip second-launch handoff (no session bus)"
+fi
+
 if [[ -n "$WAV" && -f "$WAV" ]]; then
     # Full dictation: play a clip through the virtual mic and expect a card.
     pw-cat --playback --target virtmic-in "$WAV" 2>/dev/null ||
