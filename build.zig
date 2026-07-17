@@ -392,7 +392,9 @@ pub fn build(b: *std.Build) void {
         linkAudioSystemDepsOnly(win_app.root_module, target_os);
         // OS DLLs, resolved from Zig's bundled mingw import libraries, so
         // this cross-compiles from any host with no Windows SDK.
-        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32" }) |lib| {
+        // comctl32: the settings trackbar. shlwapi: PathRemoveFileSpec for the
+        // exe-relative themes dir. advapi32: the settings registry keys.
+        for ([_][]const u8{ "user32", "gdi32", "shell32", "dwmapi", "advapi32", "comctl32", "shlwapi" }) |lib| {
             win_app.root_module.linkSystemLibrary(lib, .{});
         }
         win_app.root_module.addIncludePath(b.path("include"));
@@ -403,6 +405,7 @@ pub fn build(b: *std.Build) void {
                 "main.c",
                 "model.c",
                 "overlay.c",
+                "settings.c",
                 "waveform.c",
                 "tray.c",
                 "hotkey.c",

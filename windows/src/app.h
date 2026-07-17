@@ -33,6 +33,13 @@
 // Tray menu command ids.
 #define BOO_CMD_TOGGLE_RECORD 100
 #define BOO_CMD_QUIT          101
+#define BOO_CMD_SETTINGS      102
+
+// A parsed theme (display name + colors) for the settings picker.
+typedef struct {
+    WCHAR *name;
+    BooThemeColors colors;
+} BooThemeEntry;
 
 typedef struct BooApp {
     BooContext *ctx;
@@ -56,8 +63,17 @@ typedef struct BooApp {
     volatile LONG stream_running; // atomic stop signal
 
     bool hotkey_ok;
-    bool dark;         // follow the system Apps theme
+    bool dark;         // follow the system Apps theme (default, no theme picked)
     WCHAR status[160]; // one-line status under the record button
+
+    // Theme selection + settings (settings.c). current_theme indexes themes,
+    // or -1 for the built-in default. opacity_pct is 10..100.
+    BooThemeEntry *themes;
+    int theme_count;
+    int current_theme;
+    int opacity_pct;
+    bool auto_type;    // paste into the focused app vs clipboard-only
+    HWND settings_win; // modeless Settings dialog, NULL when closed
 
     // Transcript history, chronological; cards[0] is the oldest. Each entry is
     // malloc'd. live_text is the provisional streaming card, dimmer than the

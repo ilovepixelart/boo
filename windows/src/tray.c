@@ -74,6 +74,8 @@ void boo_tray_show_menu(HWND hwnd, POINT anchor, bool recording) {
                 recording ? L"Stop recording (Ctrl+Shift+Space)"
                           : L"Start recording (Ctrl+Shift+Space)");
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING, BOO_CMD_SETTINGS, L"Settings…");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(menu, MF_STRING, BOO_CMD_QUIT, L"Quit Boo");
 
     // TrackPopupMenu contract: the window must be foreground or the menu will
