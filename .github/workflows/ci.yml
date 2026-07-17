@@ -176,7 +176,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
-            pkg-config xvfb dbus-x11 python3-gi kcov
+            pkg-config xvfb dbus-x11 python3-gi
 
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
@@ -208,6 +208,17 @@ jobs:
         # This is what proves Boo's predicted Request path matches the one the
         # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
+
+      - name: Install kcov
+        # Built from a pinned release: Ubuntu noble does not package kcov.
+        # Dep list per kcov's INSTALL.md; ~1 minute on the runner.
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            binutils-dev libcurl4-openssl-dev libdw-dev libiberty-dev zlib1g-dev cmake
+          git clone --depth 1 --branch v43 https://github.com/SimonKagstrom/kcov /tmp/kcov
+          cmake -S /tmp/kcov -B /tmp/kcov/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov/build -j"$(nproc)"
+          sudo cmake --install /tmp/kcov/build
 
       - name: Coverage (Linux C, Windows planner, Zig core)
         # Generic XMLs for the sonar job, plus kcov over the Zig core. The
