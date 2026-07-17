@@ -70,10 +70,7 @@ class SettingsViewController: NSViewController {
 
         // Controls open at the persisted values, so the first interaction
         // adjusts the real state rather than stomping it with defaults.
-        let defaults = UserDefaults.standard
-        let savedOpacity =
-            defaults.object(forKey: AppDelegate.opacityDefaultsKey) != nil
-            ? defaults.double(forKey: AppDelegate.opacityDefaultsKey) : 1.0
+        let savedOpacity = AppDelegate.savedOpacity()
         opacitySlider = NSSlider(
             value: savedOpacity, minValue: 0.1, maxValue: 1.0, target: self,
             action: #selector(opacityChanged(_:)))
@@ -89,9 +86,7 @@ class SettingsViewController: NSViewController {
         stack.addArrangedSubview(opacityRow)
 
         // ── Auto-type ──
-        let savedAutoType =
-            defaults.object(forKey: AppDelegate.autoTypeDefaultsKey) != nil
-            ? defaults.bool(forKey: AppDelegate.autoTypeDefaultsKey) : true
+        let savedAutoType = AppDelegate.savedAutoType()
         autoTypeCheckbox = NSButton(
             checkboxWithTitle: "Auto-type into focused app after transcription", target: self,
             action: #selector(autoTypeChanged(_:)))
@@ -370,9 +365,4 @@ struct ModelChoice {
     let title: String
     let path: String?
     let manifest: BooModelInfo?
-}
-
-extension Notification.Name {
-    static let opacityChanged = Notification.Name("BooOpacityChanged")
-    static let autoTypeChanged = Notification.Name("BooAutoTypeChanged")
 }

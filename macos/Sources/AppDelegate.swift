@@ -276,6 +276,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let autoTypeDefaultsKey = "autoType"
     static let themeDefaultsKey = "theme"
 
+    /// The persisted preferences with their defaults and bounds, the one
+    /// source for the Settings controls and the startup restore.
+    static func savedOpacity() -> Double {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: opacityDefaultsKey) != nil else { return 1.0 }
+        let value = defaults.double(forKey: opacityDefaultsKey)
+        return (0.1...1.0).contains(value) ? value : 1.0
+    }
+
+    static func savedAutoType() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: autoTypeDefaultsKey) != nil else { return true }
+        return defaults.bool(forKey: autoTypeDefaultsKey)
+    }
+
     @objc func themeDidChange() {
         overlayWindow?.applyTheme(ThemeManager.shared.current)
         UserDefaults.standard.set(
@@ -306,17 +321,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         {
             ThemeManager.shared.selectTheme(at: idx)
         }
-        if defaults.object(forKey: AppDelegate.opacityDefaultsKey) != nil {
-            let value = defaults.double(forKey: AppDelegate.opacityDefaultsKey)
-            if value >= 0.1 && value <= 1.0 {
-                overlayWindow?.opacity = CGFloat(value)
-                overlayWindow?.backgroundColor =
-                    ThemeManager.shared.current.bgWithAlpha(CGFloat(value))
-            }
-        }
-        if defaults.object(forKey: AppDelegate.autoTypeDefaultsKey) != nil {
-            overlayWindow?.autoType = defaults.bool(forKey: AppDelegate.autoTypeDefaultsKey)
-        }
+        let opacity = AppDelegate.savedOpacity()
+        overlayWindow?.opacity = CGFloat(opacity)
+        overlayWindow?.backgroundColor =
+            ThemeManager.shared.current.bgWithAlpha(CGFloat(opacity))
+        overlayWindow?.autoType = AppDelegate.savedAutoType()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -384,18 +393,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for dir in modelSearchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
 
-            let models =
-                entries
-                // ggml-silero-* is the VAD model, not a speech model; without
-                // this exclusion it could win the alphabetical tiebreak.
-                .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") && !$0.hasPrefix("ggml-silero") }
-                // A truncated file (interrupted manual download) must not be
-                // auto-picked; it would fail seconds into launch.
-                .filter {
-                    boo_model_verify((dir as NSString).appendingPathComponent($0))
-                        != Int32(BOO_MODEL_FILE_TRUNCATED)
-                }
-                .sorted()
+            let models = entries.filter { isUsableSpeechModel($0, in: dir) }.sorted()
             guard !models.isEmpty else { continue }
 
             // Take the most capable model the user has bothered to download,
@@ -412,6 +410,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// capable model still wins auto-discovery by default.
     static let modelDefaultsKey = "modelPath"
 
+    /// Whether `name` inside `dir` is a usable speech model: any ggml-*.bin
+    /// except the silero VAD models (which would otherwise win alphabetical
+    /// tiebreaks), and not a truncated partial download (boo_model_verify).
+    private func isUsableSpeechModel(_ name: String, in dir: String) -> Bool {
+        guard name.hasPrefix("ggml-"), name.hasSuffix(".bin"),
+            !name.hasPrefix("ggml-silero")
+        else { return false }
+        let path = (dir as NSString).appendingPathComponent(name)
+        return boo_model_verify(path) != Int32(BOO_MODEL_FILE_TRUNCATED)
+    }
+
     /// Speech models on disk for the Settings popup: every ggml-*.bin in the
     /// search directories (minus the silero VAD models), deduplicated by
     /// filename so ~/.boo/models shadows a bundled copy, ranked most capable
@@ -425,12 +434,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for dir in modelSearchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
             for name in entries.sorted()
-            where name.hasPrefix("ggml-") && name.hasSuffix(".bin")
-                && !name.hasPrefix("ggml-silero") && seen.insert(name).inserted
-            {
-                let path = (dir as NSString).appendingPathComponent(name)
-                if boo_model_verify(path) == Int32(BOO_MODEL_FILE_TRUNCATED) { continue }
-                out.append((name, path))
+            where isUsableSpeechModel(name, in: dir) && seen.insert(name).inserted {
+                out.append((name, (dir as NSString).appendingPathComponent(name)))
             }
         }
         return out.sorted { (boo_model_rank($0.name), $0.name) < (boo_model_rank($1.name), $1.name) }

@@ -73,4 +73,17 @@ if themes.themes.count > 1 {
     check(themes.current.name == themes.themes[target].name, "current follows the index")
 }
 
+// ModelDownloader's error path: a bad manifest URL must surface through
+// onFail (callers freeze their UI before calling start), never return
+// silently and leave a dead dialog.
+var urlFails = 0
+let badModel = BooModelInfo(
+    filename: strdup("x.bin"), url: strdup(""), sha256: strdup("00"),
+    label: strdup("x"), note: strdup("x"), size: 1)
+ModelDownloader(
+    onProgress: { _ in }, onDone: { _ in },
+    onFail: { _ in urlFails += 1 }
+).start(model: badModel)
+check(urlFails == 1, "a bad download URL reports through onFail")
+
 exit(failures == 0 ? 0 : 1)

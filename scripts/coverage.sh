@@ -170,6 +170,8 @@ gen_swift() {
         -import-objc-header "$root/include/boo.h" \
         "$root/macos/Sources/GhosttyInjector.swift" \
         "$root/macos/Sources/Theme.swift" \
+        "$root/macos/Sources/ModelDownloader.swift" \
+        "$root/macos/Sources/Notifications.swift" \
         "$root/macos/Tests/main.swift" \
         "$root/zig-out/lib/libboo-core.a" "$root/zig-out/lib/libwhisper.a" \
         -lc++ -framework Cocoa -framework Accelerate -framework CoreAudio \

@@ -6,6 +6,10 @@ class FlippedView: NSView {
 }
 
 class OverlayWindow: NSWindow {
+    /// The one idle hint; flashStatus reverts by comparing against it, so a
+    /// hotkey change must not leave stale copies behind.
+    static let idleHint = "ctrl+shift+space"
+
     let booCtx: OpaquePointer
     let waveformView: WaveformView
     var isRecording = false
@@ -131,7 +135,7 @@ class OverlayWindow: NSWindow {
         contentView.addSubview(bottomBar)
 
         // Status text
-        statusLabel = NSTextField(labelWithString: "ctrl+shift+space")
+        statusLabel = NSTextField(labelWithString: OverlayWindow.idleHint)
         statusLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         statusLabel.textColor = ThemeManager.shared.current.dim
         statusLabel.alignment = .center
@@ -418,7 +422,7 @@ class OverlayWindow: NSWindow {
         statusLabel.stringValue = text
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             if self.statusLabel.stringValue == text && !self.isRecording {
-                self.statusLabel.stringValue = "ctrl+shift+space"
+                self.statusLabel.stringValue = OverlayWindow.idleHint
             }
         }
     }
@@ -427,7 +431,7 @@ class OverlayWindow: NSWindow {
 
     func addTranscript(_ text: String) {
         transcripts.append(text)
-        statusLabel.stringValue = "ctrl+shift+space"
+        statusLabel.stringValue = OverlayWindow.idleHint
 
         let bubble = createTranscriptBubble(text, index: transcripts.count - 1)
         bubble.translatesAutoresizingMaskIntoConstraints = false

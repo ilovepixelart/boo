@@ -33,8 +33,8 @@ struct BooTheme {
 class ThemeManager {
     static let shared = ThemeManager()
 
-    var themes: [BooTheme] = []
-    var currentIndex: Int = 0
+    private(set) var themes: [BooTheme] = []
+    private(set) var currentIndex: Int = 0
 
     var current: BooTheme {
         guard currentIndex < themes.count else { return defaultTheme }
@@ -143,10 +143,4 @@ class ThemeManager {
         currentIndex = index
         NotificationCenter.default.post(name: .themeChanged, object: nil)
     }
-}
-
-extension Notification.Name {
-    static let themeChanged = Notification.Name("BooThemeChanged")
-    static let booRecordingStarted = Notification.Name("BooRecordingStarted")
-    static let booRecordingStopped = Notification.Name("BooRecordingStopped")
 }
