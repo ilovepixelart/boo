@@ -146,9 +146,7 @@ int main(void) {
     check(cf != NULL, "chunk-test temp file opens");
     if (cf) {
         BCRYPT_ALG_HANDLE calg = NULL;
-        BCRYPT_HASH_HANDLE chash = NULL;
         BCryptOpenAlgorithmProvider(&calg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
-        BCryptCreateHash(calg, &chash, NULL, 0, NULL, 0, 0);
         const BooModelInfo chunk_model = {.filename = "c.bin",
                                           .url = "https://x.invalid/c",
                                           .sha256 = abc_sha,
@@ -156,6 +154,13 @@ int main(void) {
                                           .note = "c",
                                           .size = 3};
         const DownloadJob chunk_job = {.notify = sink, .model = &chunk_model};
+
+        // The two good chunks fill exactly the manifest size: each is written
+        // and counted, progress posts, and what was written hashes to the FIPS
+        // "abc" vector. digest_matches finalizes this hash, so the size-bound
+        // case below uses a fresh one.
+        BCRYPT_HASH_HANDLE chash = NULL;
+        BCryptCreateHash(calg, &chash, NULL, 0, NULL, 0, 0);
         unsigned long long received = 0;
         int last_pct = -1;
         dl_progress_count = 0;
@@ -164,17 +169,25 @@ int main(void) {
         const bool c2 = consume_chunk(&chunk_job, (const BYTE *)"c", 1, cf, chash,
                                       &received, &last_pct);
         check(c1 && c2 && received == 3, "consume_chunk writes and counts the bytes");
-        // A fourth byte pushes the total past the manifest size of 3.
-        const bool over = consume_chunk(&chunk_job, (const BYTE *)"d", 1, cf, chash,
-                                        &received, &last_pct);
-        check(!over, "consume_chunk trips the size bound past the manifest size");
-        fclose(cf);
-        // Pump the progress posts the chunks queued, then confirm at least one.
         MSG m;
         while (PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
         check(dl_progress_count > 0, "consume_chunk posts progress");
-        // The hash of "abc" (the two good chunks) is the FIPS vector.
         check(digest_matches(chash, abc_sha), "the streamed bytes hash to their digest");
+        BCryptDestroyHash(chash);
+
+        // A chunk that overruns the manifest size of 3 is rejected (the guard
+        // that stops a misbehaving server filling the disk). A fresh hash: the
+        // rejected bytes never reach the digest check in a real download.
+        BCRYPT_HASH_HANDLE chash2 = NULL;
+        BCryptCreateHash(calg, &chash2, NULL, 0, NULL, 0, 0);
+        unsigned long long over_received = 0;
+        int over_pct = -1;
+        const bool over = consume_chunk(&chunk_job, (const BYTE *)"abcd", 4, cf, chash2,
+                                        &over_received, &over_pct);
+        check(!over, "consume_chunk trips the size bound past the manifest size");
+        BCryptDestroyHash(chash2);
+
+        fclose(cf);
         BCryptCloseAlgorithmProvider(calg, 0);
         _wremove(chunk_tmp);
     }
