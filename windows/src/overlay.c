@@ -125,8 +125,9 @@ static Palette palette(const BooApp *app) {
     const COLORREF record = RGB(0xFF, 0x3B, 0x30);
     // A picked theme wins over the system light/dark follow, matching macOS and
     // Linux. Its tokens map to the same slots the hardcoded default uses.
-    if (app->current_theme >= 0) {
-        const BooThemeColors *c = &app->themes[app->current_theme].colors;
+    if (app->settings.current_theme >= 0) {
+        const BooThemeColors *c =
+            &app->settings.themes[app->settings.current_theme].colors;
         const COLORREF bg = pcolor(c->bg);
         // Card fills are white@6%/3% over a dark surface, black over a light one.
         const int lum = ((c->bg >> 16) & 0xFF) + ((c->bg >> 8) & 0xFF) + (c->bg & 0xFF);
@@ -270,18 +271,20 @@ static DWORD WINAPI transcribe_worker(LPVOID param) {
     return 0;
 }
 
+// Post the committed-so-far transcript to the UI thread, if there is any.
+static void post_live_transcript(BooApp *app) {
+    const char *live = boo_get_live_transcript(app->ctx);
+    if (!live) return;
+    WCHAR *w = card_dup(live);
+    if (w && !PostMessageW(app->overlay, BOO_MSG_LIVE, 0, (LPARAM)w)) free(w);
+}
+
 // 250ms cadence, one background thread per take (the C API contract): a tick
 // is a cheap VAD scan until an utterance ends, then blocks for its inference.
 static DWORD WINAPI stream_tick_worker(LPVOID param) {
     BooApp *app = param;
     while (InterlockedCompareExchange(&app->stream_running, 0, 0)) {
-        if (boo_stream_tick(app->ctx)) {
-            const char *live = boo_get_live_transcript(app->ctx);
-            if (live) {
-                WCHAR *w = card_dup(live);
-                if (w && !PostMessageW(app->overlay, BOO_MSG_LIVE, 0, (LPARAM)w)) free(w);
-            }
-        }
+        if (boo_stream_tick(app->ctx)) post_live_transcript(app);
         Sleep(250);
     }
     return 0;
@@ -375,7 +378,7 @@ static void on_transcribed(BooApp *app, char *text) {
         // foreground window, so the worst case is Ctrl+V landing in the
         // window the user is actually looking at.
         // Auto-type off makes Boo clipboard-only: pass no paste target.
-        HWND target = app->auto_type ? app->paste_target : NULL;
+        HWND target = app->settings.auto_type ? app->paste_target : NULL;
         switch (boo_inject_deliver(app->overlay, target, text)) {
         case BOO_DELIVER_PASTED:
             set_status(app, L"copied to clipboard and pasted");
@@ -474,10 +477,24 @@ static void fill_round(HDC dc, RECT rc, int radius, COLORREF color) {
     DeleteObject(pen);
 }
 
+// The GDI context and geometry shared by every card in one painted stack.
+typedef struct {
+    HDC dc;
+    const Palette *pal;
+    UINT dpi;
+    int left;
+    int right;
+} CardCtx;
+
 // One transcript card; returns its height. When `measure_only`, nothing is
 // drawn (used to stack cards bottom-up). `hit` may be -1 for the live card.
-static int paint_card(HDC dc, const Palette *pal, UINT dpi, int top, int left, int right,
-                      const WCHAR *text, bool live, int hit, bool measure_only) {
+static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, int hit,
+                      bool measure_only) {
+    HDC dc = cc->dc;
+    const Palette *pal = cc->pal;
+    const UINT dpi = cc->dpi;
+    const int left = cc->left;
+    const int right = cc->right;
     const int pad_x = px(CARD_PAD_X, dpi);
     const int header_h = live ? 0 : px(HEADER_H, dpi);
     RECT text_rc = {left + pad_x, 0, right - pad_x, 0};
@@ -536,6 +553,7 @@ static int paint_card(HDC dc, const Palette *pal, UINT dpi, int top, int left, i
 static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT area) {
     drawn_count = 0;
     const int gap = px(CARD_GAP, dpi);
+    const CardCtx cc = {dc, pal, dpi, area.left, area.right};
 
     int heights[BOO_HISTORY_MAX + 1];
     const int cap = (int)(sizeof(heights) / sizeof(heights[0]));
@@ -543,11 +561,9 @@ static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT 
     // Bound by the array size as well as card_count: the write index is then
     // provably in range even if card_count were ever off (history_push caps it).
     for (int i = 0; i < app->card_count && idx < cap; i++)
-        heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right, app->cards[i],
-                                    false, i, true);
+        heights[idx++] = paint_card(&cc, 0, app->cards[i], false, i, true);
     if (app->live_text && idx < cap)
-        heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right,
-                                    app->live_text, true, -1, true);
+        heights[idx++] = paint_card(&cc, 0, app->live_text, true, -1, true);
     const int total = idx;
 
     // Find the first card that still fits when stacking up from the bottom.
@@ -564,9 +580,7 @@ static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT 
     for (int i = first; i < total; i++) {
         const bool live = app->live_text && i == total - 1;
         const WCHAR *text = live ? app->live_text : app->cards[i];
-        y += paint_card(dc, pal, dpi, y, area.left, area.right, text, live, live ? -1 : i,
-                        false) +
-             gap;
+        y += paint_card(&cc, y, text, live, live ? -1 : i, false) + gap;
     }
 }
 
@@ -604,8 +618,14 @@ static void paint(BooApp *app, HWND hwnd) {
         wstate = BOO_WAVE_TRANSCRIBING;
         wcolor = pal.wave_think;
     }
-    boo_waveform_paint(dc, wave, waveform, bars, boo_get_peak_rms(app->ctx), wstate,
-                       wcolor, pal.bg, (float)(GetTickCount64() % 100000) / 1000.0f);
+    const BooWavePaint wp = {waveform,
+                             bars,
+                             boo_get_peak_rms(app->ctx),
+                             wstate,
+                             wcolor,
+                             pal.bg,
+                             (float)(GetTickCount64() % 100000) / 1000.0f};
+    boo_waveform_paint(dc, wave, &wp);
 
     // Record disc: ease the corner radius toward its state target; ~0.4/tick
     // at 33ms settles in about 150ms, the reference's animation length.
@@ -743,6 +763,16 @@ static void on_tray_event(BooApp *app, HWND hwnd, WPARAM wparam, LPARAM lparam) 
 
 // ── window proc ──
 
+static void on_timer(BooApp *app, HWND hwnd, WPARAM id) {
+    if (id == BOO_TIMER_WAVEFORM) on_waveform_tick(app);
+    if (id == BOO_TIMER_AUTO_STOP) on_auto_stop_poll(app);
+    if (id == BOO_TIMER_STATUS) {
+        KillTimer(hwnd, BOO_TIMER_STATUS);
+        if (!app->ui_recording && !app->transcribing) set_status_idle(app);
+        InvalidateRect(hwnd, NULL, FALSE);
+    }
+}
+
 static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     if (msg == WM_NCCREATE) {
         const CREATESTRUCTW *cs = (const CREATESTRUCTW *)lparam;
@@ -792,13 +822,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         }
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_TIMER:
-        if (wparam == BOO_TIMER_WAVEFORM) on_waveform_tick(app);
-        if (wparam == BOO_TIMER_AUTO_STOP) on_auto_stop_poll(app);
-        if (wparam == BOO_TIMER_STATUS) {
-            KillTimer(hwnd, BOO_TIMER_STATUS);
-            if (!app->ui_recording && !app->transcribing) set_status_idle(app);
-            InvalidateRect(hwnd, NULL, FALSE);
-        }
+        on_timer(app, hwnd, wparam);
         return 0;
     case WM_PAINT:
         paint(app, hwnd);

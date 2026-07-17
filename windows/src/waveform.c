@@ -35,8 +35,14 @@ static void bar(HDC dc, int x, int center_y, int w, int h, COLORREF color) {
     DeleteObject(pen);
 }
 
-void boo_waveform_paint(HDC dc, RECT rc, const float *bars, int n, float peak,
-                        BooWaveState state, COLORREF color, COLORREF bg, float phase) {
+void boo_waveform_paint(HDC dc, RECT rc, const BooWavePaint *wp) {
+    const float *bars = wp->bars;
+    const float peak = wp->peak;
+    const BooWaveState state = wp->state;
+    const COLORREF color = wp->color;
+    const COLORREF bg = wp->bg;
+    const float phase = wp->phase;
+    int n = wp->n;
     if (n <= 0) return;
     if (n > (int)(sizeof(smoothed) / sizeof(smoothed[0])))
         n = (int)(sizeof(smoothed) / sizeof(smoothed[0]));

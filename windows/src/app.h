@@ -66,14 +66,16 @@ typedef struct BooApp {
     bool dark;         // follow the system Apps theme (default, no theme picked)
     WCHAR status[160]; // one-line status under the record button
 
-    // Theme selection + settings (settings.c). current_theme indexes themes,
-    // or -1 for the built-in default. opacity_pct is 10..100.
-    BooThemeEntry *themes;
-    int theme_count;
-    int current_theme;
-    int opacity_pct;
-    bool auto_type;    // paste into the focused app vs clipboard-only
-    HWND settings_win; // modeless Settings dialog, NULL when closed
+    // Theme selection + prefs (settings.c). current_theme indexes themes, or
+    // -1 for the built-in default. opacity_pct is 10..100.
+    struct {
+        BooThemeEntry *themes;
+        int theme_count;
+        int current_theme;
+        int opacity_pct;
+        bool auto_type; // paste into the focused app vs clipboard-only
+        HWND win;       // modeless Settings dialog, NULL when closed
+    } settings;
 
     // Transcript history, chronological; cards[0] is the oldest. Each entry is
     // malloc'd. live_text is the provisional streaming card, dimmer than the
