@@ -320,6 +320,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_: Notification) {
+        // A quit mid-swap must wait for boo_reload_model before the context
+        // is torn down; the load is seconds at worst.
+        modelSwapGroup.wait()
         if let ctx = booCtx {
             boo_deinit(ctx)
         }
@@ -433,6 +436,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return out.sorted { (boo_model_rank($0.name), $0.name) < (boo_model_rank($1.name), $1.name) }
     }
 
+    /// Tracks an in-flight model swap so quitting can wait for it: tearing
+    /// the context down under a live boo_reload_model is a use-after-free.
+    private let modelSwapGroup = DispatchGroup()
+
     /// Swap the loaded model in place (core boo_reload_model) off the main
     /// thread; loading takes seconds. On failure the core keeps serving with
     /// the old model. On success the choice persists and wins future launches.
@@ -441,8 +448,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             completion(false)
             return
         }
+        modelSwapGroup.enter()
         DispatchQueue.global(qos: .userInitiated).async {
             let ok = boo_reload_model(ctx, path)
+            self.modelSwapGroup.leave()
             DispatchQueue.main.async {
                 if ok {
                     self.currentModelPath = path

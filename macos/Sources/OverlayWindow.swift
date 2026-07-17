@@ -22,6 +22,9 @@ class OverlayWindow: NSWindow {
     var statusLabel: NSTextField!
     var recordButton: NSButton!
     var waveformLink: CADisplayLink?
+    // Stored so closing can stop it; an anonymous repeating timer would wake
+    // the process at 3.3 Hz forever with no way to cancel it.
+    var trafficLightTimer: Timer?
 
     // Transcript history
     var transcripts: [String] = []
@@ -176,7 +179,8 @@ class OverlayWindow: NSWindow {
     override var canBecomeMain: Bool { canBecomeKey }
 
     private func startTrafficLightTimer() {
-        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+        trafficLightTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) {
+            [weak self] _ in
             guard let self = self else { return }
             for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
                 if let button = self.standardWindowButton(buttonType),
@@ -753,9 +757,19 @@ class OverlayWindow: NSWindow {
         }
     }
 
+    override func close() {
+        // The display link retains its target (this window) and the run loop
+        // retains the link, so deinit alone can never run; break the cycle
+        // here, where closing actually happens.
+        waveformLink?.invalidate()
+        waveformLink = nil
+        trafficLightTimer?.invalidate()
+        trafficLightTimer = nil
+        super.close()
+    }
+
     deinit {
-        // The run loop retains the display link, so leaving it attached would
-        // keep firing at a deallocated target.
+        // Belt and suspenders for a teardown path that skips close().
         waveformLink?.invalidate()
     }
 }

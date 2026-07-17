@@ -78,7 +78,7 @@ class ThemeManager {
         guard let dir = findThemesDir(),
             let files = try? FileManager.default.contentsOfDirectory(atPath: dir)
         else {
-            print("No themes directory found, using default only")
+            NSLog("Boo: no themes directory found, using the default only")
             return
         }
 
@@ -93,7 +93,7 @@ class ThemeManager {
         if let idx = themes.firstIndex(where: { $0.name == "Ghostty Default Style Dark" }) {
             currentIndex = idx
         }
-        print("Loaded \(themes.count) themes")
+        NSLog("Boo: loaded %d themes", themes.count)
     }
 
     private func color(_ rgb: UInt32) -> NSColor {
@@ -132,13 +132,8 @@ class ThemeManager {
                 .appendingPathComponent("themes"),
         ]
 
-        print("Searching for themes directory:")
-        for path in candidates {
-            let exists = FileManager.default.fileExists(atPath: path)
-            print("  \(exists ? "✓" : "✗") \(path)")
-            if exists {
-                return path
-            }
+        for path in candidates where FileManager.default.fileExists(atPath: path) {
+            return path
         }
         return nil
     }
