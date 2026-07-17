@@ -67,6 +67,29 @@ check(
     !FileManager.default.fileExists(atPath: "/tmp/boo-test-canary"),
     "no payload executed (no canary file)")
 
+// inputText's fallback: with Ghostty absent the AppleScript engine cannot
+// resolve its bundle id, so injection fails cleanly and the caller pastes
+// instead. Guarded on Ghostty's absence so a machine that has it installed
+// never launches it or trips the Automation prompt here.
+if NSWorkspace.shared.urlForApplication(withBundleIdentifier: GhosttyInjector.ghosttyBundleID) == nil {
+    check(
+        !GhosttyInjector.inputText("harness fallback"),
+        "inputText reports failure when Ghostty is unavailable")
+}
+
+// ── PermissionsManager (non-prompting Accessibility check) ──
+// hasAccessibility forwards AXIsProcessTrusted; requestAccessibilityIfNeeded
+// returns that same trust and, once run, stays stable so a granted paste never
+// re-prompts. The mic TCC prompt and the denied-mic modal need a user at the
+// machine, so they stay uncovered.
+let axTrusted = PermissionsManager.hasAccessibility
+check(
+    PermissionsManager.requestAccessibilityIfNeeded() == axTrusted,
+    "requestAccessibilityIfNeeded reports the current Accessibility trust")
+check(
+    PermissionsManager.requestAccessibilityIfNeeded() == axTrusted,
+    "a repeat Accessibility check stays stable and never re-prompts")
+
 // Theme handling through the REAL core parser (boo_theme_parse_file): the
 // harness runs from the repo root, so ThemeManager finds ./themes and parses
 // the full Ghostty set. Pins the load, the default, and selection bounds.
@@ -348,6 +371,7 @@ settings.window?.close()
 // into the core, so the pointer is never dereferenced. Recording and waveform
 // polling touch the core and stay behind BOO_HARNESS_BOOT below.
 let overlay = OverlayWindow(booCtx: OpaquePointer(bitPattern: 0xB00)!)
+check(overlay.canBecomeKey && overlay.canBecomeMain, "the overlay can become the key and main window")
 
 overlay.appDidActivate(Notification(name: NSWorkspace.didActivateApplicationNotification))  // no app: ignored
 if let other = NSWorkspace.shared.runningApplications.first(where: {
@@ -399,6 +423,15 @@ check(
     pump(seconds: 3, until: { overlay.statusLabel.stringValue == OverlayWindow.idleHint }),
     "flashStatus settles back on the idle hint")
 
+// A flash that a newer status supersedes must be left alone: the delayed revert
+// only fires while the label still reads the flashed text.
+overlay.flashStatus("copied")
+overlay.statusLabel.stringValue = "recording..."
+_ = pump(seconds: 3, until: { false })  // let the flash's revert deadline pass
+check(
+    overlay.statusLabel.stringValue == "recording...",
+    "flashStatus leaves a superseded status untouched")
+
 overlay.startDisplayLink()
 overlay.stopDisplayLink()
 check(overlay.waveformLink?.isPaused == true, "the waveform display link pauses on stop")
@@ -410,6 +443,18 @@ check(overlay.waveformLink == nil, "closing the overlay tears down the display l
 appDelegate.showDownloadWindow()
 check(appDelegate.downloadWindow != nil, "the onboarding download window opens")
 check(appDelegate.onboardingStart != nil, "its Download action is wired")
+
+// Drive the wired downloader to fail with no network (empty URL): the window's
+// onFail closure must surface the reason in the status line and leave the
+// dialog usable, never freeze it. The onDone/onProgress closures need a real
+// fetch plus a loadable model (boo_init), so they stay for the booted CI job.
+let onboardingStatus = appDelegate.downloadWindow?.contentView?.subviews
+    .compactMap { $0 as? NSTextField }.first
+appDelegate.modelDownloader?.start(model: badModel)
+check(
+    onboardingStatus?.stringValue == "The model's download URL is invalid.",
+    "a failed onboarding download surfaces the reason in the window")
+
 appDelegate.downloadWindow?.close()
 appDelegate.downloadWindow = nil
 appDelegate.modelDownloader = nil
@@ -439,9 +484,41 @@ if ProcessInfo.processInfo.environment["BOO_HARNESS_BOOT"] == "1" {
         appDelegate.themeDidChange()
         _ = pump(seconds: 1, until: { false })  // let timers and the link tick
 
+        appDelegate.showMainWindow()
+        check(appDelegate.overlayWindow?.isVisible == true, "Show Window brings the overlay up")
+
+        // The record entry points with no microphone (CI runners have none):
+        // each must say so and refuse a phantom recording. Guarded on the mic so
+        // a machine with a real input device never actually records here.
+        if let ctx = appDelegate.booCtx, !boo_has_microphone(ctx), let ov = appDelegate.overlayWindow {
+            appDelegate.statusBarToggleRecord()
+            check(
+                ov.statusLabel.stringValue == "no microphone" && !ov.isRecording,
+                "the menu-bar Record item no-ops without a microphone")
+            appDelegate.handleHotKey()
+            check(!ov.isRecording, "the global hotkey does not record without a microphone")
+            ov.waveformClicked()
+            check(!ov.isRecording, "clicking the waveform does not record without a microphone")
+        }
+
+        // The status-bar poll wind-down with a live context: a stop schedules a
+        // 5s settle that, finding the core idle, retires the timer and resets the
+        // icon (headless the body early-returns on a nil context).
+        appDelegate.recordingStateChanged(Notification(name: .booRecordingStarted))
+        check(appDelegate.statusBarTimer != nil, "a booted recording-start arms the status-bar poll")
+        appDelegate.recordingStateChanged(Notification(name: .booRecordingStopped))
+        check(
+            pump(seconds: 7, until: { appDelegate.statusBarTimer == nil }),
+            "the poll wind-down retires the timer once the core is idle")
+
         appDelegate.openSettings()
         check(appDelegate.settingsWindowController != nil, "Settings opens from the app")
         _ = appDelegate.settingsWindowController?.window?.contentViewController?.view
+        let firstSettings = appDelegate.settingsWindowController
+        appDelegate.openSettings()  // a second open reuses the controller, never rebuilds it
+        check(
+            appDelegate.settingsWindowController === firstSettings,
+            "reopening Settings reuses the existing controller")
         appDelegate.settingsWindowController?.window?.close()
 
         var swapOK: Bool?
