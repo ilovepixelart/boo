@@ -207,7 +207,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
-            pkg-config pipewire wireplumber xvfb dbus-x11 imagemagick xdotool
+            pkg-config xvfb dbus-x11 imagemagick xdotool
 
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
@@ -223,11 +223,12 @@ jobs:
           curl -fSL --retry 3 -o models/ggml-tiny.en-q5_1.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin
 
-      - name: UI smoke under Xvfb + PipeWire
-        # boo_init needs the audio stack up (with PipeWire killed the window
-        # renders black), but the render + record-morph checks need no mic.
-        # ui-smoke.sh asserts the ACTUAL rendered colours (bg #282C34, disc
-        # #FF3B30) so a theme or layout regression fails here, not on a desktop.
+      - name: UI smoke under Xvfb
+        # No audio server: graceful audio degradation lets the window render
+        # without one, and the render + record-morph + theme-switch checks need
+        # no mic. ui-smoke.sh asserts the ACTUAL rendered colours (bg #282C34,
+        # disc #FF3B30, and a persisted theme's #F7F7F7) so a theme or layout
+        # regression fails here, not on a desktop.
         run: |
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
           mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
@@ -235,9 +236,6 @@ jobs:
           sleep 2
           export DISPLAY=:99
           eval "$(dbus-launch --sh-syntax)"
-          pipewire >/dev/null 2>&1 &
-          wireplumber >/dev/null 2>&1 &
-          sleep 3
           BOO_SMOKE_OUT="$RUNNER_TEMP/smoke" bash linux/tests/ui-smoke.sh zig-out/bin/boo-app
 
       - name: Upload screenshots
