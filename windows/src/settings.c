@@ -327,6 +327,71 @@ static void select_theme(BooApp *app, int index) {
     InvalidateRect(app->overlay, NULL, FALSE);
 }
 
+// Build the dialog's controls (WM_CREATE body, split out of settings_proc to
+// keep the window proc's complexity within bounds).
+static void settings_on_create(BooApp *app, HWND hwnd, const CREATESTRUCTW *cs) {
+    const UINT dpi = GetDpiForWindow(hwnd);
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    const int m = scale(16, dpi);
+    const int w = scale(288, dpi);
+
+    const int vw = scale(44, dpi);
+    HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m, w - vw,
+                            scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+    HWND val = CreateWindowW(L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                             m + w - vw, m, vw, scale(18, dpi), hwnd,
+                             (HMENU)IDC_OPACITY_VAL, cs->hInstance, NULL);
+    HWND bar = CreateWindowW(
+        TRACKBAR_CLASSW, NULL, WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m,
+        scale(38, dpi), w, scale(30, dpi), hwnd, (HMENU)IDC_OPACITY, cs->hInstance, NULL);
+    SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
+    SendMessageW(bar, TBM_SETPOS, TRUE, app->settings.opacity_pct);
+    set_opacity_label(hwnd, app->settings.opacity_pct);
+
+    HWND chk =
+        CreateWindowW(L"BUTTON", L"Auto-type into focused app",
+                      WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, m, scale(78, dpi), w,
+                      scale(24, dpi), hwnd, (HMENU)IDC_AUTOTYPE, cs->hInstance, NULL);
+    SendMessageW(chk, BM_SETCHECK, app->settings.auto_type ? BST_CHECKED : BST_UNCHECKED,
+                 0);
+
+    HWND lm =
+        CreateWindowW(L"STATIC", L"Model", WS_CHILD | WS_VISIBLE, m, scale(112, dpi), w,
+                      scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+    // Dropdown of the usable models on disk; the loaded one is selected.
+    // The height covers the open list, per the combo box contract.
+    HWND combo = CreateWindowW(
+        L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_HASSTRINGS, m,
+        scale(134, dpi), w, scale(160, dpi), hwnd, (HMENU)IDC_MODEL, cs->hInstance, NULL);
+    model_paths_free(app); // a reopened dialog re-enumerates
+    app->settings.model_count = boo_model_installed(&app->settings.model_paths);
+    for (int i = 0; i < app->settings.model_count; i++) {
+        WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
+        if (!base) continue;
+        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
+        free(base);
+    }
+    model_combo_select_current(app, combo);
+
+    HWND l2 =
+        CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(176, dpi), w,
+                      scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+    HWND list = CreateWindowW(L"LISTBOX", NULL,
+                              WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER |
+                                  LBS_NOTIFY | LBS_HASSTRINGS,
+                              m, scale(200, dpi), w, scale(280, dpi), hwnd,
+                              (HMENU)IDC_THEMES, cs->hInstance, NULL);
+    for (int i = 0; i < app->settings.theme_count; i++)
+        SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)app->settings.themes[i].name);
+    if (app->settings.current_theme >= 0)
+        SendMessageW(list, LB_SETCURSEL, app->settings.current_theme, 0);
+
+    HWND kids[] = {l1, val, bar, chk, lm, combo, l2, list};
+    for (size_t i = 0; i < ARRAYSIZE(kids); i++)
+        SendMessageW(kids[i], WM_SETFONT, (WPARAM)font, TRUE);
+}
+
 static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     BooApp *app = (BooApp *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 
@@ -335,68 +400,7 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         const CREATESTRUCTW *cs = (const CREATESTRUCTW *)lparam;
         app = (BooApp *)cs->lpCreateParams;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)app);
-        const UINT dpi = GetDpiForWindow(hwnd);
-        HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-        const int m = scale(16, dpi);
-        const int w = scale(288, dpi);
-
-        const int vw = scale(44, dpi);
-        HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m,
-                                w - vw, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
-        HWND val = CreateWindowW(L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_RIGHT,
-                                 m + w - vw, m, vw, scale(18, dpi), hwnd,
-                                 (HMENU)IDC_OPACITY_VAL, cs->hInstance, NULL);
-        HWND bar = CreateWindowW(TRACKBAR_CLASSW, NULL,
-                                 WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m,
-                                 scale(38, dpi), w, scale(30, dpi), hwnd,
-                                 (HMENU)IDC_OPACITY, cs->hInstance, NULL);
-        SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
-        SendMessageW(bar, TBM_SETPOS, TRUE, app->settings.opacity_pct);
-        set_opacity_label(hwnd, app->settings.opacity_pct);
-
-        HWND chk =
-            CreateWindowW(L"BUTTON", L"Auto-type into focused app",
-                          WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, m, scale(78, dpi), w,
-                          scale(24, dpi), hwnd, (HMENU)IDC_AUTOTYPE, cs->hInstance, NULL);
-        SendMessageW(chk, BM_SETCHECK,
-                     app->settings.auto_type ? BST_CHECKED : BST_UNCHECKED, 0);
-
-        HWND lm =
-            CreateWindowW(L"STATIC", L"Model", WS_CHILD | WS_VISIBLE, m, scale(112, dpi),
-                          w, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
-        // Dropdown of the usable models on disk; the loaded one is selected.
-        // The height covers the open list, per the combo box contract.
-        HWND combo = CreateWindowW(L"COMBOBOX", NULL,
-                                   WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST |
-                                       CBS_HASSTRINGS,
-                                   m, scale(134, dpi), w, scale(160, dpi), hwnd,
-                                   (HMENU)IDC_MODEL, cs->hInstance, NULL);
-        model_paths_free(app); // a reopened dialog re-enumerates
-        app->settings.model_count = boo_model_installed(&app->settings.model_paths);
-        for (int i = 0; i < app->settings.model_count; i++) {
-            WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
-            if (!base) continue;
-            SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
-            free(base);
-        }
-        model_combo_select_current(app, combo);
-
-        HWND l2 =
-            CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(176, dpi),
-                          w, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
-        HWND list = CreateWindowW(L"LISTBOX", NULL,
-                                  WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER |
-                                      LBS_NOTIFY | LBS_HASSTRINGS,
-                                  m, scale(200, dpi), w, scale(280, dpi), hwnd,
-                                  (HMENU)IDC_THEMES, cs->hInstance, NULL);
-        for (int i = 0; i < app->settings.theme_count; i++)
-            SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)app->settings.themes[i].name);
-        if (app->settings.current_theme >= 0)
-            SendMessageW(list, LB_SETCURSEL, app->settings.current_theme, 0);
-
-        HWND kids[] = {l1, val, bar, chk, lm, combo, l2, list};
-        for (size_t i = 0; i < ARRAYSIZE(kids); i++)
-            SendMessageW(kids[i], WM_SETFONT, (WPARAM)font, TRUE);
+        settings_on_create(app, hwnd, cs);
         return 0;
     }
     case WM_HSCROLL:

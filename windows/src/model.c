@@ -173,6 +173,48 @@ static bool already_listed(char **paths, int count, const char *basename) {
     return false;
 }
 
+// Append `ufull` to the grown-on-demand list, taking ownership. Returns false
+// (and frees it) when the list cannot grow.
+static bool push_path(char ***paths, int *count, int *cap, char *ufull) {
+    if (*count == *cap) {
+        const int ncap = *cap ? *cap * 2 : 8;
+        char **grown = realloc(*paths, (size_t)ncap * sizeof(*grown));
+        if (!grown) {
+            free(ufull);
+            return false;
+        }
+        *paths = grown;
+        *cap = ncap;
+    }
+    (*paths)[(*count)++] = ufull;
+    return true;
+}
+
+// Append one directory's usable ggml-*.bin models to the list. A basename seen
+// in an earlier directory wins: ~\.boo\models shadows a bundled copy.
+static void scan_model_dir(const WCHAR *dir, char ***paths, int *count, int *cap) {
+    WCHAR pattern[MAX_PATH];
+    if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dir) < 0) return;
+    WIN32_FIND_DATAW e;
+    HANDLE it = FindFirstFileW(pattern, &e);
+    if (it == INVALID_HANDLE_VALUE) return;
+    do {
+        if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        if (wcsncmp(e.cFileName, L"ggml-silero", 11) == 0) continue;
+        if (!usable_model(dir, e.cFileName)) continue;
+        WCHAR full[MAX_PATH];
+        if (swprintf(full, MAX_PATH, L"%ls\\%ls", dir, e.cFileName) < 0) continue;
+        char *ufull = to_utf8(full);
+        if (!ufull) continue;
+        if (already_listed(*paths, *count, boo_model_basename(ufull))) {
+            free(ufull);
+            continue;
+        }
+        if (!push_path(paths, count, cap, ufull)) break;
+    } while (FindNextFileW(it, &e));
+    FindClose(it);
+}
+
 int boo_model_installed(char ***out) {
     *out = NULL;
     WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
@@ -181,39 +223,7 @@ int boo_model_installed(char ***out) {
     char **paths = NULL;
     int count = 0;
     int cap = 0;
-    for (size_t i = 0; i < ndirs; i++) {
-        WCHAR pattern[MAX_PATH];
-        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dirs[i]) < 0) continue;
-        WIN32_FIND_DATAW e;
-        HANDLE it = FindFirstFileW(pattern, &e);
-        if (it == INVALID_HANDLE_VALUE) continue;
-        do {
-            if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-            if (wcsncmp(e.cFileName, L"ggml-silero", 11) == 0) continue;
-            if (!usable_model(dirs[i], e.cFileName)) continue;
-            WCHAR full[MAX_PATH];
-            if (swprintf(full, MAX_PATH, L"%ls\\%ls", dirs[i], e.cFileName) < 0) continue;
-            char *ufull = to_utf8(full);
-            if (!ufull) continue;
-            // First directory wins: ~\.boo\models shadows a bundled copy.
-            if (already_listed(paths, count, boo_model_basename(ufull))) {
-                free(ufull);
-                continue;
-            }
-            if (count == cap) {
-                const int ncap = cap ? cap * 2 : 8;
-                char **grown = realloc(paths, (size_t)ncap * sizeof(*grown));
-                if (!grown) {
-                    free(ufull);
-                    break;
-                }
-                paths = grown;
-                cap = ncap;
-            }
-            paths[count++] = ufull;
-        } while (FindNextFileW(it, &e));
-        FindClose(it);
-    }
+    for (size_t i = 0; i < ndirs; i++) scan_model_dir(dirs[i], &paths, &count, &cap);
 
     if (paths) qsort(paths, (size_t)count, sizeof(*paths), cmp_installed);
     *out = paths;
