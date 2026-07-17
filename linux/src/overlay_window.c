@@ -416,19 +416,21 @@ static void on_shortcut_unavailable(const char *reason, gpointer user_data) {
 // slots are filled from the theme by apply_theme. #FF3B30 is the one
 // cross-platform hardcode; the record disc's border-radius transition IS the
 // circle -> rounded-square morph (20px idle, 6px recording, 150ms).
-static const char *BOO_CSS_FMT =
-    "window.boo, window.boo headerbar { background: #%06x; color: #%06x; }\n"
-    ".boo-card { background: alpha(#ffffff, 0.06); border-radius: 10px;"
-    "  padding: 8px 12px; color: #%06x; }\n"
-    ".boo-card-live { background: alpha(#ffffff, 0.03); border-radius: 10px;"
-    "  padding: 8px 12px; color: #%06x; }\n"
-    ".boo-card-btn { color: #%06x; min-width: 0; min-height: 0; padding: 2px; }\n"
-    ".boo-card-btn.boo-flash { color: #%06x; }\n"
-    ".boo-hint { color: #%06x; font-family: monospace; font-size: 11pt; }\n"
-    "button.boo-record { background: #ff3b30; min-width: 40px; min-height: 40px;"
-    "  padding: 0; border-radius: 20px; transition: border-radius 150ms ease;"
-    "  background-image: none; border: none; box-shadow: none; }\n"
-    "button.boo-record.boo-recording { border-radius: 6px; }\n";
+// A macro (not a const char *) so g_strdup_printf sees a string literal for its
+// format argument, the trusted CSS template with %06x colour slots.
+#define BOO_CSS_FMT                                                                      \
+    "window.boo, window.boo headerbar { background: #%06x; color: #%06x; }\n"            \
+    ".boo-card { background: alpha(#ffffff, 0.06); border-radius: 10px;"                 \
+    "  padding: 8px 12px; color: #%06x; }\n"                                             \
+    ".boo-card-live { background: alpha(#ffffff, 0.03); border-radius: 10px;"            \
+    "  padding: 8px 12px; color: #%06x; }\n"                                             \
+    ".boo-card-btn { color: #%06x; min-width: 0; min-height: 0; padding: 2px; }\n"       \
+    ".boo-card-btn.boo-flash { color: #%06x; }\n"                                        \
+    ".boo-hint { color: #%06x; font-family: monospace; font-size: 11pt; }\n"             \
+    "button.boo-record { background: #ff3b30; min-width: 40px; min-height: 40px;"        \
+    "  padding: 0; border-radius: 20px; transition: border-radius 150ms ease;"           \
+    "  background-image: none; border: none; box-shadow: none; }\n"                      \
+    "button.boo-record.boo-recording { border-radius: 6px; }\n"
 
 // "Ghostty Default Style Dark" values, the fallback when no themes dir is found.
 static const BooThemeColors DEFAULT_THEME = {
@@ -441,7 +443,7 @@ static const BooThemeColors DEFAULT_THEME = {
 // system share, mirroring the model search.
 static char *find_themes_dir(void) {
     const char *xdg_env = g_getenv("XDG_DATA_HOME");
-    g_autofree char *xdg = (xdg_env && *xdg_env)
+    g_autofree const char *xdg = (xdg_env && *xdg_env)
                                ? g_build_filename(xdg_env, "boo", "themes", NULL)
                                : g_build_filename(g_get_home_dir(), ".local", "share",
                                                   "boo", "themes", NULL);
@@ -453,9 +455,9 @@ static char *find_themes_dir(void) {
 }
 
 static BooThemeColors default_theme_colors(void) {
-    g_autofree char *dir = find_themes_dir();
+    g_autofree const char *dir = find_themes_dir();
     if (dir) {
-        g_autofree char *path = g_build_filename(dir, "Ghostty Default Style Dark", NULL);
+        g_autofree const char *path = g_build_filename(dir, "Ghostty Default Style Dark", NULL);
         BooThemeColors c;
         if (boo_theme_parse_file(path, &c)) return c;
     }
@@ -482,7 +484,7 @@ static gint theme_name_cmp(gconstpointer a, gconstpointer b) {
 static void load_theme_list(WindowState *st) {
     st->themes = g_array_new(FALSE, FALSE, sizeof(ThemeEntry));
     st->current_theme = -1;
-    g_autofree char *dir = find_themes_dir();
+    g_autofree const char *dir = find_themes_dir();
     if (!dir) return;
     GDir *d = g_dir_open(dir, 0, NULL);
     if (!d) return;
@@ -493,7 +495,7 @@ static void load_theme_list(WindowState *st) {
     g_dir_close(d);
     g_ptr_array_sort(names, theme_name_cmp);
     for (guint i = 0; i < names->len; i++) {
-        g_autofree char *path = g_build_filename(dir, names->pdata[i], NULL);
+        g_autofree const char *path = g_build_filename(dir, names->pdata[i], NULL);
         BooThemeColors c;
         if (boo_theme_parse_file(path, &c)) {
             ThemeEntry e = {g_strdup(names->pdata[i]), c};
@@ -507,7 +509,7 @@ static void load_theme_list(WindowState *st) {
 
 static char *settings_path(void) {
     const char *cfg = g_getenv("XDG_CONFIG_HOME");
-    g_autofree char *dir =
+    g_autofree const char *dir =
         (cfg && *cfg) ? g_build_filename(cfg, "boo", NULL)
                       : g_build_filename(g_get_home_dir(), ".config", "boo", NULL);
     g_mkdir_with_parents(dir, 0700);
@@ -523,7 +525,7 @@ static void settings_save(WindowState *st) {
     g_key_file_set_string(kf, "boo", "theme", theme);
     g_key_file_set_double(kf, "boo", "opacity", st->opacity);
     g_key_file_set_boolean(kf, "boo", "auto-type", st->auto_type);
-    g_autofree char *path = settings_path();
+    g_autofree const char *path = settings_path();
     g_key_file_save_to_file(kf, path, NULL);
 }
 
@@ -531,13 +533,13 @@ static void settings_load(WindowState *st) {
     st->opacity = 1.0;
     st->auto_type = TRUE;
     g_autoptr(GKeyFile) kf = g_key_file_new();
-    g_autofree char *path = settings_path();
+    g_autofree const char *path = settings_path();
     if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) return;
     double o = g_key_file_get_double(kf, "boo", "opacity", NULL);
     if (o >= 0.1 && o <= 1.0) st->opacity = o;
     if (g_key_file_has_key(kf, "boo", "auto-type", NULL))
         st->auto_type = g_key_file_get_boolean(kf, "boo", "auto-type", NULL);
-    g_autofree char *theme = g_key_file_get_string(kf, "boo", "theme", NULL);
+    g_autofree const char *theme = g_key_file_get_string(kf, "boo", "theme", NULL);
     if (theme && st->themes)
         for (guint i = 0; i < st->themes->len; i++)
             if (g_strcmp0(g_array_index(st->themes, ThemeEntry, i).name, theme) == 0) {
@@ -601,8 +603,8 @@ static gboolean theme_filter(GtkListBoxRow *row, gpointer data) {
     const char *q = gtk_editable_get_text(GTK_EDITABLE(ui->search));
     if (!q || !*q) return TRUE;
     const char *name = g_object_get_data(G_OBJECT(row), "boo-theme-name");
-    g_autofree char *lname = g_ascii_strdown(name, -1);
-    g_autofree char *lq = g_ascii_strdown(q, -1);
+    g_autofree const char *lname = g_ascii_strdown(name, -1);
+    g_autofree const char *lq = g_ascii_strdown(q, -1);
     return strstr(lname, lq) != NULL;
 }
 

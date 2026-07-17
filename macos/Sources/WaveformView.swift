@@ -35,7 +35,7 @@ class WaveformView: NSView {
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func draw(_: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let barCount = smoothed.count

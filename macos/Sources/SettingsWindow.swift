@@ -187,11 +187,11 @@ class SettingsViewController: NSViewController {
 }
 
 extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
+    func numberOfRows(in _: NSTableView) -> Int {
         return filteredThemes.count
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         let (idx, theme) = filteredThemes[row]
 
         let cell = NSStackView()
@@ -220,7 +220,7 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
+    func tableViewSelectionDidChange(_: Notification) {
         let row = themeTableView.selectedRow
         guard row >= 0, row < filteredThemes.count else { return }
         let (idx, _) = filteredThemes[row]

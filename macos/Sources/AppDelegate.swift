@@ -9,6 +9,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyRef: EventHotKeyRef?
     var settingsWindowController: SettingsWindowController?
     var statusBarTimer: Timer?
+    // Retained while the onboarding download runs (ModelOnboarding.swift).
+    var modelDownloader: ModelDownloader?
+    var downloadWindow: NSWindow?
 
     /// Open the diagnostic log at ~/Library/Logs/Boo/boo.log. Never logs
     /// recognized text (see docs/logging-and-crash-reporting.md).
@@ -19,26 +22,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         boo_log_init(dir.appendingPathComponent("boo.log").path, Int32(BOO_LOG_INFO))
     }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         initLogging()
         // Microphone only. Accessibility is requested later, the first time a
         // paste actually needs it, see PermissionsManager.
         PermissionsManager.ensurePermissions()
 
-        guard let modelPath = findModelPath() else {
+        if let modelPath = findModelPath() {
+            startWithModel(path: modelPath)
+        } else {
             boo_log(Int32(BOO_LOG_ERROR), "no speech model found")
-            showModelNotFoundAlert()
-            NSApp.terminate(nil)
-            return
+            showModelOnboarding()  // Download… / Choose a File… / Quit
         }
-        NSLog("Boo: loading model %@", modelPath)
+    }
 
-        guard let ctx = boo_init(modelPath) else {
+    /// Load the model at `path` and bring up the whole app. Shared by
+    /// auto-discovery and the onboarding (file picker / download). Terminates on
+    /// a load failure.
+    func startWithModel(path: String) {
+        NSLog("Boo: loading model %@", path)
+
+        guard let ctx = boo_init(path) else {
             boo_log(Int32(BOO_LOG_ERROR), "speech model failed to load")
             let alert = NSAlert()
             alert.messageText = "Could not load the model"
             alert.informativeText = """
-                \(modelPath)
+                \(path)
 
                 The file exists but whisper could not read it. It may be corrupt \
                 or truncated, try downloading it again.
@@ -376,40 +385,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         task.resume()
-    }
-
-    private func showModelNotFoundAlert() {
-        let alert = NSAlert()
-        alert.messageText = "No speech model found"
-        alert.informativeText = """
-            Boo needs a speech model, which isn't bundled.
-
-            Download one into ~/.boo/models/ and relaunch.
-
-            Recommended, best accuracy, 25 languages (669 MB):
-            mkdir -p ~/.boo/models
-            curl -L -o ~/.boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \\
-              https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
-
-            Lighter and faster, English only (148 MB):
-            curl -L -o ~/.boo/models/ggml-base.en.bin \\
-              https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-
-            Searched:
-            \(modelSearchDirs.map { "  • \($0)" }.joined(separator: "\n"))
-            """
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Copy Command")
-        alert.addButton(withTitle: "Quit")
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            let cmd = """
-                mkdir -p ~/.boo/models && curl -L -o ~/.boo/models/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \
-                https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
-                """
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(cmd, forType: .string)
-        }
     }
 
     // MARK: - Global Hotkey (Ctrl+Shift+Space)

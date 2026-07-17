@@ -15,7 +15,9 @@ typedef struct {
     gboolean was_active;
     // State colors (0xRRGGBB) from the active theme; default-theme tokens until
     // a theme is applied: idle #70C0B1, recording #D54E53, thinking #E7C547.
-    guint32 idle, rec, think;
+    guint32 idle;
+    guint32 rec;
+    guint32 think;
 } WaveformState;
 
 static void rounded_bar(cairo_t *cr, double x, double cy, double w, double h) {

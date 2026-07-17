@@ -513,6 +513,7 @@ pub fn build(b: *std.Build) void {
         swift_compile.addFileArg(b.path("macos/Sources/Theme.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/SettingsWindow.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/Permissions.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/ModelOnboarding.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/main.swift"));
 
         swift_compile.step.dependOn(&boo_lib.step);
