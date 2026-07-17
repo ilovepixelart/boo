@@ -436,10 +436,11 @@ pub fn build(b: *std.Build) void {
         const bundle_step = b.step("app", "Build macOS Boo.app");
 
         // Zig's archiver emits Mach-O members without the 8-byte alignment
-        // Apple's ld requires, and linkLibrary does not merge whisper's
-        // objects into libboo-core.a, so repack libwhisper.a the same way
-        // scripts/build-zig-libs.sh does for the Xcode path: extract, merge
-        // via `ld -r` into one aligned object, re-archive.
+        // Apple's ld requires, and the exact alignment is content-dependent, so
+        // a source change can silently make libboo-core.a (or libwhisper.a)
+        // unlinkable. Repack BOTH the same way scripts/build-zig-libs.sh does
+        // for the Xcode path: merge each archive via `ld -r` into one aligned
+        // object, re-archive.
         const macos_arch = switch (target.result.cpu.arch) {
             .aarch64 => "arm64",
             .x86_64 => "x86_64",
@@ -452,16 +453,20 @@ pub fn build(b: *std.Build) void {
         const repack = b.addSystemCommand(&.{
             "/bin/sh", "-c",
             \\set -e
-            \\ARCHIVE="$0"; OUT="$1"; ARCH="$2"
-            \\case "$ARCHIVE" in /*) ;; *) ARCHIVE="$PWD/$ARCHIVE" ;; esac
+            \\BOO="$0"; WHISPER="$1"; OUT="$2"; ARCH="$3"
+            \\case "$BOO" in /*) ;; *) BOO="$PWD/$BOO" ;; esac
+            \\case "$WHISPER" in /*) ;; *) WHISPER="$PWD/$WHISPER" ;; esac
             \\case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
             \\WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
             \\SDK=$(xcrun --sdk macosx --show-sdk-version)
-            \\ld -r -arch "$ARCH" -platform_version macos 14.0 "$SDK" -all_load "$ARCHIVE" -o "$WORK/whisper-merged.o"
+            \\ld -r -arch "$ARCH" -platform_version macos 14.0 "$SDK" -all_load "$WHISPER" -o "$WORK/whisper-merged.o"
             \\ar -rcs "$OUT/libwhisper.a" "$WORK/whisper-merged.o"
+            \\ld -r -arch "$ARCH" -platform_version macos 14.0 "$SDK" -all_load "$BOO" -o "$WORK/boo-merged.o"
+            \\ar -rcs "$OUT/libboo-core.a" "$WORK/boo-merged.o"
         });
+        repack.addFileArg(boo_lib.getEmittedBin());
         repack.addFileArg(whisper_lib.getEmittedBin());
-        const repack_dir = repack.addOutputDirectoryArg("whisper-repacked");
+        const repack_dir = repack.addOutputDirectoryArg("repacked");
         repack.addArg(macos_arch);
 
         const swift_compile = b.addSystemCommand(&.{
@@ -473,8 +478,7 @@ pub fn build(b: *std.Build) void {
         swift_compile.addArgs(&.{
             "-L",
         });
-        swift_compile.addDirectoryArg(boo_lib.getEmittedBinDirectory());
-        swift_compile.addArg("-L");
+        // Both aligned archives live in repack_dir now.
         swift_compile.addDirectoryArg(repack_dir);
         swift_compile.addArgs(&.{
             "-lboo-core",

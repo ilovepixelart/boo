@@ -67,32 +67,29 @@ class ThemeManager {
     }
 
     private func loadThemes() {
-        // Parse through the shared core parser (src/theme.zig) so macOS, Linux
-        // and Windows all read one implementation of the Ghostty format.
+        // Enumerate the themes dir here, but parse each file through the shared
+        // core parser (boo_theme_parse_file) so macOS, Linux and Windows read
+        // one implementation of the Ghostty format.
         themes = [defaultTheme]
 
-        guard let dir = findThemesDir() else {
+        guard let dir = findThemesDir(),
+            let files = try? FileManager.default.contentsOfDirectory(atPath: dir)
+        else {
             print("No themes directory found, using default only")
             return
         }
-        guard let handle = boo_themes_load(dir) else {
-            print("Theme parser could not open \(dir), using default only")
-            return
-        }
-        defer { boo_themes_free(handle) }
 
-        let count = Int(boo_themes_count(handle))
-        themes.reserveCapacity(count + 1)
-        for i in 0..<count {
-            guard let namePtr = boo_themes_name(handle, Int32(i)) else { continue }
+        for file in files.sorted() {
+            let path = (dir as NSString).appendingPathComponent(file)
             var colors = BooThemeColors()
-            guard boo_themes_colors(handle, Int32(i), &colors) else { continue }
-            themes.append(makeTheme(name: String(cString: namePtr), colors: colors))
+            if boo_theme_parse_file(path, &colors) {
+                themes.append(makeTheme(name: file, colors: colors))
+            }
         }
 
-        // The core reports the default's index within its own list; themes[0]
-        // is the prepended fallback, so shift by one.
-        currentIndex = Int(boo_themes_default_index(handle)) + 1
+        if let idx = themes.firstIndex(where: { $0.name == "Ghostty Default Style Dark" }) {
+            currentIndex = idx
+        }
         print("Loaded \(themes.count) themes")
     }
 

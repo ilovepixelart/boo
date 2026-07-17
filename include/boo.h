@@ -52,30 +52,21 @@ bool boo_stream_tick(BooContext *ctx);
 // not freed). Callable from any thread.
 const char *boo_get_live_transcript(BooContext *ctx);
 
-// Themes (Ghostty format), independent of the audio context. Every frontend
-// loads one set from a themes directory, drives its picker from the names, and
-// applies the colors of the selected index. The frontend owns the current
-// selection and its persistence. Colors are packed 0xRRGGBB; alpha (window
-// opacity) is the frontend's business.
-typedef struct BooThemes BooThemes;
-
+// Themes (Ghostty format), independent of the audio context. The frontend
+// enumerates its themes directory (trivial per-OS), sorts the names, and calls
+// this per file to get the colors; the Ghostty-format parsing is shared here so
+// it is not reimplemented three times. Colors are packed 0xRRGGBB; alpha (window
+// opacity) and the current selection are the frontend's business.
 typedef struct {
     uint32_t bg;
     uint32_t fg;
     uint32_t palette[16]; // 16 ANSI colors; [8]=dim, [9]=red, [11]=yellow, [14]=cyan
 } BooThemeColors;
 
-// Parse every theme file in `dir` (sorted by name); files that don't parse are
-// skipped. Returns NULL if the directory can't be opened. Free with boo_themes_free.
-BooThemes *boo_themes_load(const char *dir);
-void boo_themes_free(BooThemes *themes);
-int boo_themes_count(BooThemes *themes);
-// Theme name at `index`, or NULL if out of range. Valid until boo_themes_free.
-const char *boo_themes_name(BooThemes *themes, int index);
-// Fills `*out` with the theme's colors; false if `index` is out of range.
-bool boo_themes_colors(BooThemes *themes, int index, BooThemeColors *out);
-// Index of "Ghostty Default Style Dark" when present, else 0.
-int boo_themes_default_index(BooThemes *themes);
+// Parse one Ghostty theme file at `path` into `*out`. Returns false when the
+// file cannot be read or is not a complete theme (missing bg/fg or fewer than
+// 16 palette entries), so the caller can skip it.
+bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 
 #ifdef __cplusplus
 }
