@@ -15,6 +15,7 @@
 #include "settings.h"
 
 #include <commctrl.h>
+#include <shellapi.h> // NIN_SELECT, excluded by WIN32_LEAN_AND_MEAN
 #include <stdio.h>
 #include <string.h>
 
@@ -55,10 +56,13 @@ static void poke_settings(HWND dlg) {
                      (LPARAM)list);
     }
 
-    // Opacity: drag to 80% via the same WM_HSCROLL the trackbar sends.
+    // Opacity: 80% then back to 100%, driving both boo_settings_apply branches
+    // (the layered translucent window, then dropping WS_EX_LAYERED when opaque).
     HWND slider = GetDlgItem(dlg, IDC_OPACITY);
     if (slider) {
         SendMessageW(slider, TBM_SETPOS, TRUE, 80);
+        SendMessageW(dlg, WM_HSCROLL, TB_THUMBTRACK, (LPARAM)slider);
+        SendMessageW(slider, TBM_SETPOS, TRUE, 100);
         SendMessageW(dlg, WM_HSCROLL, TB_THUMBTRACK, (LPARAM)slider);
     }
 
@@ -85,6 +89,26 @@ static int drive_main(void) {
     PostMessageW(overlay, WM_COMMAND, BOO_CMD_TOGGLE_RECORD, 0);
     Sleep(500);
 
+    // The same toggle through the hotkey path (WM_HOTKEY), the third trigger
+    // alongside the tray and the button.
+    PostMessageW(overlay, WM_HOTKEY, 0, 0);
+    Sleep(500);
+    PostMessageW(overlay, WM_HOTKEY, 0, 0);
+    Sleep(500);
+
+    // Maximize/restore so the sizing path asks for WM_GETMINMAXINFO, which pins
+    // the width and clamps the height to the spec range.
+    PostMessageW(overlay, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    Sleep(300);
+    PostMessageW(overlay, WM_SYSCOMMAND, SC_RESTORE, 0);
+    Sleep(300);
+
+    // Tray single-select toggles the overlay's visibility (hide, then show).
+    PostMessageW(overlay, BOO_MSG_TRAY, 0, MAKELPARAM(NIN_SELECT, 0));
+    Sleep(300);
+    PostMessageW(overlay, BOO_MSG_TRAY, 0, MAKELPARAM(NIN_SELECT, 0));
+    Sleep(300);
+
     PostMessageW(overlay, WM_COMMAND, BOO_CMD_SETTINGS, 0);
     HWND dlg = wait_for(BOO_SETTINGS_CLASS, 10000);
     if (dlg) {
@@ -99,6 +123,9 @@ static int drive_main(void) {
     // while the overlay is alive; coverage stays honest either way.
     Sleep(8000);
 
+    // Close hides a tray app rather than quitting; Quit is what tears it down.
+    PostMessageW(overlay, WM_CLOSE, 0, 0);
+    Sleep(300);
     PostMessageW(overlay, WM_COMMAND, BOO_CMD_QUIT, 0);
     return dlg ? 0 : 1;
 }
