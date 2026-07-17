@@ -373,6 +373,26 @@ int main(void) {
         }
         g_unlink(fake);
 
+        // The settings download path (model_download_start) against the local
+        // server: a deliberately wrong pin lands in on_model_download_fail via
+        // the real transfer, without a network round-trip to Hugging Face.
+        const char *dl_port = g_getenv("BOO_HARNESS_HTTP_PORT");
+        if (dl_port) {
+            g_autofree char *dl_url =
+                g_strdup_printf("http://127.0.0.1:%s/harness-model.bin", dl_port);
+            BooModelInfo dl_model = {
+                .filename = "ggml-dl-harness.bin",
+                .url = dl_url,
+                .sha256 =
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                .label = "d",
+                .note = "d",
+                .size = 4096};
+            model_download_start(ui, &dl_model);
+            check(pump_hint_until(ui->model_status, "checksum", 8000),
+                  "a settings download runs through model_download_start");
+        }
+
         gtk_window_destroy(st->settings.dialog);
         pump_ms(300);
         check(st->settings.dialog == NULL, "destroying the dialog clears the singleton");
