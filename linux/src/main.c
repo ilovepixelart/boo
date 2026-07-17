@@ -27,27 +27,6 @@ typedef struct {
     BooContext *ctx;
 } AppState;
 
-// Models the README recommends, most capable first. Parakeet TDT tops the
-// list: near large-v3 accuracy at roughly base.en decode speed. Downloading
-// a bigger model is a deliberate act, so it wins over the default base.en
-// when both exist. Matches the macOS frontend.
-static const char *const preferred_models[] = {
-    "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
-    "ggml-parakeet-tdt-0.6b-v3-f16.bin",
-    "ggml-large-v3-turbo-q5_0.bin",
-    "ggml-large-v3-turbo.bin",
-    "ggml-small.en.bin",
-    "ggml-base.en.bin",
-};
-
-// Position in preferred_models, or one past the end for everything else.
-static unsigned model_rank(const char *name) {
-    for (unsigned i = 0; i < G_N_ELEMENTS(preferred_models); i++) {
-        if (g_str_equal(name, preferred_models[i])) return i;
-    }
-    return G_N_ELEMENTS(preferred_models);
-}
-
 // Pick a whisper (or parakeet) model out of `dir`, or NULL if it holds none.
 //
 // Any GGML speech model works, so this accepts any ggml-*.bin rather than only
@@ -68,7 +47,7 @@ static char *find_model_in(const char *dir) {
 
         // Best rank wins; alphabetical order breaks ties among the
         // unrecognized, so the choice is at least deterministic.
-        unsigned rank = model_rank(name);
+        unsigned rank = boo_model_rank(name);
         if (!best || rank < best_rank ||
             (rank == best_rank && g_strcmp0(name, best) < 0)) {
             g_free(best);

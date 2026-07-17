@@ -246,18 +246,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ].filter { !$0.isEmpty }
     }
 
-    /// Models the README recommends, most capable first. Parakeet TDT tops
-    /// the list: near large-v3 accuracy at roughly base.en decode speed.
-    /// Downloading a bigger model is a deliberate act, so it wins over the
-    /// default base.en when both exist.
-    private static let preferredModels = [
-        "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
-        "ggml-parakeet-tdt-0.6b-v3-f16.bin",
-        "ggml-large-v3-turbo-q5_0.bin",
-        "ggml-large-v3-turbo.bin",
-        "ggml-small.en.bin",
-        "ggml-base.en.bin",
-    ]
 
     /// Find a whisper model.
     ///
@@ -288,10 +276,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .sorted()
             guard !models.isEmpty else { continue }
 
-            // Take the most capable model the user has bothered to download;
-            // anything unrecognized falls back to first-alphabetical, so the
-            // choice is at least deterministic.
-            let chosen = Self.preferredModels.first(where: models.contains) ?? models[0]
+            // Take the most capable model the user has bothered to download,
+            // ranked by the shared core order (boo_model_rank); `models` is
+            // pre-sorted, so equal ranks (the unrecognized) break alphabetically.
+            let chosen = models.min(by: { boo_model_rank($0) < boo_model_rank($1) }) ?? models[0]
             return (dir as NSString).appendingPathComponent(chosen)
         }
         return nil

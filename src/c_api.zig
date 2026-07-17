@@ -329,6 +329,31 @@ export fn boo_theme_parse_file(path: [*:0]const u8, out: ?*theme.Colors) bool {
     return false;
 }
 
+// ── recommended speech models ─────────────────────────────────────────────────
+// The single source of truth for the model preference order all three frontends
+// use to pick the most capable installed model. Directory listing stays per-OS
+// (each frontend uses its native API); only this policy is shared. Most capable
+// first; keep in step with docs/models.md.
+const recommended_models = [_][]const u8{
+    "ggml-parakeet-tdt-0.6b-v3-q8_0.bin",
+    "ggml-parakeet-tdt-0.6b-v3-f16.bin",
+    "ggml-large-v3-turbo-q5_0.bin",
+    "ggml-large-v3-turbo.bin",
+    "ggml-small.en.bin",
+    "ggml-base.en.bin",
+};
+
+// Rank of a model filename in the recommended order (best == 0); the list length
+// for anything unrecognized, so a caller can take "lowest rank wins, alphabetical
+// breaks ties among the rest" and always prefer a recognized model.
+export fn boo_model_rank(name: [*:0]const u8) u32 {
+    const n = std.mem.span(name);
+    for (recommended_models, 0..) |m, i| {
+        if (std.mem.eql(u8, n, m)) return @intCast(i);
+    }
+    return recommended_models.len;
+}
+
 // ── tests ────────────────────────────────────────────────────────────────────
 
 test {
@@ -347,6 +372,15 @@ test {
 }
 
 const testing = std.testing;
+
+test "boo_model_rank orders the recommended models best-first" {
+    try testing.expectEqual(@as(u32, 0), boo_model_rank("ggml-parakeet-tdt-0.6b-v3-q8_0.bin"));
+    try testing.expectEqual(@as(u32, 5), boo_model_rank("ggml-base.en.bin"));
+    // Unknown models rank last (== the list length), so a recognized model
+    // always beats an unrecognized one.
+    try testing.expectEqual(recommended_models.len, boo_model_rank("ggml-something-else.bin"));
+    try testing.expect(boo_model_rank("ggml-small.en.bin") < boo_model_rank("ggml-base.en.bin"));
+}
 
 test "a failed init frees everything it had already allocated" {
     // This is the regression that motivated splitting initContext out.

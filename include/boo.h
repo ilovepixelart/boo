@@ -72,6 +72,12 @@ typedef struct {
 // 16 palette entries), so the caller can skip it.
 bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 
+// Rank of a model filename in the shared recommended order (best == 0); a value
+// equal to the recommended-list length for anything unrecognized. The three
+// frontends call this to pick the most capable installed model, so the
+// preference order lives in one place. Directory listing stays per-OS.
+uint32_t boo_model_rank(const char *name);
+
 #ifdef __cplusplus
 }
 #endif
