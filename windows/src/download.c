@@ -39,6 +39,28 @@ static void post_done(HWND notify, bool ok, const char *text) {
         free(copy);
 }
 
+// Fold one received chunk into the download: write it, hash it, advance the
+// running total, and post progress on a percentage change. Returns false when
+// the total exceeds the manifest size (a longer body is the wrong file, and
+// the bound stops a misbehaving server filling the disk before the digest
+// check runs). Split from the WinHTTP read loop so the per-byte accounting is
+// testable without a live connection.
+static bool consume_chunk(const DownloadJob *job, const BYTE *buf, DWORD n, FILE *out,
+                          BCRYPT_HASH_HANDLE hash, unsigned long long *received,
+                          int *last_pct) {
+    if (fwrite(buf, 1, n, out) != n) return false;
+    BCryptHashData(hash, (PUCHAR)buf, n, 0);
+    *received += n;
+    if (*received > job->model->size) return false;
+    const int pct = (int)(*received * 100 / job->model->size);
+    if (pct != *last_pct) {
+        *last_pct = pct;
+        PostMessageW(job->notify, BOO_MSG_DL_PROGRESS, (WPARAM)(pct > 100 ? 100 : pct),
+                     0);
+    }
+    return true;
+}
+
 // One HTTP GET streamed to `out` with progress posts; the SHA-256 of every
 // byte written lands in `hash`. Returns false on any transport failure.
 static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
@@ -50,19 +72,7 @@ static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
         DWORD n = 0;
         if (!WinHttpReadData(request, buf, sizeof(buf), &n)) return false;
         if (n == 0) return true; // end of body
-        if (fwrite(buf, 1, n, out) != n) return false;
-        BCryptHashData(hash, buf, n, 0);
-        received += n;
-        // The manifest size is exact; a longer body is the wrong file, and
-        // without this bound a misbehaving server fills the disk before the
-        // digest check ever runs.
-        if (received > job->model->size) return false;
-        const int pct = (int)(received * 100 / job->model->size);
-        if (pct != last_pct) {
-            last_pct = pct;
-            PostMessageW(job->notify, BOO_MSG_DL_PROGRESS,
-                         (WPARAM)(pct > 100 ? 100 : pct), 0);
-        }
+        if (!consume_chunk(job, buf, n, out, hash, &received, &last_pct)) return false;
     }
 }
 

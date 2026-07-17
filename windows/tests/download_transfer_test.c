@@ -131,6 +131,54 @@ int main(void) {
     check(run_download(sink, &malformed), "malformed URL reports back (no hang)");
     check(dl_ok == 0, "malformed URL is a failure");
 
+    // consume_chunk is the transfer loop's per-chunk accounting, split out so
+    // it runs without a live connection: it writes, hashes, bounds the total,
+    // and posts progress. Feed it bytes directly against a temp file and a real
+    // CNG hash, then confirm the digest of what it wrote matches the input.
+    WCHAR chunk_dir[MAX_PATH];
+    WCHAR chunk_tmp[MAX_PATH];
+    const DWORD tn = GetEnvironmentVariableW(L"TEMP", chunk_dir, MAX_PATH);
+    FILE *cf = NULL;
+    if (tn > 0 && tn < MAX_PATH &&
+        swprintf(chunk_tmp, MAX_PATH, L"%ls\\boo-chunk-test-%lu.bin", chunk_dir,
+                 (unsigned long)GetCurrentProcessId()) >= 0)
+        cf = _wfopen(chunk_tmp, L"wb");
+    check(cf != NULL, "chunk-test temp file opens");
+    if (cf) {
+        BCRYPT_ALG_HANDLE calg = NULL;
+        BCRYPT_HASH_HANDLE chash = NULL;
+        BCryptOpenAlgorithmProvider(&calg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
+        BCryptCreateHash(calg, &chash, NULL, 0, NULL, 0, 0);
+        const BooModelInfo chunk_model = {.filename = "c.bin",
+                                          .url = "https://x.invalid/c",
+                                          .sha256 = abc_sha,
+                                          .label = "c",
+                                          .note = "c",
+                                          .size = 3};
+        const DownloadJob chunk_job = {.notify = sink, .model = &chunk_model};
+        unsigned long long received = 0;
+        int last_pct = -1;
+        dl_progress_count = 0;
+        const bool c1 = consume_chunk(&chunk_job, (const BYTE *)"ab", 2, cf, chash,
+                                      &received, &last_pct);
+        const bool c2 = consume_chunk(&chunk_job, (const BYTE *)"c", 1, cf, chash,
+                                      &received, &last_pct);
+        check(c1 && c2 && received == 3, "consume_chunk writes and counts the bytes");
+        // A fourth byte pushes the total past the manifest size of 3.
+        const bool over = consume_chunk(&chunk_job, (const BYTE *)"d", 1, cf, chash,
+                                        &received, &last_pct);
+        check(!over, "consume_chunk trips the size bound past the manifest size");
+        fclose(cf);
+        // Pump the progress posts the chunks queued, then confirm at least one.
+        MSG m;
+        while (PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+        check(dl_progress_count > 0, "consume_chunk posts progress");
+        // The hash of "abc" (the two good chunks) is the FIPS vector.
+        check(digest_matches(chash, abc_sha), "the streamed bytes hash to their digest");
+        BCryptCloseAlgorithmProvider(calg, 0);
+        _wremove(chunk_tmp);
+    }
+
     // The worker removes its .part on failure, so nothing loadable is left in
     // %USERPROFILE%\.boo\models behind a transfer that never verified.
     WCHAR home[MAX_PATH];
