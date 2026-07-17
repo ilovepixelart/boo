@@ -422,11 +422,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let vadModelName = "ggml-silero-v6.2.0.bin"
 
+    /// Default VAD download base. Fixed on purpose: the SHA-256 pin applies
+    /// to whatever the URL serves, so pointing elsewhere cannot weaken it.
+    private static let vadModelBaseURL =
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"
+
     /// The VAD download source. $BOO_VAD_MODEL_URL lets a mirror stand in for
     /// Hugging Face; the SHA-256 pin applies to whatever the URL serves.
     private static var vadModelURL: URL {
-        let fallback = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"
-            + vadModelName
+        let fallback = vadModelBaseURL + vadModelName
         let raw = ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"] ?? fallback
         return URL(string: raw) ?? URL(string: fallback)!
     }
