@@ -90,6 +90,9 @@ modules:
         path: ../..
     build-commands:
       - zig build app -Doptimize=ReleaseFast --prefix "${FLATPAK_DEST}"
+      # Bundle the Ghostty theme set so the in-app picker has themes to offer.
+      # The app looks here (find_themes_dir searches /app/share/boo/themes).
+      - mkdir -p "${FLATPAK_DEST}/share/boo" && cp -r themes "${FLATPAK_DEST}/share/boo/themes"
       - install -Dm644 linux/flatpak/com.boo.app.desktop
         "${FLATPAK_DEST}/share/applications/com.boo.app.desktop"
       - install -Dm644 linux/flatpak/com.boo.app.metainfo.xml
