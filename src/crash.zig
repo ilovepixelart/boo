@@ -85,6 +85,12 @@ pub fn init(dir: []const u8) void {
 
     if (installed) return;
     installed = true;
+    // Warm the unwinder now: glibc's first backtrace() call dlopens libgcc_s,
+    // which allocates, so a handler-time first call can deadlock on the very
+    // heap-corruption crashes this exists to report (the mitigation the glibc
+    // man page prescribes).
+    var warm: [1]?*anyopaque = undefined;
+    _ = backtrace(&warm, 1);
     const act = std.posix.Sigaction{
         .handler = .{ .handler = handler },
         .mask = std.posix.sigemptyset(),

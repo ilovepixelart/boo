@@ -272,7 +272,10 @@ export fn boo_stream_tick(ctx: ?*BooContext) bool {
     const pending = a.copyAudioFrom(c.allocator, ch.consumed) catch return false;
     defer c.allocator.free(pending);
 
-    const committed = ch.tick(pending) catch return false;
+    const committed = ch.tick(pending) catch |err| {
+        log.logf(.warn, "stream tick failed: {s}", .{@errorName(err)});
+        return false;
+    };
     if (committed) c.publishLiveTranscript();
     return committed;
 }
@@ -300,7 +303,10 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         if (c.chunker) |*ch| {
             const tail = a.copyAudioFrom(c.allocator, ch.consumed) catch return null;
             defer c.allocator.free(tail);
-            break :blk ch.finalize(tail, MIN_AUDIO_SAMPLES) catch return null;
+            break :blk ch.finalize(tail, MIN_AUDIO_SAMPLES) catch |err| {
+                log.logf(.warn, "finalize failed: {s}", .{@errorName(err)});
+                return null;
+            };
         }
 
         // Batch path: no VAD model loaded, transcribe the whole take.
@@ -310,7 +316,12 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         // Decoding a silent take hallucinates filler, see SILENCE_RMS_FLOOR.
         if (common.maxWindowRms(samples, common.RMS_WINDOW_SAMPLES) <
             common.SILENCE_RMS_FLOOR) return null;
-        break :blk c.engine.transcribe(c.allocator, samples, true) catch return null;
+        break :blk c.engine.transcribe(c.allocator, samples, true) catch |err| {
+            // Without this a persistently failing engine is indistinguishable
+            // from a quiet microphone in the log. Metadata only, never text.
+            log.logf(.warn, "transcription failed: {s}", .{@errorName(err)});
+            return null;
+        };
     };
 
     // Collapse residual whisper repetition loops and normalize whitespace
