@@ -91,6 +91,32 @@ if themes.themes.count > 1 {
     check(themes.current.name == themes.themes[target].name, "current follows the index")
 }
 
+// The palette accessors and the surface-tint helper: pure color math the app
+// only reaches once a theme is applied to a live overlay.
+func rgba(_ color: NSColor) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
+    var r: CGFloat = 0
+    var g: CGFloat = 0
+    var b: CGFloat = 0
+    var a: CGFloat = 0
+    color.getRed(&r, green: &g, blue: &b, alpha: &a)
+    return (r, g, b, a)
+}
+let paletteTheme = themes.current
+check(
+    paletteTheme.green == paletteTheme.palette[10] && paletteTheme.blue == paletteTheme.palette[12]
+        && paletteTheme.magenta == paletteTheme.palette[13] && paletteTheme.white == paletteTheme.palette[15],
+    "the palette accessors map to their ANSI indices")
+let surf = rgba(paletteTheme.surfaceColor(0.5))
+let base = rgba(paletteTheme.bg)
+check(
+    surf.a == 0.5 && surf.r >= base.r && surf.g >= base.g && surf.b >= base.b,
+    "surfaceColor lightens the background and takes the given alpha")
+let brightTheme = BooTheme(
+    name: "bright", bg: NSColor(red: 0.99, green: 0.99, blue: 0.99, alpha: 1), fg: .white,
+    palette: Array(repeating: .white, count: 16))
+let clamped = rgba(brightTheme.surfaceColor(1))
+check(clamped.r == 1 && clamped.g == 1 && clamped.b == 1, "surfaceColor clamps each channel at 1")
+
 // ModelDownloader's error path: a bad manifest URL must surface through
 // onFail (callers freeze their UI before calling start), never return
 // silently and leave a dead dialog.
@@ -245,6 +271,19 @@ check(!AppDelegate.savedAutoType(), "an auto-type change persists")
 prefs.removeObject(forKey: AppDelegate.opacityDefaultsKey)
 prefs.removeObject(forKey: AppDelegate.autoTypeDefaultsKey)
 
+// The status-bar recording poll: a start notification spins up the 2Hz timer
+// (its tick is a quiet no-op without a context), a stop notification schedules
+// the wind-down.
+appDelegate.recordingStateChanged(Notification(name: .booRecordingStarted))
+check(appDelegate.statusBarTimer != nil, "recording-started starts the status-bar poll")
+_ = pump(seconds: 0.6, until: { false })  // let the timer tick once
+appDelegate.recordingStateChanged(Notification(name: .booRecordingStopped))
+appDelegate.statusBarTimer?.invalidate()
+appDelegate.statusBarTimer = nil
+check(
+    appDelegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared),
+    "closing the last window terminates the app")
+
 // ── Settings window headless ──
 let settings = SettingsWindowController()
 _ = settings.window?.contentViewController?.view  // forces the whole setupUI
@@ -273,10 +312,99 @@ if let vc = settings.window?.contentViewController as? SettingsViewController {
     check(
         vc.modelPopup.numberOfItems >= installed.count,
         "the model dropdown merges disk and manifest")
+
+    vc.searchField.stringValue = "light"
+    vc.searchChanged(vc.searchField)
+    let lightCount = vc.filteredThemes.count
+    check(
+        lightCount > 0 && lightCount < ThemeManager.shared.themes.count,
+        "the search-field action filters the list (\(lightCount) match)")
+    vc.searchField.stringValue = ""
+    vc.searchChanged(vc.searchField)
+
+    if let curRow = vc.filteredThemes.firstIndex(where: { $0.0 == ThemeManager.shared.currentIndex }) {
+        check(
+            vc.tableView(vc.themeTableView, viewFor: nil, row: curRow) != nil,
+            "the current theme's row renders with its accent highlight")
+    }
+
+    // A model already on disk selected with no live context: the swap is
+    // refused and reported, never left as a silent dead dropdown.
+    if let installedIdx = vc.modelChoices.firstIndex(where: { $0.path != nil }) {
+        vc.modelPopup.selectItem(at: installedIdx)
+        vc.modelChanged(vc.modelPopup)
+        check(
+            vc.modelStatus.stringValue.contains("Could not load"),
+            "selecting a disk model without a context reports the refused swap")
+    }
 } else {
     check(false, "Settings builds its view controller")
 }
 settings.window?.close()
+
+// ── Overlay window headless ──
+// A sentinel context stands in for a booted core: this overlay drives only the
+// pure-UI paths (transcript bubbles, theming, status flashes), which never call
+// into the core, so the pointer is never dereferenced. Recording and waveform
+// polling touch the core and stay behind BOO_HARNESS_BOOT below.
+let overlay = OverlayWindow(booCtx: OpaquePointer(bitPattern: 0xB00)!)
+
+overlay.appDidActivate(Notification(name: NSWorkspace.didActivateApplicationNotification))  // no app: ignored
+if let other = NSWorkspace.shared.runningApplications.first(where: {
+    $0.bundleIdentifier != nil && $0.bundleIdentifier != Bundle.main.bundleIdentifier
+}) {
+    overlay.appDidActivate(
+        Notification(
+            name: NSWorkspace.didActivateApplicationNotification, object: nil,
+            userInfo: [NSWorkspace.applicationUserInfoKey: other]))
+    check(overlay.previousApp === other, "the overlay tracks the last non-Boo app")
+}
+
+overlay.addTranscript("harness bubble one")
+overlay.addTranscript("harness bubble two")
+overlay.applyTheme(ThemeManager.shared.current)  // recolors the existing bubbles
+check(overlay.transcripts.count == 2, "transcripts accumulate in history")
+
+let bubbleButtons =
+    (overlay.transcriptStack.arrangedSubviews.last?.subviews ?? [])
+    .compactMap { $0 as? NSStackView }
+    .flatMap { $0.arrangedSubviews }
+    .compactMap { $0 as? NSButton }
+if let copyButton = bubbleButtons.first {
+    NSPasteboard.general.clearContents()
+    overlay.copyBubbleText(copyButton)
+    check(
+        NSPasteboard.general.string(forType: .string) == "harness bubble two",
+        "a bubble's copy button copies its transcript")
+}
+if bubbleButtons.count >= 2, let dismissButton = bubbleButtons.last {
+    let before = overlay.transcriptStack.arrangedSubviews.count
+    overlay.dismissBubble(dismissButton)
+    check(
+        pump(seconds: 2, until: { overlay.transcriptStack.arrangedSubviews.count < before }),
+        "a bubble's dismiss button removes it")
+}
+
+if let closeButton = overlay.standardWindowButton(.closeButton) {
+    closeButton.isHidden = true
+    closeButton.alphaValue = 0
+    check(
+        pump(seconds: 1.5, until: { !closeButton.isHidden && closeButton.alphaValue >= 1 }),
+        "the traffic-light timer restores hidden window buttons")
+}
+
+overlay.flashStatus("pasted")
+check(overlay.statusLabel.stringValue == "pasted", "flashStatus shows a transient message")
+check(
+    pump(seconds: 3, until: { overlay.statusLabel.stringValue == OverlayWindow.idleHint }),
+    "flashStatus settles back on the idle hint")
+
+overlay.startDisplayLink()
+overlay.stopDisplayLink()
+check(overlay.waveformLink?.isPaused == true, "the waveform display link pauses on stop")
+
+overlay.close()
+check(overlay.waveformLink == nil, "closing the overlay tears down the display link")
 
 // ── Onboarding download window headless ──
 appDelegate.showDownloadWindow()
@@ -286,6 +414,10 @@ appDelegate.downloadWindow?.close()
 appDelegate.downloadWindow = nil
 appDelegate.modelDownloader = nil
 appDelegate.onboardingStart = nil
+
+// With onboarding torn down, the Download button's selector is an inert no-op.
+appDelegate.startModelDownload(NSButton())
+check(appDelegate.onboardingStart == nil, "the Download selector stays inert with no prepared action")
 
 // ── Full app boot (opt-in: grabs mic TCC + the global hotkey) ──
 if ProcessInfo.processInfo.environment["BOO_HARNESS_BOOT"] == "1" {
