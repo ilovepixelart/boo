@@ -45,8 +45,17 @@ intact.
 not PowerShell's `curl` alias). In **PowerShell** (the Windows 11 default),
 paste each line on its own, no line continuation:
 
+Parakeet is the best pick: near large-v3 accuracy at `base.en` speed, 25
+languages, auto-detected (669 MB):
+
 ```powershell
 mkdir "$env:USERPROFILE\.boo\models" -Force
+curl.exe -L -o "$env:USERPROFILE\.boo\models\ggml-parakeet-tdt-0.6b-v3-q8_0.bin" https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin
+```
+
+Want a smaller, faster first download? `base.en` is 148 MB, English-only:
+
+```powershell
 curl.exe -L -o "$env:USERPROFILE\.boo\models\ggml-base.en.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 

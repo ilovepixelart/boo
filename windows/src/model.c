@@ -128,12 +128,17 @@ void boo_model_missing_hint(wchar_t *buf, size_t len) {
     if (!primary_model_dir(dir, MAX_PATH)) wcscpy(dir, L"%USERPROFILE%\\.boo\\models");
 
     swprintf(buf, len,
-             L"Boo needs a whisper model, which isn't bundled, they're 140 MB+.\n\n"
-             L"Download one (curl ships with Windows) and relaunch:\n\n"
+             L"Boo needs a speech model, which isn't bundled.\n\n"
+             L"Download one (curl ships with Windows) and relaunch.\n\n"
+             L"Recommended, best accuracy, 25 languages (669 MB):\n"
              L"  mkdir \"%ls\"\n"
+             L"  curl.exe -L -o \"%ls\\ggml-parakeet-tdt-0.6b-v3-q8_0.bin\" ^\n"
+             L"    https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/"
+             L"ggml-parakeet-tdt-0.6b-v3-q8_0.bin\n\n"
+             L"Lighter and faster, English only (148 MB):\n"
              L"  curl.exe -L -o \"%ls\\ggml-base.en.bin\" ^\n"
              L"    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
              L"ggml-base.en.bin\n\n"
              L"Or point BOO_MODEL at a model you already have.",
-             dir, dir);
+             dir, dir, dir);
 }

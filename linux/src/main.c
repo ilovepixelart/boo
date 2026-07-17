@@ -170,14 +170,20 @@ static char *model_install_hint(void) {
                                                           "share", "boo", "models", NULL);
 
     return g_strdup_printf(
-        "Boo needs a whisper model, which isn't bundled, they're 140 MB+.\n\n"
-        "Download one and relaunch:\n\n"
+        "Boo needs a speech model, which isn't bundled.\n\n"
+        "Download one and relaunch.\n\n"
+        "Recommended, best accuracy, 25 languages (669 MB):\n"
         "  mkdir -p %s\n"
+        "  curl -L -o %s/ggml-parakeet-tdt-0.6b-v3-q8_0.bin \\\n"
+        "    "
+        "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/"
+        "ggml-parakeet-tdt-0.6b-v3-q8_0.bin\n\n"
+        "Lighter and faster, English only (148 MB):\n"
         "  curl -L -o %s/ggml-base.en.bin \\\n"
         "    "
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n\n"
         "Or point BOO_MODEL at a model you already have.",
-        dir, dir);
+        dir, dir, dir);
 }
 
 // Fetch the Silero VAD model in the background on first run, mirroring the
