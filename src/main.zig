@@ -68,7 +68,7 @@ pub fn main(init: std.process.Init) !void {
         }
 
         // Transcribe
-        const text = ctx.transcribe(allocator, samples) catch |err| {
+        const text = ctx.transcribe(allocator, samples, true) catch |err| {
             std.debug.print("Transcription error: {}\n\n", .{err});
             continue;
         };

@@ -95,7 +95,7 @@ pub const Chunker = struct {
         // prompt back into the output when consecutive utterances sound
         // alike, inserting text that was never spoken. Choppier punctuation
         // at chunk seams is the safer failure mode.
-        const text = try self.engine.transcribe(self.allocator, pending[0..cut_at]);
+        const text = try self.engine.transcribe(self.allocator, pending[0..cut_at], false);
         defer self.allocator.free(text);
         try self.appendCommitted(text);
         self.consumed += cut_at;
@@ -114,7 +114,7 @@ pub const Chunker = struct {
             common.maxWindowRms(tail, common.RMS_WINDOW_SAMPLES) >=
                 common.SILENCE_RMS_FLOOR)
         {
-            const text = try self.engine.transcribe(self.allocator, tail);
+            const text = try self.engine.transcribe(self.allocator, tail, true);
             defer self.allocator.free(text);
             try self.appendCommitted(text);
         }

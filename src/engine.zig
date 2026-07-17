@@ -39,9 +39,13 @@ pub const Engine = union(enum) {
     }
 
     /// Transcribe PCM f32 audio at 16kHz mono. Returns allocated string.
-    pub fn transcribe(self: *Engine, allocator: std.mem.Allocator, samples: []const f32) ![]const u8 {
+    /// `beam` asks for whisper's slower beam-search decode: pass true for the
+    /// final decode, false for live streaming ticks. Parakeet has a single
+    /// decode path and ignores it.
+    pub fn transcribe(self: *Engine, allocator: std.mem.Allocator, samples: []const f32, beam: bool) ![]const u8 {
         return switch (self.*) {
-            inline else => |*e| e.transcribe(allocator, samples),
+            .whisper => |*e| e.transcribe(allocator, samples, beam),
+            .parakeet => |*e| e.transcribe(allocator, samples),
         };
     }
 };

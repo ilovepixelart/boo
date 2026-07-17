@@ -12,8 +12,10 @@ So both are worth doing, but they fix different symptoms.
 
 ## What Boo does today
 
-- Decode: `WHISPER_SAMPLING_GREEDY` (beam_size 1), `no_context = true`,
-  `suppress_nst = true`, `no_timestamps = true` (`src/whisper.zig`).
+- Decode: greedy for live streaming ticks (latency), beam search
+  (`beam_size`/`best_of` 5) for the batch path and the streaming final decode;
+  `no_context = true`, `suppress_nst = true`, `no_timestamps = true`
+  (`src/whisper.zig`).
 - A confidence filter drops a segment when `no_speech_prob > 0.6 && avg_logprob
   < -0.4` (`keepSegment`) — this can discard real quiet/mumbled speech.
 - Streaming: the VAD chunker cuts at utterance-end silence and transcribes each
@@ -36,11 +38,13 @@ So both are worth doing, but they fix different symptoms.
 1. **Model** — Parakeet TDT is the single biggest win and is already the
    recommended download + the in-app downloader (task #32). Most of the
    base.en jankiness is the model.
-2. **Beam search on the *final* decode.** Parameterize `transcribe()` with the
-   sampling strategy: keep **greedy** for the live streaming ticks (latency),
-   use **beam_size 5 / best_of 5, temperature 0** for the batch path and the
-   streaming *finalize* tail, where the user has stopped and can wait. Gate it
-   with the `--assert-wer` bench so the gain is measured, not assumed.
+2. **Beam search on the *final* decode.** Done: `transcribe()` takes a `beam`
+   flag; streaming ticks stay greedy, the batch path and the streaming
+   finalize tail use beam_size/best_of 5. Measured on the 12-clip LibriSpeech
+   suite: WER-neutral (8.5% both ways, clean read speech does not stress the
+   decoder), jfk final decode 237 to 337 ms, every CI WER/RTF gate still
+   green. Kept because the cost lands only where the user already stopped,
+   and upstream's reported gains are on harder audio than the suite.
 3. **Loosen `keepSegment`.** The `avg_logprob < -0.4` cutoff likely drops real
    low-confidence speech; raise the bar (or require a stronger no_speech signal)
    and re-measure WER on the LibriSpeech suite.

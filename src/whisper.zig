@@ -64,8 +64,14 @@ pub const WhisperContext = struct {
     }
 
     /// Transcribe PCM f32 audio at 16kHz mono. Returns allocated string.
-    pub fn transcribe(self: *WhisperContext, allocator: std.mem.Allocator, samples: []const f32) ![]const u8 {
-        var params = c.whisper_full_default_params(c.WHISPER_SAMPLING_GREEDY);
+    /// `beam` selects beam search (beam_size/best_of 5, whisper.cpp's accuracy
+    /// default) over greedy. Measured WER-neutral on the clean LibriSpeech
+    /// suite and ~40% slower; upstream reports fewer errors on harder audio.
+    /// Streaming ticks pass false (latency), the final decode passes true.
+    pub fn transcribe(self: *WhisperContext, allocator: std.mem.Allocator, samples: []const f32, beam: bool) ![]const u8 {
+        var params = c.whisper_full_default_params(
+            if (beam) c.WHISPER_SAMPLING_BEAM_SEARCH else c.WHISPER_SAMPLING_GREEDY,
+        );
         params.print_progress = false;
         params.print_special = false;
         params.print_realtime = false;

@@ -290,7 +290,7 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         // Decoding a silent take hallucinates filler, see SILENCE_RMS_FLOOR.
         if (common.maxWindowRms(samples, common.RMS_WINDOW_SAMPLES) <
             common.SILENCE_RMS_FLOOR) return null;
-        break :blk c.engine.transcribe(c.allocator, samples) catch return null;
+        break :blk c.engine.transcribe(c.allocator, samples, true) catch return null;
     };
 
     if (text.len == 0) {

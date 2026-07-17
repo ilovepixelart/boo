@@ -219,7 +219,7 @@ pub fn main(init: std.process.Init) !void {
     // Cold run: includes Metal pipeline warm-up, worth knowing but not
     // representative of dictation steady state.
     _ = timer.lap();
-    const cold_text = ctx.transcribe(allocator, samples) catch fatal("transcription failed", .{});
+    const cold_text = ctx.transcribe(allocator, samples, true) catch fatal("transcription failed", .{});
     const cold_ns = timer.lap();
     if (cold_text.len == 0) fatal("empty transcript; model or audio is broken", .{});
     std.debug.print("  cold run:   {d:.0} ms (includes backend warm-up)\n", .{msFromNs(cold_ns)});
@@ -230,7 +230,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("  warm runs: ", .{});
         for (times) |*t| {
             _ = timer.lap();
-            const text = ctx.transcribe(allocator, samples) catch fatal("transcription failed", .{});
+            const text = ctx.transcribe(allocator, samples, true) catch fatal("transcription failed", .{});
             t.* = timer.lap();
             allocator.free(text);
             std.debug.print(" {d:.0}", .{msFromNs(t.*)});
@@ -326,13 +326,13 @@ fn runSuite(
         // The first inference pays one-time backend warm-up; keep it out of
         // the timings by burning a run on the first clip.
         if (!warmed_up) {
-            const warmup = ctx.transcribe(allocator, samples) catch fatal("warm-up failed", .{});
+            const warmup = ctx.transcribe(allocator, samples, true) catch fatal("warm-up failed", .{});
             allocator.free(warmup);
             warmed_up = true;
         }
 
         var timer = Timer.start();
-        const text = ctx.transcribe(allocator, samples) catch fatal("transcription failed on {s}", .{name});
+        const text = ctx.transcribe(allocator, samples, true) catch fatal("transcription failed on {s}", .{name});
         defer allocator.free(text);
         const infer_ms = msFromNs(timer.lap());
 
@@ -426,7 +426,7 @@ fn runStreamBench(
     // Pay the backend warm-up outside the measurements; pointless in quick
     // mode, which measures coverage, not time.
     if (!quick) {
-        const warmup = ctx.transcribe(allocator, utterance) catch fatal("warm-up transcription failed", .{});
+        const warmup = ctx.transcribe(allocator, utterance, true) catch fatal("warm-up transcription failed", .{});
         allocator.free(warmup);
     }
 
@@ -469,7 +469,7 @@ fn runStreamBench(
     // mode: the comparison costs a second full-take inference.
     if (!quick) {
         _ = timer.lap();
-        const batch = ctx.transcribe(allocator, take.items) catch fatal("batch transcription failed", .{});
+        const batch = ctx.transcribe(allocator, take.items, true) catch fatal("batch transcription failed", .{});
         defer allocator.free(batch);
         const batch_ms = msFromNs(timer.lap());
         std.debug.print("  batch comparison: {d:.0} ms ({d:.1}x slower than streaming stop)\n", .{ batch_ms, batch_ms / stop_ms });
