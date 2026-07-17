@@ -444,9 +444,9 @@ static const BooThemeColors DEFAULT_THEME = {
 static char *find_themes_dir(void) {
     const char *xdg_env = g_getenv("XDG_DATA_HOME");
     g_autofree const char *xdg = (xdg_env && *xdg_env)
-                               ? g_build_filename(xdg_env, "boo", "themes", NULL)
-                               : g_build_filename(g_get_home_dir(), ".local", "share",
-                                                  "boo", "themes", NULL);
+                                     ? g_build_filename(xdg_env, "boo", "themes", NULL)
+                                     : g_build_filename(g_get_home_dir(), ".local",
+                                                        "share", "boo", "themes", NULL);
     const char *dirs[] = {"themes", xdg, "/app/share/boo/themes", "/usr/share/boo/themes",
                           NULL};
     for (int i = 0; dirs[i]; i++)
@@ -457,7 +457,8 @@ static char *find_themes_dir(void) {
 static BooThemeColors default_theme_colors(void) {
     g_autofree const char *dir = find_themes_dir();
     if (dir) {
-        g_autofree const char *path = g_build_filename(dir, "Ghostty Default Style Dark", NULL);
+        g_autofree const char *path =
+            g_build_filename(dir, "Ghostty Default Style Dark", NULL);
         BooThemeColors c;
         if (boo_theme_parse_file(path, &c)) return c;
     }
