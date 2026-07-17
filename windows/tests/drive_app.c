@@ -19,6 +19,11 @@
 #include <stdio.h>
 #include <string.h>
 
+// overlay.c keeps BOO_SC_SETTINGS private; mirror its value to drive the
+// system-menu Settings item (WM_SYSCOMMAND). Kept a multiple of 16 and below
+// 0xF000, like the source.
+#define BOO_SC_SETTINGS 0x0010
+
 // The app needs seconds to load a model before its windows exist.
 static HWND wait_for(const WCHAR *class_name, int timeout_ms) {
     for (int waited = 0; waited < timeout_ms; waited += 200) {
@@ -36,6 +41,16 @@ static int drive_onboarding(void) {
         return 1;
     }
     Sleep(500);
+
+    // A progress tick then a failed download with no reason: the messages the
+    // download worker posts, driving onboarding's progress and failure-recovery
+    // branches without a network round-trip. A success (wparam=1) would boot the
+    // app on a bogus path and pop a modal, so only the failure lands here.
+    PostMessageW(dlg, BOO_MSG_DL_PROGRESS, 40, 0);
+    Sleep(200);
+    PostMessageW(dlg, BOO_MSG_DL_DONE, 0, 0);
+    Sleep(200);
+
     PostMessageW(dlg, WM_CLOSE, 0, 0);
     return 0;
 }
@@ -72,6 +87,55 @@ static void poke_settings(HWND dlg) {
     if (combo)
         SendMessageW(dlg, WM_COMMAND, MAKEWPARAM(IDC_MODEL, CBN_SELCHANGE),
                      (LPARAM)combo);
+
+    // A download-progress tick, the message the download worker posts while a
+    // tagged model fetches; drives the progress-bar handler. The DL_DONE twin
+    // is not posted here: on failure it pops a modal, and success carries a
+    // cross-process path pointer.
+    PostMessageW(dlg, BOO_MSG_DL_PROGRESS, 50, 0);
+}
+
+// Drive the overlay's own input handlers, all headless-safe: no message here
+// carries a cross-process pointer, and none needs a microphone. Coordinates
+// come from the live client rect so they track the window's actual size.
+static void poke_overlay(HWND overlay) {
+    RECT rc;
+    if (!GetClientRect(overlay, &rc)) return;
+    const int cx = rc.right / 2;
+    const int body = rc.bottom / 3;
+
+    // Body drag: press off every interactive element, slide, release. Covers
+    // the mouse-down drag branch, the move handler, and the up handler.
+    PostMessageW(overlay, WM_LBUTTONDOWN, 0, MAKELPARAM(cx, body));
+    Sleep(50);
+    PostMessageW(overlay, WM_MOUSEMOVE, 0, MAKELPARAM(cx + 8, body + 8));
+    Sleep(50);
+    PostMessageW(overlay, WM_LBUTTONUP, 0, MAKELPARAM(cx + 8, body + 8));
+    Sleep(50);
+
+    // Record disc: press and release on the button so the click lands on an
+    // interactive element (over_interactive, handle_click, then the toggle).
+    // Its centre sits MARGIN + BUTTON_SIZE/2 up from the client bottom, per
+    // overlay.c's button_rect; at the CI default 96 DPI this is exact.
+    const int by = rc.bottom - MulDiv(32, (int)GetDpiForWindow(overlay), 96);
+    PostMessageW(overlay, WM_LBUTTONDOWN, 0, MAKELPARAM(cx, by));
+    Sleep(50);
+    PostMessageW(overlay, WM_LBUTTONUP, 0, MAKELPARAM(cx, by));
+    Sleep(50);
+
+    // Timer ticks the message loop would deliver: with no microphone the record
+    // path never arms them, so post each id to drive on_timer's headless
+    // branches (the idle waveform, the auto-stop poll, settle-to-idle).
+    PostMessageW(overlay, WM_TIMER, BOO_TIMER_WAVEFORM, 0);
+    PostMessageW(overlay, WM_TIMER, BOO_TIMER_AUTO_STOP, 0);
+    PostMessageW(overlay, WM_TIMER, BOO_TIMER_STATUS, 0);
+    Sleep(50);
+
+    // A settings broadcast with no area string: exercises the handler and its
+    // guard. The ImmersiveColorSet re-eval needs a string lParam, which a
+    // cross-process post cannot carry, so that branch stays for the live app.
+    PostMessageW(overlay, WM_SETTINGCHANGE, 0, 0);
+    Sleep(50);
 }
 
 static int drive_main(void) {
@@ -109,14 +173,30 @@ static int drive_main(void) {
     PostMessageW(overlay, BOO_MSG_TRAY, 0, MAKELPARAM(NIN_SELECT, 0));
     Sleep(300);
 
+    poke_overlay(overlay);
+
     PostMessageW(overlay, WM_COMMAND, BOO_CMD_SETTINGS, 0);
     HWND dlg = wait_for(BOO_SETTINGS_CLASS, 10000);
     if (dlg) {
         Sleep(300);
+        // Re-issue the open while the dialog lives: covers the "already open,
+        // just focus it" early return in boo_settings_open.
+        PostMessageW(overlay, WM_COMMAND, BOO_CMD_SETTINGS, 0);
+        Sleep(200);
         poke_settings(dlg);
         Sleep(300);
         PostMessageW(dlg, WM_CLOSE, 0, 0);
         Sleep(300);
+
+        // Reopen through the window's system menu (Alt+Space > Settings), the
+        // WM_SYSCOMMAND twin of the tray/command open.
+        PostMessageW(overlay, WM_SYSCOMMAND, BOO_SC_SETTINGS, 0);
+        HWND sys_dlg = wait_for(BOO_SETTINGS_CLASS, 10000);
+        if (sys_dlg) {
+            Sleep(200);
+            PostMessageW(sys_dlg, WM_CLOSE, 0, 0);
+            Sleep(200);
+        }
     }
 
     // Let the background VAD fetch usually finish so BOO_MSG_DL_DONE lands
