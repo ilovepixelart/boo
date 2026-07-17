@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Retained while the onboarding download runs (ModelOnboarding.swift).
     var modelDownloader: ModelDownloader?
     var downloadWindow: NSWindow?
+    // The onboarding Download button's prepared action, wired to its widgets.
+    var onboardingStart: (() -> Void)?
     /// Path of the model currently loaded into the core (Settings shows it).
     private(set) var currentModelPath: String?
 

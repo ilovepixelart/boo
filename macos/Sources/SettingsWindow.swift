@@ -26,8 +26,11 @@ class SettingsViewController: NSViewController {
     var themePreview: NSView!
     var modelPopup: NSPopUpButton!
     var modelStatus: NSTextField!
+    var modelProgress: NSProgressIndicator!
     var filteredThemes: [(Int, BooTheme)] = []
-    var installedModels: [(name: String, path: String)] = []
+    var modelChoices: [ModelChoice] = []
+    // Retained while a settings-initiated model download runs.
+    var modelDownloader: ModelDownloader?
 
     private var appDelegate: AppDelegate? { NSApp.delegate as? AppDelegate }
 
@@ -87,26 +90,24 @@ class SettingsViewController: NSViewController {
         stack.addArrangedSubview(autoTypeCheckbox)
 
         // ── Model ──
+        // One dropdown merging models on disk with the curated manifest;
+        // entries not yet downloaded are tagged, and picking one downloads it
+        // (progress below), then swaps to it.
         let modelTitle = NSTextField(labelWithString: "Model")
         modelTitle.font = .systemFont(ofSize: 13, weight: .medium)
         stack.addArrangedSubview(modelTitle)
 
-        let modelRow = NSStackView()
-        modelRow.orientation = .horizontal
-        modelRow.spacing = 8
-
         modelPopup = NSPopUpButton()
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged(_:))
-        modelPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        modelRow.addArrangedSubview(modelPopup)
+        stack.addArrangedSubview(modelPopup)
 
-        let downloadButton = NSButton(
-            title: "Download…", target: self, action: #selector(downloadModel(_:)))
-        downloadButton.bezelStyle = .rounded
-        modelRow.addArrangedSubview(downloadButton)
-
-        stack.addArrangedSubview(modelRow)
+        modelProgress = NSProgressIndicator()
+        modelProgress.isIndeterminate = false
+        modelProgress.minValue = 0
+        modelProgress.maxValue = 100
+        modelProgress.isHidden = true
+        stack.addArrangedSubview(modelProgress)
 
         modelStatus = NSTextField(labelWithString: "")
         modelStatus.font = .systemFont(ofSize: 11)
@@ -167,16 +168,31 @@ class SettingsViewController: NSViewController {
         NotificationCenter.default.post(name: .autoTypeChanged, object: sender.state == .on)
     }
 
-    /// Refill the model popup from disk and select the loaded model.
+    /// Refill the model popup: models on disk first (ranked), then curated
+    /// manifest models not yet downloaded, tagged with their size. Selects the
+    /// loaded model.
     func reloadModelList() {
         guard let app = appDelegate else { return }
-        installedModels = app.installedModels()
+        let installed = app.installedModels()
+        modelChoices = installed.map { ModelChoice(title: $0.name, path: $0.path, manifest: nil) }
+        var count = 0
+        if let models = boo_models(&count) {
+            let onDisk = Set(installed.map { $0.name })
+            for i in 0..<count where !onDisk.contains(String(cString: models[i].filename)) {
+                let m = models[i]
+                let name = String(cString: m.filename)
+                modelChoices.append(
+                    ModelChoice(
+                        title: "\(name)  (download, \(m.size / 1_000_000) MB)",
+                        path: nil, manifest: m))
+            }
+        }
         modelPopup.removeAllItems()
-        for model in installedModels {
-            modelPopup.addItem(withTitle: model.name)
+        for choice in modelChoices {
+            modelPopup.addItem(withTitle: choice.title)
         }
         if let current = app.currentModelPath,
-            let idx = installedModels.firstIndex(where: { $0.path == current })
+            let idx = modelChoices.firstIndex(where: { $0.path == current })
         {
             modelPopup.selectItem(at: idx)
         }
@@ -184,36 +200,60 @@ class SettingsViewController: NSViewController {
 
     @objc func modelChanged(_ sender: NSPopUpButton) {
         let idx = sender.indexOfSelectedItem
-        guard let app = appDelegate, idx >= 0, idx < installedModels.count else { return }
-        let target = installedModels[idx]
-        guard target.path != app.currentModelPath else { return }
+        guard let app = appDelegate, idx >= 0, idx < modelChoices.count else { return }
+        let choice = modelChoices[idx]
+        guard let path = choice.path else {
+            if let manifest = choice.manifest { downloadAndSwitch(to: manifest) }
+            return
+        }
+        guard path != app.currentModelPath else { return }
         if let ctx = app.booCtx, boo_is_recording(ctx) || boo_is_transcribing(ctx) {
             modelStatus.stringValue = "Stop recording first."
             reloadModelList()  // snap the selection back to the loaded model
             return
         }
         modelPopup.isEnabled = false
-        modelStatus.stringValue = "Loading \(target.name)…"
-        app.switchModel(path: target.path) { [weak self] ok in
+        modelStatus.stringValue = "Loading \(choice.title)…"
+        app.switchModel(path: path) { [weak self] ok in
             guard let self = self else { return }
             self.modelPopup.isEnabled = true
             self.modelStatus.stringValue =
                 ok
-                ? "Loaded \(target.name)."
-                : "Could not load \(target.name); keeping the previous model."
+                ? "Loaded \(choice.title)."
+                : "Could not load \(choice.title); keeping the previous model."
             if !ok { self.reloadModelList() }
         }
     }
 
-    @objc func downloadModel(_: NSButton) {
-        appDelegate?.showDownloadWindow { [weak self] path in
-            self?.appDelegate?.switchModel(path: path) { ok in
+    /// Fetch a not-yet-downloaded manifest model (progress bar under the
+    /// dropdown), then swap to it like any installed model.
+    private func downloadAndSwitch(to manifest: BooModelInfo) {
+        let name = String(cString: manifest.filename)
+        modelPopup.isEnabled = false
+        modelProgress.doubleValue = 0
+        modelProgress.isHidden = false
+        modelStatus.stringValue = "Downloading \(name)…"
+        let downloader = ModelDownloader(
+            onProgress: { [weak self] percent in self?.modelProgress.doubleValue = percent },
+            onDone: { [weak self] path in
                 guard let self = self else { return }
+                self.modelProgress.isHidden = true
+                self.modelPopup.isEnabled = true
+                self.appDelegate?.switchModel(path: path) { ok in
+                    self.reloadModelList()
+                    self.modelStatus.stringValue =
+                        ok ? "Downloaded and switched to \(name)." : "Downloaded, but it could not be loaded."
+                }
+            },
+            onFail: { [weak self] why in
+                guard let self = self else { return }
+                self.modelProgress.isHidden = true
+                self.modelPopup.isEnabled = true
+                self.modelStatus.stringValue = why
                 self.reloadModelList()
-                self.modelStatus.stringValue =
-                    ok ? "Downloaded and switched." : "Downloaded, but it could not be loaded."
-            }
-        }
+            })
+        modelDownloader = downloader
+        downloader.start(model: manifest)
     }
 
     @objc func searchChanged(_ sender: NSSearchField) {
@@ -311,6 +351,15 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         updatePreview()
         themeTableView.reloadData()
     }
+}
+
+/// One model-dropdown entry: a model on disk (`path` set) or a curated
+/// manifest model not yet downloaded (`manifest` set); picking the latter
+/// downloads it first. Exactly one of the two is set.
+struct ModelChoice {
+    let title: String
+    let path: String?
+    let manifest: BooModelInfo?
 }
 
 extension Notification.Name {

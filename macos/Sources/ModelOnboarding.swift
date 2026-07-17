@@ -37,13 +37,10 @@ extension AppDelegate {
     }
 
     /// A small window: a model dropdown + a progress bar + Download.
-    /// `onDone` receives the verified path; nil means first-run onboarding,
-    /// which boots the app with the download (and quits when there is nothing
-    /// to offer, since no model can be loaded any other way at that point).
-    func showDownloadWindow(onDone: ((String) -> Void)? = nil) {
+    func showDownloadWindow() {
         var count = 0
         guard let models = boo_models(&count), count > 0 else {
-            if onDone == nil { NSApp.terminate(nil) }
+            NSApp.terminate(nil)
             return
         }
 
@@ -67,10 +64,7 @@ extension AppDelegate {
         bar.maxValue = 100
         content.addSubview(bar)
 
-        let status = NSTextField(
-            labelWithString: onDone == nil
-                ? "Downloads to ~/.boo/models, then opens Boo."
-                : "Downloads to ~/.boo/models, then switches to it.")
+        let status = NSTextField(labelWithString: "Downloads to ~/.boo/models, then opens Boo.")
         status.frame = NSRect(x: 20, y: 48, width: 380, height: 18)
         status.textColor = .secondaryLabelColor
         status.font = .systemFont(ofSize: 11)
@@ -84,12 +78,30 @@ extension AppDelegate {
         content.addSubview(button)
 
         win.contentView = content
-        // Wire the controls to a downloader the button action can reach.
-        let ui = DownloadUI(popup: popup, bar: bar, status: status, button: button, window: win)
-        let done = onDone ?? { [weak self] path in self?.startWithModel(path: path) }
-        modelDownloader = ModelDownloader(models: models, count: count, ui: ui) { path in
-            win.close()
-            done(path)
+
+        // The downloader drives these widgets through its closures; the
+        // button action just fires the prepared start closure.
+        let downloader = ModelDownloader(
+            onProgress: { bar.doubleValue = $0 },
+            onDone: { [weak self] path in
+                win.close()
+                self?.startWithModel(path: path)
+            },
+            onFail: { why in
+                status.stringValue = why
+                button.isEnabled = true
+                popup.isEnabled = true
+                win.standardWindowButton(.closeButton)?.isEnabled = true
+            })
+        modelDownloader = downloader
+        onboardingStart = {
+            let idx = popup.indexOfSelectedItem
+            guard idx >= 0, idx < count else { return }
+            button.isEnabled = false
+            popup.isEnabled = false
+            win.standardWindowButton(.closeButton)?.isEnabled = false  // no mid-download close
+            status.stringValue = "Downloading…"
+            downloader.start(model: models[idx])
         }
         downloadWindow = win
         win.makeKeyAndOrderFront(nil)
@@ -97,7 +109,7 @@ extension AppDelegate {
     }
 
     @objc func startModelDownload(_: NSButton) {
-        modelDownloader?.start()
+        onboardingStart?()
     }
 
     private func cs(_ p: UnsafePointer<CChar>?) -> String {
@@ -105,43 +117,30 @@ extension AppDelegate {
     }
 }
 
-/// The download dialog's controls, grouped so the downloader takes one handle.
-struct DownloadUI {
-    let popup: NSPopUpButton
-    let bar: NSProgressIndicator
-    let status: NSTextField
-    let button: NSButton
-    let window: NSWindow
-}
-
-/// Streams the selected model with progress, verifies its pinned SHA-256, moves
-/// it into ~/.boo/models, and reports the final path.
+/// Streams one manifest model with progress, verifies its pinned SHA-256, moves
+/// it into ~/.boo/models, and reports the final path. UI-agnostic: progress,
+/// success, and failure surface through closures (called on the main queue),
+/// so onboarding and the Settings model switcher drive different widgets with
+/// the same downloader.
 final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
-    private let models: UnsafePointer<BooModelInfo>
-    private let count: Int
-    private let ui: DownloadUI
-    private let onDone: (String) -> Void
+    private let onProgress: (Double) -> Void  // 0..100
+    private let onDone: (String) -> Void  // verified path in ~/.boo/models
+    private let onFail: (String) -> Void
     private var session: URLSession?
     private var model: BooModelInfo?
 
     init(
-        models: UnsafePointer<BooModelInfo>, count: Int, ui: DownloadUI,
-        onDone: @escaping (String) -> Void
+        onProgress: @escaping (Double) -> Void, onDone: @escaping (String) -> Void,
+        onFail: @escaping (String) -> Void
     ) {
-        self.models = models
-        self.count = count
-        self.ui = ui
+        self.onProgress = onProgress
         self.onDone = onDone
+        self.onFail = onFail
     }
 
-    func start() {
-        let idx = ui.popup.indexOfSelectedItem
-        guard idx >= 0, idx < count, let url = URL(string: str(models[idx].url)) else { return }
-        model = models[idx]
-        ui.button.isEnabled = false
-        ui.popup.isEnabled = false
-        ui.window.standardWindowButton(.closeButton)?.isEnabled = false  // no mid-download close
-        ui.status.stringValue = "Downloading…"
+    func start(model: BooModelInfo) {
+        guard let url = URL(string: str(model.url)) else { return }
+        self.model = model
         let cfg = URLSessionConfiguration.default
         session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
         session?.downloadTask(with: url).resume()
@@ -152,7 +151,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         totalBytesWritten: Int64, totalBytesExpectedToWrite _: Int64
     ) {
         let total = Double(model?.size ?? 0)
-        if total > 0 { ui.bar.doubleValue = Double(totalBytesWritten) / total * 100 }
+        if total > 0 { onProgress(Double(totalBytesWritten) / total * 100) }
     }
 
     // Must move/verify synchronously: URLSession deletes `location` on return.
@@ -190,10 +189,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
 
     private func fail(_ why: String) {
         boo_log(Int32(BOO_LOG_ERROR), "model download failed")
-        ui.status.stringValue = why
-        ui.button.isEnabled = true
-        ui.popup.isEnabled = true
-        ui.window.standardWindowButton(.closeButton)?.isEnabled = true
+        onFail(why)
     }
 
     private func str(_ p: UnsafePointer<CChar>?) -> String {
