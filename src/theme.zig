@@ -14,20 +14,8 @@ pub const Colors = extern struct {
     palette: [16]u32 = .{0} ** 16,
 };
 
-// libc file IO declared by hand rather than via @cImport: Zig 0.16 removed
-// std.fs.cwd and reworked file IO, and @cImport of <stdio.h>/<dirent.h> does
-// not translate cleanly for the mingw (Windows) target (unused-constant and
-// signature errors from the fortified inlines). These are ABI-stable across
-// every libc Boo links.
-const FILE = opaque {};
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*FILE;
-extern "c" fn fclose(f: *FILE) c_int;
-extern "c" fn fread(ptr: [*]u8, size: usize, nmemb: usize, f: *FILE) usize;
-extern "c" fn fseek(f: *FILE, off: c_long, whence: c_int) c_int;
-extern "c" fn ftell(f: *FILE) c_long;
-const SEEK_SET: c_int = 0;
-const SEEK_END: c_int = 2;
-const MAX_THEME_BYTES: c_long = 1 << 20;
+const libc = @import("libc.zig");
+const MAX_THEME_BYTES = 1 << 20;
 
 /// One `#RRGGBB` (the `#` optional) to 0xRRGGBB, or null if malformed.
 pub fn parseHex(text: []const u8) ?u32 {
@@ -85,15 +73,9 @@ pub fn parseContent(content: []const u8) ?Colors {
 /// or oversized, or is not a complete theme. `allocator` holds the file only for
 /// the duration of the call.
 pub fn parseFile(allocator: std.mem.Allocator, path: [*:0]const u8) ?Colors {
-    const f = fopen(path, "rb") orelse return null;
-    defer _ = fclose(f);
-    if (fseek(f, 0, SEEK_END) != 0) return null;
-    const size = ftell(f);
-    if (size <= 0 or size > MAX_THEME_BYTES) return null;
-    if (fseek(f, 0, SEEK_SET) != 0) return null;
-    const buf = allocator.alloc(u8, @intCast(size)) catch return null;
+    const buf = libc.readFile(allocator, path, MAX_THEME_BYTES) catch return null;
     defer allocator.free(buf);
-    if (fread(buf.ptr, 1, buf.len, f) != buf.len) return null;
+    if (buf.len == 0) return null;
     return parseContent(buf);
 }
 

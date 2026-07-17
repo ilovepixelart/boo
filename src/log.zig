@@ -12,22 +12,15 @@
 // without translate-c).
 
 const std = @import("std");
-const common = @import("audio/common.zig");
+const sync = @import("sync.zig");
 
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern "c" fn fclose(stream: *anyopaque) c_int;
-extern "c" fn fwrite(ptr: [*]const u8, size: usize, nmemb: usize, stream: *anyopaque) usize;
-extern "c" fn fflush(stream: *anyopaque) c_int;
-// Wall-clock seconds since the epoch. Zig 0.16 moved the std time helpers into
-// std.Io; libc time() is portable across all three targets (time_t is 64-bit on
-// modern Linux/macOS/mingw).
-extern "c" fn time(tloc: ?*i64) i64;
+const libc = @import("libc.zig");
 
 pub const Level = enum(c_int) { err = 0, warn = 1, info = 2, debug = 3 };
 
-var file: ?*anyopaque = null;
+var file: ?*libc.FILE = null;
 var min_level: c_int = @intFromEnum(Level.info);
-var mutex: common.Mutex = .{};
+var mutex: sync.Mutex = .{};
 
 fn tag(level: c_int) []const u8 {
     return switch (level) {
@@ -44,11 +37,11 @@ pub fn init(path: ?[*:0]const u8, level: c_int) void {
     mutex.lock();
     defer mutex.unlock();
     if (file) |f| {
-        _ = fclose(f);
+        _ = libc.fclose(f);
         file = null;
     }
     min_level = level;
-    if (path) |p| file = fopen(p, "a");
+    if (path) |p| file = libc.fopen(p, "a");
 }
 
 /// Write one already-formatted line at `level`. Below the minimum level it is
@@ -61,17 +54,17 @@ pub fn write(level: c_int, msg: []const u8) void {
     var head: [48]u8 = undefined;
     // Seconds since epoch keeps the header allocation-free and timezone-free;
     // a human can convert.
-    const h = std.fmt.bufPrint(&head, "[{d}] {s} ", .{ time(null), tag(level) }) catch return;
+    const h = std.fmt.bufPrint(&head, "[{d}] {s} ", .{ libc.time(null), tag(level) }) catch return;
 
     // stderr for the CLI / tests; the frontends also have their native console
     // sinks (os_log / journald / OutputDebugString).
     std.debug.print("{s}{s}\n", .{ h, msg });
 
     if (file) |f| {
-        _ = fwrite(h.ptr, 1, h.len, f);
-        _ = fwrite(msg.ptr, 1, msg.len, f);
-        _ = fwrite("\n", 1, 1, f);
-        _ = fflush(f);
+        _ = libc.fwrite(h.ptr, 1, h.len, f);
+        _ = libc.fwrite(msg.ptr, 1, msg.len, f);
+        _ = libc.fwrite("\n", 1, 1, f);
+        _ = libc.fflush(f);
     }
 }
 

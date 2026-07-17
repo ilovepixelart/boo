@@ -1,4 +1,5 @@
 const std = @import("std");
+const sync = @import("sync.zig");
 const c = @cImport({
     @cInclude("whisper.h");
 });
@@ -87,7 +88,7 @@ pub const WhisperContext = struct {
         // annotations); on silence and noise those are pure hallucination.
         params.suppress_nst = true;
         params.language = language();
-        params.n_threads = threadCount();
+        params.n_threads = sync.threadCount();
 
         const result = c.whisper_full(self.ctx, params, samples.ptr, @intCast(samples.len));
         if (result != 0) return error.TranscriptionFailed;
@@ -203,18 +204,6 @@ test "isAnnotation: real speech is never an annotation" {
     try testing.expect(!isAnnotation("[")); // too short / unbalanced
 }
 
-/// Decode thread count: min(cores, 8), overridable with $BOO_THREADS.
-/// The valgrind CI job sets 1: memcheck serializes every thread onto a single
-/// core, where ggml's spin-waiting workers starve the one doing the work and
-/// a minutes-long job becomes hours.
-pub fn threadCount() c_int {
-    if (std.c.getenv("BOO_THREADS")) |env| {
-        const n = std.fmt.parseInt(u8, std.mem.span(env), 10) catch 0;
-        if (n > 0) return n;
-    }
-    return @intCast(@min(std.Thread.getCpuCount() catch 4, 8));
-}
-
 /// whisper's VAD timestamps are centiseconds (the same 10ms unit as its
 /// segment timestamps); at 16kHz that is 160 samples per tick.
 const SAMPLES_PER_CS = 160;
@@ -233,7 +222,7 @@ pub const Vad = struct {
         // which reintroduced spin-waiting workers under the valgrind CI job
         // after $BOO_THREADS had removed them from transcription.
         params.use_gpu = false;
-        params.n_threads = threadCount();
+        params.n_threads = sync.threadCount();
         const ctx = c.whisper_vad_init_from_file_with_params(model_path.ptr, params) orelse
             return error.ModelLoadFailed;
         return .{ .ctx = ctx };

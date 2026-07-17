@@ -107,10 +107,7 @@ pub fn init(dir: []const u8) void {
 
 const testing = std.testing;
 
-extern "c" fn remove(path: [*:0]const u8) c_int;
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern "c" fn fread(ptr: [*]u8, size: usize, nmemb: usize, f: *anyopaque) usize;
-extern "c" fn fclose(f: *anyopaque) c_int;
+const libc = @import("libc.zig");
 extern "c" fn fork() c_int;
 extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
 extern "c" fn _exit(status: c_int) noreturn;
@@ -125,7 +122,7 @@ test "a fatal signal leaves a backtrace file behind" {
     const dir = try std.fmt.bufPrint(&dbuf, "{s}", .{std.mem.span(tmp)});
     var pbuf: [1024:0]u8 = undefined;
     const path = try std.fmt.bufPrintSentinel(&pbuf, "{s}/boo-crash.txt", .{dir}, 0);
-    _ = remove(path);
+    _ = libc.remove(path);
 
     const pid = fork();
     try testing.expect(pid >= 0);
@@ -144,10 +141,10 @@ test "a fatal signal leaves a backtrace file behind" {
     const exited_clean = (status & 0x7f) == 0 and ((status >> 8) & 0xff) == 0;
     try testing.expect(!exited_clean);
 
-    const f = fopen(path, "rb") orelse return error.TestUnexpectedResult;
+    const f = libc.fopen(path, "rb") orelse return error.TestUnexpectedResult;
     var content: [4096]u8 = undefined;
-    const n = fread(&content, 1, content.len, f);
-    _ = fclose(f);
+    const n = libc.fread(&content, 1, content.len, f);
+    _ = libc.fclose(f);
     try testing.expect(std.mem.indexOf(u8, content[0..n], "Boo crash: signal") != null);
-    _ = remove(path);
+    _ = libc.remove(path);
 }

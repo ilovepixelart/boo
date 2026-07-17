@@ -10,7 +10,7 @@ const crash = @import("crash.zig");
 const common = @import("audio/common.zig");
 
 const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
-const MIN_AUDIO_SAMPLES = 8000; // ~0.5s at 16kHz
+const MIN_AUDIO_SAMPLES = common.MIN_AUDIO_SAMPLES;
 
 const BooContext = struct {
     engine: Engine,
@@ -24,7 +24,7 @@ const BooContext = struct {
     /// would be a data race.
     transcribing: std.atomic.Value(bool) = .init(false),
     /// Owned null-terminated transcript string, or null if none.
-    last_transcript: ?[]u8 = null,
+    last_transcript: ?[:0]u8 = null,
     waveform_buf: [WAVEFORM_BARS]f32 = .{0.0} ** WAVEFORM_BARS,
 
     // Streaming (VAD-chunked) state; stays absent unless boo_load_vad succeeds,
@@ -81,8 +81,7 @@ const BooContext = struct {
     /// keeps showing the previous state.
     fn publishLiveTranscript(self: *BooContext) void {
         const ch = if (self.chunker) |*it| it else return;
-        const buf = self.allocator.allocSentinel(u8, ch.committed.items.len, 0) catch return;
-        @memcpy(buf[0..ch.committed.items.len], ch.committed.items);
+        const buf = self.allocator.dupeZ(u8, ch.committed.items) catch return;
         if (self.live_transcript) |old| {
             // On OOM, leak `old` rather than free it: a frontend thread may
             // still be copying the pointer it fetched from live_ptr.
@@ -337,13 +336,10 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
         return null;
     }
 
-    // Allocate null-terminated copy: text + null byte as one contiguous allocation
-    const buf = c.allocator.alloc(u8, text.len + 1) catch {
+    const buf = c.allocator.dupeZ(u8, text) catch {
         c.allocator.free(text);
         return null;
     };
-    @memcpy(buf[0..text.len], text);
-    buf[text.len] = 0;
     c.allocator.free(text);
 
     // Replace previous transcript
@@ -351,8 +347,8 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     c.last_transcript = buf;
 
     // Metadata only, never the text (see src/log.zig privacy note).
-    log.logf(.info, "transcribed {d} chars", .{buf.len - 1});
-    return @ptrCast(buf.ptr);
+    log.logf(.info, "transcribed {d} chars", .{buf.len});
+    return buf.ptr;
 }
 
 // ── themes ─────────────────────────────────────────────────────────────────
@@ -494,14 +490,7 @@ pub const BOO_MODEL_FILE_OK: c_int = 0;
 pub const BOO_MODEL_FILE_TRUNCATED: c_int = 1;
 pub const BOO_MODEL_FILE_UNKNOWN: c_int = 2;
 
-// libc, hand-declared like theme.zig: portable across the mingw build where
-// @cImport of stdio.h does not translate.
-const SEEK_END: c_int = 2;
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern "c" fn fclose(f: *anyopaque) c_int;
-extern "c" fn fseek(f: *anyopaque, off: c_long, whence: c_int) c_int;
-extern "c" fn ftell(f: *anyopaque) c_long;
-extern "c" fn remove(path: [*:0]const u8) c_int;
+const libc = @import("libc.zig");
 
 export fn boo_model_verify(path: [*:0]const u8) c_int {
     const basename = std.fs.path.basename(std.mem.span(path));
@@ -510,10 +499,10 @@ export fn boo_model_verify(path: [*:0]const u8) c_int {
     } else return BOO_MODEL_FILE_UNKNOWN;
 
     // Every manifest size fits c_long even on mingw (all under 2 GB).
-    const f = fopen(path, "rb") orelse return BOO_MODEL_FILE_TRUNCATED;
-    defer _ = fclose(f);
-    if (fseek(f, 0, SEEK_END) != 0) return BOO_MODEL_FILE_TRUNCATED;
-    const size = ftell(f);
+    const f = libc.fopen(path, "rb") orelse return BOO_MODEL_FILE_TRUNCATED;
+    defer _ = libc.fclose(f);
+    if (libc.fseek(f, 0, libc.SEEK_END) != 0) return BOO_MODEL_FILE_TRUNCATED;
+    const size = libc.ftell(f);
     if (size < 0) return BOO_MODEL_FILE_TRUNCATED;
     return if (@as(u64, @intCast(size)) == expected)
         BOO_MODEL_FILE_OK
@@ -559,6 +548,8 @@ test {
     _ = @import("log.zig");
     _ = @import("postprocess.zig");
     _ = @import("crash.zig");
+    _ = @import("sync.zig");
+    _ = @import("libc.zig");
 }
 
 const testing = std.testing;
@@ -678,9 +669,9 @@ test "boo_model_verify flags truncated manifest models, cannot judge unknowns" {
         .{std.mem.span(tmp)},
         0,
     );
-    const f = fopen(path, "wb") orelse return error.SkipZigTest;
-    _ = fclose(f);
-    defer _ = remove(path);
+    const f = libc.fopen(path, "wb") orelse return error.SkipZigTest;
+    _ = libc.fclose(f);
+    defer _ = libc.remove(path);
     try testing.expectEqual(BOO_MODEL_FILE_TRUNCATED, boo_model_verify(path));
 
     // A real, complete download passes. Skips on checkouts without models.
@@ -692,8 +683,8 @@ test "boo_model_verify flags truncated manifest models, cannot judge unknowns" {
         .{std.mem.span(home)},
         0,
     ) catch return;
-    const probe = fopen(model, "rb") orelse return;
-    _ = fclose(probe);
+    const probe = libc.fopen(model, "rb") orelse return;
+    _ = libc.fclose(probe);
     try testing.expectEqual(BOO_MODEL_FILE_OK, boo_model_verify(model));
 }
 

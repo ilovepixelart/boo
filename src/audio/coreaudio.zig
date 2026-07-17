@@ -3,7 +3,6 @@ const common = @import("common.zig");
 
 const WHISPER_SAMPLE_RATE = common.WHISPER_SAMPLE_RATE;
 const WAVEFORM_BARS = common.WAVEFORM_BARS;
-const PREROLL_SAMPLES = common.PREROLL_SAMPLES;
 
 const NUM_BUFFERS: usize = 3;
 const BUFFER_DURATION_MS: u32 = 100;

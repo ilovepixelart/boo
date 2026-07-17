@@ -36,7 +36,7 @@ const c = @cImport({
     @cInclude("dirent.h");
 });
 
-const WHISPER_SAMPLE_RATE = 16000;
+const WHISPER_SAMPLE_RATE = @import("audio/common.zig").WHISPER_SAMPLE_RATE;
 const DEFAULT_WARM_RUNS = 5;
 const MAX_WAV_BYTES = 512 * 1024 * 1024;
 
@@ -249,14 +249,7 @@ pub fn main(init: std.process.Init) !void {
     allocator.free(cold_text);
 
     var failed = false;
-    if (assert_rtf) |threshold| {
-        if (rtf < threshold) {
-            std.debug.print("\nFAIL: {d:.1}x realtime is below the required {d:.1}x\n", .{ rtf, threshold });
-            failed = true;
-        } else {
-            std.debug.print("\nOK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
-        }
-    }
+    checkRtfGate(rtf, assert_rtf, &failed);
     checkWerGate(wer_pct, assert_wer, &failed);
     if (failed) std.process.exit(1);
 }
@@ -356,14 +349,7 @@ fn runSuite(
     );
 
     var failed = false;
-    if (assert_rtf) |threshold| {
-        if (rtf < threshold) {
-            std.debug.print("FAIL: {d:.1}x realtime is below the required {d:.1}x\n", .{ rtf, threshold });
-            failed = true;
-        } else {
-            std.debug.print("OK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
-        }
-    }
+    checkRtfGate(rtf, assert_rtf, &failed);
     checkWerGate(aggregate_pct, assert_wer, &failed);
     if (failed) std.process.exit(1);
 }
@@ -375,6 +361,16 @@ fn scoreWer(allocator: std.mem.Allocator, transcript: []const u8, reference: ?[]
     const pct = rate * 100.0;
     std.debug.print("  WER:        {d:.1}% vs reference\n", .{pct});
     return pct;
+}
+
+fn checkRtfGate(rtf: f64, assert_rtf: ?f64, failed: *bool) void {
+    const threshold = assert_rtf orelse return;
+    if (rtf < threshold) {
+        std.debug.print("\nFAIL: {d:.1}x realtime is below the required {d:.1}x\n", .{ rtf, threshold });
+        failed.* = true;
+    } else {
+        std.debug.print("\nOK: {d:.1}x realtime meets the required {d:.1}x\n", .{ rtf, threshold });
+    }
 }
 
 fn checkWerGate(wer_pct: ?f64, assert_wer: ?f64, failed: *bool) void {
@@ -450,7 +446,7 @@ fn runStreamBench(
     }
 
     _ = timer.lap();
-    const final = try chunker.finalize(take.items[chunker.consumed..], 8000);
+    const final = try chunker.finalize(take.items[chunker.consumed..], @import("audio/common.zig").MIN_AUDIO_SAMPLES);
     const stop_ms = msFromNs(timer.lap());
     defer allocator.free(final);
 

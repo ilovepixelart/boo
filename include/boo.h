@@ -29,12 +29,18 @@ bool boo_is_transcribing(BooContext *ctx);
 // the frontend should say "no microphone" rather than appear to record.
 bool boo_has_microphone(BooContext *ctx);
 
-// Audio data
+// Live audio readouts for the UI. boo_get_waveform returns a pointer INTO
+// the context: overwritten by every call and written without a lock, so poll
+// it from one UI thread/timer only; out_bars receives the bar count.
+// boo_get_audio_samples returns the number of captured samples so far (a
+// count, despite the name). All three tolerate a null context.
 const float *boo_get_waveform(BooContext *ctx, int *out_bars);
 float boo_get_peak_rms(BooContext *ctx);
 int boo_get_audio_samples(BooContext *ctx);
 
-// Transcription, returns null-terminated string owned by context.
+// Transcription, returns null-terminated string owned by context, or NULL
+// for a silent or too-short take and on any engine failure (the frontend
+// shows "no speech detected" either way; failures land in the log).
 // Valid until the next boo_transcribe() or boo_deinit(); starting a new
 // recording does NOT free it, so a worker still copying the result can never
 // race a fresh take.

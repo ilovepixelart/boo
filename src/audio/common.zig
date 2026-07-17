@@ -29,50 +29,14 @@ pub fn samplesUntilCap(captured: usize, incoming: usize) usize {
     return @min(MAX_RECORDING_SAMPLES - captured, incoming);
 }
 
-// OS-primitive mutex. `std.Thread.Mutex` was removed in Zig 0.16 in favor of
-// `std.Io.Mutex`, which threads an Io context through every call site, too
-// invasive for our audio callback path. pthread covers macOS and Linux; on
-// Windows std.c has no pthread types, so that arm uses SRWLOCK: one
-// zero-initialized pointer-sized word, no destroy call exists or is needed.
-pub const Mutex = switch (builtin.os.tag) {
-    .windows => struct {
-        handle: SRWLOCK = .{},
+// Re-exported so the audio backends keep their import; the shim itself
+// lives in src/sync.zig, where base modules can reach it without depending
+// on the audio subsystem.
+pub const Mutex = @import("../sync.zig").Mutex;
 
-        // Declared by hand rather than via std.os.windows.ntdll, which is not
-        // a stability-guaranteed API surface.
-        const SRWLOCK = extern struct { ptr: ?*anyopaque = null };
-        extern "ntdll" fn RtlAcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
-        extern "ntdll" fn RtlReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
-        extern "ntdll" fn RtlTryAcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) u8;
-
-        pub fn lock(self: *@This()) void {
-            RtlAcquireSRWLockExclusive(&self.handle);
-        }
-
-        pub fn unlock(self: *@This()) void {
-            RtlReleaseSRWLockExclusive(&self.handle);
-        }
-
-        pub fn tryLock(self: *@This()) bool {
-            return RtlTryAcquireSRWLockExclusive(&self.handle) != 0;
-        }
-    },
-    else => struct {
-        handle: std.c.pthread_mutex_t = .{},
-
-        pub fn lock(self: *@This()) void {
-            _ = std.c.pthread_mutex_lock(&self.handle);
-        }
-
-        pub fn unlock(self: *@This()) void {
-            _ = std.c.pthread_mutex_unlock(&self.handle);
-        }
-
-        pub fn tryLock(self: *@This()) bool {
-            return std.c.pthread_mutex_trylock(&self.handle) == .SUCCESS;
-        }
-    },
-};
+/// The shortest take worth decoding (~0.5s at 16kHz): shared by the C API's
+/// batch gate and the bench's streaming simulation, previously two literals.
+pub const MIN_AUDIO_SAMPLES = WHISPER_SAMPLE_RATE / 2;
 
 pub fn computeWaveform(samples: []const f32, out: *[WAVEFORM_BARS]f32) void {
     const window = WHISPER_SAMPLE_RATE / 2;
