@@ -48,12 +48,15 @@ So both are worth doing, but they fix different symptoms.
 3. **Loosen `keepSegment`.** The `avg_logprob < -0.4` cutoff likely drops real
    low-confidence speech; raise the bar (or require a stronger no_speech signal)
    and re-measure WER on the LibriSpeech suite.
-4. **Deterministic post-processing** (after the full transcript, local, no
-   network): collapse verbatim repeated words/phrases (residual whisper
-   repetition), normalize whitespace and capitalize sentence starts, strip a
-   stray leading/trailing filler token. Plus the roadmap's user-vocabulary
-   replacements and spoken-punctuation commands. This fixes *formatting and
-   repetition*, not drops.
+4. **Deterministic post-processing.** Core part done: repetition-loop
+   collapse (a unit of 1 to 4 words repeated 3+ times back to back becomes
+   one occurrence, doubles are kept as real speech) plus whitespace
+   normalization, in `src/postprocess.zig`, applied once at the C API
+   boundary so every frontend gets it. Sentence capitalization was dropped
+   on purpose: whisper already capitalizes, and rules would mangle words
+   like "iPhone". User-vocabulary replacements and spoken-punctuation
+   commands stay on the roadmap. This fixes *formatting and repetition*,
+   not drops.
 5. **Streaming LocalAgreement** (larger): cross-confirm chunk seams so words are
    not lost or duplicated across pauses. Only if 1-4 don't settle it.
 

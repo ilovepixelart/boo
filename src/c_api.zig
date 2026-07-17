@@ -5,6 +5,7 @@ const whisper_mod = engine_mod.whisper;
 const Engine = engine_mod.Engine;
 const AudioCapture = @import("audio.zig").AudioCapture;
 const stream = @import("stream.zig");
+const postprocess = @import("postprocess.zig");
 const common = @import("audio/common.zig");
 
 const WAVEFORM_BARS = @import("audio.zig").WAVEFORM_BARS;
@@ -275,7 +276,7 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
     c.whisper_mutex.lock();
     defer c.whisper_mutex.unlock();
 
-    const text: []const u8 = blk: {
+    const raw: []const u8 = blk: {
         // Streaming path: everything but the tail is already transcribed.
         if (c.chunker) |*ch| {
             const tail = a.copyAudioFrom(c.allocator, ch.consumed) catch return null;
@@ -292,6 +293,14 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
             common.SILENCE_RMS_FLOOR) return null;
         break :blk c.engine.transcribe(c.allocator, samples, true) catch return null;
     };
+
+    // Collapse residual whisper repetition loops and normalize whitespace
+    // before the transcript reaches any frontend (see src/postprocess.zig).
+    const text = postprocess.clean(c.allocator, raw) catch {
+        c.allocator.free(raw);
+        return null;
+    };
+    c.allocator.free(raw);
 
     if (text.len == 0) {
         c.allocator.free(text);
@@ -456,6 +465,7 @@ test {
     _ = @import("audio/wasapi.zig");
     _ = @import("wer.zig");
     _ = @import("log.zig");
+    _ = @import("postprocess.zig");
 }
 
 const testing = std.testing;
