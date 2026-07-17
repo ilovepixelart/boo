@@ -50,28 +50,15 @@ Extract the zip anywhere and run `boo-app.exe`. It is **unsigned**, so SmartScre
 
 Boo lives in the notification area, and Windows 11 hides new tray icons in the overflow flyout by default: drag the icon onto the taskbar to pin it. There are no permission prompts; the microphone works unless **Settings → Privacy & security → Microphone** blocks desktop apps. Pasting into elevated (admin) windows is blocked by Windows itself (UIPI); the transcript stays on the clipboard, press Ctrl+V yourself.
 
-### You also need a model
+### You also need a model, and Boo fetches it for you
 
-No whisper model is bundled (they're 140 MB+):
-
-```sh
-# macOS
-mkdir -p ~/.boo/models
-curl -L -o ~/.boo/models/ggml-base.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-
-# Linux (Flatpak)
-mkdir -p ~/.var/app/com.boo.app/data/boo/models
-curl -L -o ~/.var/app/com.boo.app/data/boo/models/ggml-base.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-```
-
-```bat
-:: Windows (curl ships with Windows 10 1803+)
-mkdir "%USERPROFILE%\.boo\models"
-curl.exe -L -o "%USERPROFILE%\.boo\models\ggml-base.en.bin" ^
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-```
+No speech model is bundled (they're 140 MB+). **Just launch Boo**: with no
+model installed it opens a download dialog on every platform, a curated list
+with sizes and tradeoffs, a progress bar, and every file verified against a
+SHA-256 pinned in the binary. Settings has a model switcher to change or
+download models later; an interrupted manual download is detected and offered
+for re-download instead of failing. Prefer the shell? The manual `curl` steps
+live in the per-OS [install guides](https://github.com/ilovepixelart/boo/tree/master/docs).
 
 Then press **Ctrl+Shift+Space**, speak, and press it again.
 
