@@ -35,6 +35,9 @@ typedef struct {
         gboolean auto_type;  // paste into the focused app vs clipboard-only
         char *model_current; // full path of the loaded speech model
         char *model_choice;  // the user's explicit pick, persisted; NULL until made
+        GtkWindow *dialog;   // the open Settings window, NULL when closed; a
+                             // second gear click presents it instead of
+                             // spawning a rival dialog (and rival downloads)
     } settings;
     guint hint_reset; // 0 == no pending reset to the idle hint
     gboolean hotkey_ok;
@@ -621,6 +624,10 @@ typedef struct {
     GtkLabel *model_status;
     GPtrArray *model_entries; // ModelEntry*, parallel to the dropdown rows
     gboolean model_updating;  // guard against programmatic selection changes
+    // A swap or download is in flight: the close button is hidden AND
+    // close-request is refused, because deletable is only a hint and a
+    // WM-initiated close (Alt+F4) would free this UI under the worker.
+    gboolean busy;
 } SettingsUI;
 
 // One model-dropdown entry: a model on disk (`path` set) or a curated
@@ -690,6 +697,21 @@ static gboolean on_autotype_changed(const GtkSwitch *sw, gboolean active, gpoint
     return FALSE; // let the default handler update the visual state
 }
 
+// Freeze or thaw the dialog around background work (a swap or a download):
+// the dropdown, the close button, and the close-request refusal, in one
+// place so the four call sites cannot drift.
+static void settings_set_busy(SettingsUI *ui, gboolean busy) {
+    ui->busy = busy;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), !busy);
+    gtk_window_set_deletable(ui->win, !busy);
+}
+
+static gboolean on_settings_close_request(GtkWindow *win, gpointer data) {
+    (void)win;
+    // TRUE blocks the close; the workers' completion callbacks poke this UI.
+    return ((SettingsUI *)data)->busy;
+}
+
 // Refill the model dropdown: models on disk first (ranked), then curated
 // manifest models not yet downloaded, tagged with their size. Selects the
 // loaded model.
@@ -756,8 +778,7 @@ static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer 
     gboolean ok = g_task_propagate_boolean(G_TASK(result), NULL);
     g_autofree char *base = g_path_get_basename(job->path);
 
-    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), TRUE);
-    gtk_window_set_deletable(ui->win, TRUE);
+    settings_set_busy(ui, FALSE);
     if (ok) {
         g_free(ui->st->settings.model_current);
         ui->st->settings.model_current = g_strdup(job->path);
@@ -781,8 +802,7 @@ static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer 
 // keeps the old model on failure). The settings window's close button is
 // disabled for the duration so these widgets cannot die under the worker.
 static void model_switch_start(SettingsUI *ui, const char *path) {
-    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), FALSE);
-    gtk_window_set_deletable(ui->win, FALSE);
+    settings_set_busy(ui, TRUE);
     g_autofree char *base = g_path_get_basename(path);
     g_autofree char *msg = g_strdup_printf("Loading %s…", base);
     gtk_label_set_text(ui->model_status, msg);
@@ -805,15 +825,13 @@ static void on_model_download_done(const char *path, gpointer data) {
 static void on_model_download_fail(const char *why, gpointer data) {
     SettingsUI *ui = data;
     gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), FALSE);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), TRUE);
-    gtk_window_set_deletable(ui->win, TRUE);
+    settings_set_busy(ui, FALSE);
     gtk_label_set_text(ui->model_status, why);
     model_list_rebuild(ui);
 }
 
 static void model_download_start(SettingsUI *ui, const BooModelInfo *model) {
-    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), FALSE);
-    gtk_window_set_deletable(ui->win, FALSE);
+    settings_set_busy(ui, TRUE);
     gtk_progress_bar_set_fraction(ui->model_progress, 0);
     gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), TRUE);
     g_autofree char *msg = g_strdup_printf("Downloading %s…", model->filename);
@@ -844,9 +862,18 @@ static void on_model_selected(GObject *dd, GParamSpec *spec, gpointer data) {
     model_switch_start(ui, e->path);
 }
 
+static void on_settings_destroyed(GtkWidget *win, gpointer data) {
+    (void)win;
+    ((WindowState *)data)->settings.dialog = NULL;
+}
+
 static void open_settings(GtkButton *btn, gpointer data) {
     (void)btn;
     WindowState *st = data;
+    if (st->settings.dialog) {
+        gtk_window_present(st->settings.dialog);
+        return;
+    }
     SettingsUI *ui = g_new0(SettingsUI, 1);
     ui->st = st;
 
@@ -855,7 +882,10 @@ static void open_settings(GtkButton *btn, gpointer data) {
     gtk_window_set_default_size(GTK_WINDOW(win), 360, 600);
     gtk_window_set_transient_for(GTK_WINDOW(win), st->window);
     ui->win = GTK_WINDOW(win);
+    st->settings.dialog = GTK_WINDOW(win);
     g_object_set_data_full(G_OBJECT(win), "boo-settings-ui", ui, settings_ui_free);
+    g_signal_connect(win, "close-request", G_CALLBACK(on_settings_close_request), ui);
+    g_signal_connect(win, "destroy", G_CALLBACK(on_settings_destroyed), st);
 
     GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_top(content, 12);

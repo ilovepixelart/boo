@@ -152,8 +152,10 @@ static void on_crash_response(AdwAlertDialog *dialog, const char *response,
     (void)dialog;
     const char *dir = user_data; // freed by the closure notify
     if (g_strcmp0(response, "reveal") == 0) {
-        g_autofree char *uri = g_strconcat("file://", dir, NULL);
-        g_app_info_launch_default_for_uri(uri, NULL, NULL);
+        // Proper escaping: a home path with a space or non-ASCII would make
+        // a hand-concatenated file:// URI silently invalid.
+        g_autofree char *uri = g_filename_to_uri(dir, NULL, NULL);
+        if (uri) g_app_info_launch_default_for_uri(uri, NULL, NULL);
     }
 }
 
@@ -374,6 +376,16 @@ static void show_no_model_dialog(AppState *state, const char *hint) {
 static void on_activate(AdwApplication *app, gpointer user_data) {
     AppState *state = user_data;
     state->app = GTK_APPLICATION(app);
+
+    // A second launch of this unique application re-fires activate on the
+    // primary instance; re-running startup would leak the first context and
+    // open a second overlay. Surface the existing window instead.
+    if (state->ctx) {
+        GtkWindow *win = gtk_application_get_active_window(GTK_APPLICATION(app));
+        if (win) gtk_window_present(win);
+        return;
+    }
+
     init_logging();
 
     g_autofree char *model_path = boo_find_model_path();

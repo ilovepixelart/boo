@@ -254,6 +254,14 @@ static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_d
     }
     g_checksum_update(dc->sum, dc->buf, n);
     dc->received += n;
+    // The manifest size is exact; a longer body is the wrong file, and the
+    // bound keeps a misbehaving server from filling the disk before the
+    // checksum check ever runs.
+    if (dc->received > (goffset)dc->model->size) {
+        g_object_unref(stream);
+        download_fail(dc, "The download is larger than the model. Try again.");
+        return;
+    }
     gtk_progress_bar_set_fraction(dc->progress,
                                   (double)dc->received / (double)dc->model->size);
     read_chunk(dc, stream);
@@ -270,6 +278,17 @@ static void on_send_ready(GObject *source, GAsyncResult *result, gpointer user_d
     GInputStream *stream = soup_session_send_finish(SOUP_SESSION(source), result, &error);
     if (!stream) {
         download_fail(dc, "Could not connect. Check your network and try again.");
+        return;
+    }
+
+    // send_async succeeds on an HTTP error too; without this a moved URL
+    // streams the 404 page to disk and surfaces as a baffling checksum
+    // failure that retries forever.
+    SoupMessage *msg =
+        soup_session_get_async_result_message(SOUP_SESSION(source), result);
+    if (!msg || soup_message_get_status(msg) != SOUP_STATUS_OK) {
+        g_object_unref(stream);
+        download_fail(dc, "The server did not return the model. Try again later.");
         return;
     }
 
