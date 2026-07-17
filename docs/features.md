@@ -42,7 +42,7 @@ real-mic acceptance still runs on real hardware against this table.
 | **Text lands at the caret** of the focused input | Y | Y | Y | Put caret mid-sentence in an editor; dictate; text inserts there |
 | Always copied to clipboard | Y | Y | Y | After a take, paste manually; transcript is there |
 | Delivered to the app focused at record start, never Boo | Y | Y | Y | Trigger from Boo's own window; text still goes to the prior app |
-| Explicit "copied / pasted" confirmation | ~ | Y | Y | Status/toast confirms the outcome (M shows in bubble) |
+| Explicit "copied / pasted" confirmation | Y | Y | Y | Status/toast confirms the outcome |
 | Elevated/secure-input handling stated, not silent | Y | n/a | Y | Dictate into an admin window; told to press paste yourself |
 | Ghostty fast path (pty insert, no clipboard, Secure Input safe) | Y | n/a | n/a | Dictate into Ghostty on macOS; no clipboard change |
 | Auto-type toggle (clipboard-only mode) | Y | Y | Y | Settings > turn off Auto-type; transcript copies but doesn't paste |
@@ -93,9 +93,7 @@ From the columns above, the cross-platform work, in impact order:
 
 1. **Follows system light/dark on Linux**: the overlay pins the dark default
    theme's values; Windows already follows the system toggle.
-2. **Explicit "copied/pasted" confirmation on macOS** (Linux and Windows
-   already state the outcome; macOS only implies it in the bubble).
-3. **Windows tray live indicator** is elapsed-tooltip only; the macOS menu bar
+2. **Windows tray live indicator** is elapsed-tooltip only; the macOS menu bar
    draws a live waveform with a timer.
 
 Deferred (smaller): the Windows theme picker's search, per-row swatches, and

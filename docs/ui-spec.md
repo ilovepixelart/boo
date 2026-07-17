@@ -4,20 +4,21 @@ Boo deliberately ships a native frontend per OS (no shared GUI toolkit, the
 Ghostty pattern), so "consistent" cannot mean shared widgets. It means each
 frontend renders the **same design language, layout, and behavior**. The macOS
 build is the most complete, so it is the reference. This document is the ground
-truth extracted from `macos/Sources/` (cited inline); Linux and Windows are
+truth extracted from `macos/Sources/`; Linux and Windows are
 measured against it, and the gaps are the work.
 
 ## 1. Window and chrome
 
 | Property | Value | Source |
 |---|---|---|
-| Size | 400 wide, 500 tall; min 400x300, max 400x800 (width fixed) | `OverlayWindow.swift:32,39-40` |
-| Background | `theme.bg` at the user's opacity (default 1.0, fully opaque like Ghostty), non-opaque so lower opacities are translucent, shadowed; `rgba(0.16,0.17,0.2)` is only the pre-theme first paint | `OverlayWindow.swift:47,192-193`, `AppDelegate.swift:217` |
-| Chrome | Titlebar hidden and transparent, full-size content, draggable by background | `OverlayWindow.swift:44-46` |
-| Placement | Top-right of the main screen (20px right margin, 50px top) | `OverlayWindow.swift:52-56` |
-| Level | Normal (not always-on-top on macOS); does not hide on deactivate | `OverlayWindow.swift:43,50` |
+| Size | 400 wide, 500 tall; min 400x300, max 400x800 (width fixed) | `OverlayWindow.swift` |
+| Background | `theme.bg` at the user's opacity (default 1.0, fully opaque like Ghostty), non-opaque so lower opacities are translucent, shadowed; `rgba(0.16,0.17,0.2)` is only the pre-theme first paint | `OverlayWindow.swift`, `AppDelegate.swift` |
+| Chrome | Titlebar hidden and transparent, full-size content, draggable by background | `OverlayWindow.swift` |
+| Placement | Top-right of the main screen (20px right margin, 50px top) | `OverlayWindow.swift` |
+| Level | Normal (not always-on-top on macOS); does not hide on deactivate | `OverlayWindow.swift` |
 
-Vertical stack, 12px padding: **waveform** (top) → **transcript scroll**
+Vertical stack, 12px side/bottom padding (32px on top, clearing the
+transparent titlebar): **waveform** (top) → **transcript scroll**
 (middle, fills) → **bottom bar** (status text + record button).
 
 ### Window controls (native per OS)
@@ -29,13 +30,13 @@ with its native chrome, in that OS's conventional placement.
 
 | Capability | macOS (reference) | Windows | Linux |
 |---|---|---|---|
-| Controls | traffic lights **close · minimize · zoom**, top-left, kept visible over the transparent titlebar (`:35,175-186`) | native caption **minimize · close**, top-right (no maximize: width is fixed) | libadwaita header-bar **close** (+ minimize where the desktop offers it) |
-| Title area | titlebar transparent, title hidden, content to the top edge (`:44-45`) | minimal caption, no title text | header bar, no title text |
-| Move | drag anywhere on the body (`:46`) | drag the body | drag the header bar |
-| Resize | height **300-800**, width fixed **400** (`:39-40`) | same range | same range |
-| Close | hides the window; the app stays in the menu bar / tray | same (hide to tray) | same |
-| Minimize | miniaturize to the Dock (`:35`) | minimize to the taskbar | minimize where the desktop offers it |
-| Level | normal, not always-on-top; does not hide on deactivate (`:43,50`) | topmost, an overlay kept above the dictation target | normal window |
+| Controls | traffic lights **close · minimize · zoom**, top-left, kept visible over the transparent titlebar | native caption **minimize · close**, top-right (no maximize: width is fixed) | libadwaita header-bar **close** (+ minimize where the desktop offers it) |
+| Title area | titlebar transparent, title hidden, content to the top edge | minimal caption, no title text | header bar, no title text |
+| Move | drag anywhere on the body | drag the body | drag the header bar |
+| Resize | height **300-800**, width fixed **400** | same range (WM_GETMINMAXINFO) | minimum 400x300 enforced; GTK4/Wayland offers no max-height or fixed-width constraint, so the rest is compositor-decided |
+| Close | hides the window; the app stays in the menu bar / tray | same (hide to tray) | quits: GNOME has no tray, so a hidden window would be unreachable |
+| Minimize | miniaturize to the Dock | minimize to the taskbar | minimize where the desktop offers it |
+| Level | normal, not always-on-top; does not hide on deactivate | topmost, an overlay kept above the dictation target | normal window |
 
 Requirement: **native close and minimize at minimum**, placed by each OS's own
 convention, over a title-less minimal title area with content to the top edge,
@@ -49,7 +50,7 @@ Colors come from the active **Ghostty-format theme** (`Theme.swift`): 16-color
 ANSI palette plus bg/fg, 486 themes, default "Ghostty Default Style Dark".
 Text uses theme colors; a few accents are hardcoded (flagged).
 
-**The theme drives the colors.** `applyTheme` (`OverlayWindow.swift:192-197`)
+**The theme drives the colors.** `applyTheme` (`OverlayWindow.swift`)
 re-colors the window and every state from the active Ghostty theme; the values
 hardcoded at construction are only the pre-theme first paint. The single true
 hardcode is the record disc's `#FF3B30`.
@@ -94,17 +95,17 @@ Smoothed via lerp (0.25 recording / 0.1 idle). Three states:
 - **Recording**: peak-normalized heights, center bars brighter, `systemRed`.
 - **Transcribing**: gentle sine "breathing", `systemOrange`.
 
-### Transcript cards (`OverlayWindow.swift:396-539`)
+### Transcript cards (`OverlayWindow.swift`)
 A vertical **history stack** of cards in a scroll view between the waveform and
-the bottom bar (`:159-162`), chronological top to bottom, 8px between cards,
+the bottom bar, chronological top to bottom, 8px between cards,
 each card full stack width.
 
 **Order and position:** cards are **top-anchored**. The overlay view is flipped
-(`:5`) and the stack is pinned to the **top** of the scroll's document view
-(`:111`), so with only a few cards they sit directly **under the waveform and
+ and the stack is pinned to the **top** of the scroll's document view
+, so with only a few cards they sit directly **under the waveform and
 grow downward**, with the empty space toward the record button. The **newest
-card is appended at the bottom** of the stack (`:402`). Once the stack is taller
-than the visible area it **auto-scrolls to the newest** (`:416-420`): the oldest
+card is appended at the bottom** of the stack. Once the stack is taller
+than the visible area it **auto-scrolls to the newest**: the oldest
 scroll off the top, the newest stays visible just above the bottom bar. Every
 frontend follows this: top-anchored, newest at the bottom, newest kept visible
 on overflow.
@@ -133,11 +134,11 @@ text, visually one step dimmer than history cards (`white@3%` fill, `dim` text,
 no header/buttons); it is removed when the final transcript card (or "no
 speech") replaces it on stop.
 
-### Record button (`OverlayWindow.swift:135-149`)
+### Record button (`OverlayWindow.swift`)
 40x40, `#FF3B30`. **Idle = circle** (radius 20); **recording = rounded square**
 (radius 6); animated 0.15s. Centered in the bottom bar.
 
-### Status line (`OverlayWindow.swift:128-132`)
+### Status line (`OverlayWindow.swift`)
 Monospace 11pt, `dim`, centered, directly above the record button. State text:
 
 | State | Text |
@@ -146,15 +147,15 @@ Monospace 11pt, `dim`, centered, directly above the record button. State text:
 | Recording | `recording...` then live `%.0fs` elapsed |
 | Transcribing | `thinking...` |
 | Done, empty | `no speech detected` |
-| Cap hit | `max length reached` |
+| Cap hit | `max length reached`, kept on the line while the take transcribes (Linux also raises a toast) |
 | Needs permission | `copied, grant Accessibility to auto-paste` |
 
-### Menu bar item (macOS-only, `AppDelegate.swift:83-149`)
+### Menu bar item (macOS-only, `AppDelegate.swift`)
 `NSStatusItem` with a `waveform` symbol. **Live state in the menu bar itself**:
 while recording, the symbol tints `systemRed` and the button title shows a live
 elapsed timer (` 4s`, then ` 1:23`); while transcribing, it switches to
 `waveform.badge.magnifyingglass` dimmed; idle is the plain symbol. The menu:
-`Boo`, **`Record (Ctrl+Shift+Space)`** (the hotkey is shown here too),
+`Boo 👻`, **`Record (Ctrl+Shift+Space)`** (the hotkey is shown here too),
 `Show Window`, `Settings...` (Cmd+,), `Quit Boo` (Cmd+Q).
 
 ### Settings (all platforms)
