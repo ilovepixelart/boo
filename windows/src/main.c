@@ -11,6 +11,7 @@
 #include "app.h"
 #include "hotkey.h"
 #include "model.h"
+#include "onboarding.h"
 #include "overlay.h"
 #include "tray.h"
 
@@ -43,6 +44,50 @@ static void init_logging(void) {
         boo_log_init(upath, BOO_LOG_INFO);
 }
 
+bool boo_app_start(BooApp *app, char *model_path) {
+    BooContext *ctx = boo_init(model_path);
+    if (!ctx) {
+        free(model_path);
+        boo_log(BOO_LOG_ERROR, "speech model failed to load");
+        fail_dialog(L"Could not start Boo",
+                    L"The model file exists but could not be loaded, or the microphone "
+                    L"is unavailable.\n\nA corrupt or truncated model: download it "
+                    L"again.\nMicrophone blocked: check Settings > Privacy & security > "
+                    L"Microphone,\nboth the global toggle and \"Let desktop apps access "
+                    L"your microphone\".");
+        return false;
+    }
+
+    boo_log(BOO_LOG_INFO, "speech model loaded");
+    app->ctx = ctx;
+    app->settings.model_current = model_path; // ownership moves; settings shows it
+
+    if (!boo_overlay_create(app)) {
+        boo_deinit(ctx);
+        app->ctx = NULL;
+        fail_dialog(L"Could not start Boo", L"Window creation failed.");
+        return false;
+    }
+    ShowWindow(app->overlay, SW_SHOWNOACTIVATE);
+
+    boo_tray_add(app->overlay);
+
+    WCHAR reason[128];
+    app->hotkey_ok = boo_hotkey_register(app->overlay, reason, ARRAYSIZE(reason));
+    if (!app->hotkey_ok) {
+        // Same policy as the Linux frontend: the hotkey is best-effort and the
+        // Record button stays the primary control, so say so, don't die.
+        WCHAR status[160];
+        swprintf(status, ARRAYSIZE(status), L"Hotkey unavailable: %ls", reason);
+        wcsncpy(app->status, status, ARRAYSIZE(app->status) - 1);
+        app->status[ARRAYSIZE(app->status) - 1] = 0;
+    } else {
+        // Rest on the visible hotkey hint now that registration settled.
+        boo_overlay_status_idle(app);
+    }
+    return true;
+}
+
 int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
     (void)prev;
     (void)cmdline;
@@ -60,54 +105,25 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
 
     init_logging();
 
-    char *model_path = boo_model_find();
-    if (!model_path) {
-        boo_log(BOO_LOG_ERROR, "no speech model found");
-        WCHAR hint[1024];
-        boo_model_missing_hint(hint, ARRAYSIZE(hint));
-        return fail_dialog(L"No speech model found", hint);
-    }
-
-    BooContext *ctx = boo_init(model_path);
-    if (!ctx) {
-        free(model_path);
-        boo_log(BOO_LOG_ERROR, "speech model failed to load");
-        return fail_dialog(
-            L"Could not start Boo",
-            L"The model file exists but could not be loaded, or the microphone "
-            L"is unavailable.\n\nA corrupt or truncated model: download it "
-            L"again.\nMicrophone blocked: check Settings > Privacy & security > "
-            L"Microphone,\nboth the global toggle and \"Let desktop apps access "
-            L"your microphone\".");
-    }
-
-    boo_log(BOO_LOG_INFO, "speech model loaded");
-
     static BooApp app; // zero-initialized
-    app.ctx = ctx;
     app.hinst = hinst;
-    app.settings.model_current = model_path; // takes ownership; settings shows it
 
-    if (!boo_overlay_create(&app)) {
-        boo_deinit(ctx);
-        return fail_dialog(L"Could not start Boo", L"Window creation failed.");
-    }
-    ShowWindow(app.overlay, SW_SHOWNOACTIVATE);
-
-    boo_tray_add(app.overlay);
-
-    WCHAR reason[128];
-    app.hotkey_ok = boo_hotkey_register(app.overlay, reason, ARRAYSIZE(reason));
-    if (!app.hotkey_ok) {
-        // Same policy as the Linux frontend: the hotkey is best-effort and the
-        // Record button stays the primary control, so say so, don't die.
-        WCHAR status[160];
-        swprintf(status, ARRAYSIZE(status), L"Hotkey unavailable: %ls", reason);
-        wcsncpy(app.status, status, ARRAYSIZE(app.status) - 1);
-        app.status[ARRAYSIZE(app.status) - 1] = 0;
+    char *model_path = boo_model_find();
+    if (model_path) {
+        if (!boo_app_start(&app, model_path)) {
+            CloseHandle(singleton);
+            return 1;
+        }
     } else {
-        // Rest on the visible hotkey hint now that registration settled.
-        boo_overlay_status_idle(&app);
+        // First run: the onboarding dialog downloads or picks a model, then
+        // boots the app itself. Closing it without one quits.
+        boo_log(BOO_LOG_ERROR, "no speech model found");
+        if (!boo_onboarding_open(&app)) {
+            WCHAR hint[1024];
+            boo_model_missing_hint(hint, ARRAYSIZE(hint));
+            CloseHandle(singleton);
+            return fail_dialog(L"No speech model found", hint);
+        }
     }
 
     MSG msg;
@@ -126,7 +142,7 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
         WaitForSingleObject(app.worker, INFINITE);
         CloseHandle(app.worker);
     }
-    boo_deinit(ctx);
+    if (app.ctx) boo_deinit(app.ctx);
     for (int i = 0; i < app.card_count; i++) free(app.cards[i]);
     free(app.live_text);
     CloseHandle(singleton);

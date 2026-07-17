@@ -237,7 +237,7 @@ platform-native chrome and the deferred items, nothing else.
 | Elapsed timer | status + menu bar | status | status + tray tooltip |
 | Tray / menu bar | live waveform + timer + menu | none (GNOME has no tray) | icon + menu; elapsed in tooltip only |
 | Settings: opacity + auto-type + theme picker | full (reference: slider w/ live value, checkbox, search + swatch + palette preview) | full (dialog: slider w/ live value, checkbox, search + swatch list + palette preview) | full (dialog: trackbar w/ live %, checkbox, theme name list); per-row swatch + search + palette preview deferred |
-| Settings: model switcher (merged dropdown, absent models download inline) | full (in-place swap, persisted choice) | full (same, persisted in settings.ini) | dropdown of on-disk models with in-place swap + persisted choice (registry); download entries arrive with the Windows onboarding |
+| Settings: model switcher (merged dropdown, absent models download inline) | full (in-place swap, persisted choice) | full (same, persisted in settings.ini) | full (same, persisted in the registry) |
 | Theme colors applied | 486-theme picker | 486-theme picker (dark default until one is picked) | 486-theme picker (system light/dark until one is picked) |
 
 The behavior-parity matrix and the remaining backlog live in

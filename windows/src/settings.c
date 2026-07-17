@@ -5,6 +5,7 @@
 
 #include "settings.h"
 
+#include "download.h"
 #include "model.h"
 
 #include <commctrl.h>
@@ -19,6 +20,7 @@
 #define IDC_THEMES         2003
 #define IDC_OPACITY_VAL    2004
 #define IDC_MODEL          2005
+#define IDC_MODEL_PROGRESS 2006
 
 // Live opacity readout, the reference's "1.00" label (shown as a percentage).
 static void set_opacity_label(HWND dlg, int pct) {
@@ -225,11 +227,15 @@ void boo_settings_free(BooApp *app) {
 }
 
 // ── model switcher ──
-// One dropdown of the usable models on disk (boo_model_installed). Selecting
-// one swaps it in place off the UI thread via boo_reload_model, which keeps
-// the old model serving on a failed load; the explicit choice persists in the
-// registry and wins over ranked auto-discovery on later launches. In-app
-// download of missing manifest models arrives with the Windows onboarding.
+// One dropdown merging the usable models on disk (boo_model_installed) with
+// the manifest models not yet downloaded, the latter tagged with their size.
+// Picking a tagged entry downloads it first (download.c, progress bar under
+// the combo), then swaps like any on-disk model: in place off the UI thread
+// via boo_reload_model, which keeps the old model serving on a failed load.
+// The explicit choice persists in the registry and wins over ranked
+// auto-discovery on later launches.
+
+static void model_paths_free(BooApp *app);
 
 typedef struct {
     BooApp *app;
@@ -255,10 +261,17 @@ static void model_combo_select_current(BooApp *app, HWND combo) {
     SendMessageW(combo, CB_SETCURSEL, (WPARAM)-1, 0);
 }
 
-static void model_switch(BooApp *app, HWND dlg, HWND combo) {
-    const int idx = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
-    if (idx < 0 || idx >= app->settings.model_count) return;
-    const char *path = app->settings.model_paths[idx];
+// Freeze or thaw the dialog around background work (a swap or a download):
+// the combo and the close button, so the worker's message target stays alive.
+static void model_set_frozen(BooApp *app, HWND dlg, bool frozen) {
+    (void)app;
+    EnableWindow(GetDlgItem(dlg, IDC_MODEL), !frozen);
+    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE,
+                   MF_BYCOMMAND | (frozen ? MF_GRAYED : MF_ENABLED));
+}
+
+// Swap to `path` on a worker thread; loading takes seconds.
+static void model_swap_begin(BooApp *app, HWND dlg, HWND combo, const char *path) {
     if (app->settings.model_current && strcmp(path, app->settings.model_current) == 0)
         return;
     if (boo_is_recording(app->ctx) || boo_is_transcribing(app->ctx)) {
@@ -277,14 +290,10 @@ static void model_switch(BooApp *app, HWND dlg, HWND combo) {
         return;
     }
 
-    // Loading takes seconds: hand it to a thread, freeze the combo and the
-    // close button so the dialog (the message target) stays alive.
-    EnableWindow(combo, FALSE);
-    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+    model_set_frozen(app, dlg, true);
     HANDLE worker = CreateThread(NULL, 0, model_swap_worker, job, 0, NULL);
     if (!worker) {
-        EnableWindow(combo, TRUE);
-        EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+        model_set_frozen(app, dlg, false);
         free(job->path);
         free(job);
         return;
@@ -292,21 +301,103 @@ static void model_switch(BooApp *app, HWND dlg, HWND combo) {
     CloseHandle(worker);
 }
 
+// (Re)fill the model combo: usable models on disk (ranked), then manifest
+// models not yet downloaded, tagged with their size. Selects the loaded one.
+static void model_combo_fill(BooApp *app, HWND combo) {
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    model_paths_free(app);
+    app->settings.model_count = boo_model_installed(&app->settings.model_paths);
+    for (int i = 0; i < app->settings.model_count; i++) {
+        WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
+        if (!base) continue;
+        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
+        free(base);
+    }
+
+    size_t mcount = 0;
+    const BooModelInfo *manifest = boo_models(&mcount);
+    app->settings.model_absent = malloc(mcount * sizeof(*app->settings.model_absent));
+    app->settings.model_absent_count = 0;
+    for (size_t i = 0; app->settings.model_absent && i < mcount; i++) {
+        bool on_disk = false;
+        for (int j = 0; j < app->settings.model_count && !on_disk; j++)
+            on_disk = strcmp(boo_model_basename(app->settings.model_paths[j]),
+                             manifest[i].filename) == 0;
+        if (on_disk) continue;
+        app->settings.model_absent[app->settings.model_absent_count++] = &manifest[i];
+        char label[300];
+        snprintf(label, sizeof(label), "%s  (download, %u MB)", manifest[i].filename,
+                 (unsigned)(manifest[i].size / 1000000));
+        WCHAR *wide = to_wide(label);
+        if (!wide) continue;
+        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)wide);
+        free(wide);
+    }
+    model_combo_select_current(app, combo);
+}
+
+// A not-yet-downloaded manifest entry was picked: fetch it (progress bar
+// under the combo), then BOO_MSG_DL_DONE swaps to it.
+static void model_download_begin(BooApp *app, HWND dlg, HWND combo,
+                                 const BooModelInfo *model) {
+    model_set_frozen(app, dlg, true);
+    HWND bar = GetDlgItem(dlg, IDC_MODEL_PROGRESS);
+    SendMessageW(bar, PBM_SETPOS, 0, 0);
+    ShowWindow(bar, SW_SHOW);
+    if (!boo_download_start(dlg, model)) {
+        ShowWindow(bar, SW_HIDE);
+        model_set_frozen(app, dlg, false);
+        model_combo_select_current(app, combo);
+    }
+}
+
+static void model_switch(BooApp *app, HWND dlg, HWND combo) {
+    const int idx = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
+    if (idx < 0) return;
+    if (idx < app->settings.model_count) {
+        model_swap_begin(app, dlg, combo, app->settings.model_paths[idx]);
+        return;
+    }
+    const int a = idx - app->settings.model_count;
+    if (a < app->settings.model_absent_count)
+        model_download_begin(app, dlg, combo, app->settings.model_absent[a]);
+}
+
+// The download finished: swap to the fresh file, or report and reset.
+static void model_downloaded(BooApp *app, HWND dlg, bool ok, char *text) {
+    HWND combo = GetDlgItem(dlg, IDC_MODEL);
+    ShowWindow(GetDlgItem(dlg, IDC_MODEL_PROGRESS), SW_HIDE);
+    model_set_frozen(app, dlg, false);
+    if (ok) {
+        model_swap_begin(app, dlg, combo, text);
+    } else {
+        WCHAR *wide = to_wide(text ? text : "Download failed.");
+        if (wide) {
+            MessageBoxW(dlg, wide, L"Boo", MB_ICONWARNING);
+            free(wide);
+        }
+        model_combo_select_current(app, combo);
+    }
+    free(text);
+}
+
 static void model_swapped(BooApp *app, HWND dlg, bool ok, ModelSwap *job) {
     HWND combo = GetDlgItem(dlg, IDC_MODEL);
-    EnableWindow(combo, TRUE);
-    EnableMenuItem(GetSystemMenu(dlg, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+    model_set_frozen(app, dlg, false);
     if (ok) {
         free(app->settings.model_current);
         app->settings.model_current = job->path; // ownership moves
         save_model_choice(job->path);
         boo_log(BOO_LOG_INFO, "model switched");
+        // A downloaded model just moved from the tagged rows to the on-disk
+        // rows; refill so the list matches the disk again.
+        model_combo_fill(app, combo);
     } else {
         free(job->path);
         MessageBoxW(dlg, L"Could not load that model; keeping the previous one.", L"Boo",
                     MB_ICONWARNING);
+        model_combo_select_current(app, combo);
     }
-    model_combo_select_current(app, combo);
     free(job);
 }
 
@@ -316,6 +407,9 @@ static void model_paths_free(BooApp *app) {
     free(app->settings.model_paths);
     app->settings.model_paths = NULL;
     app->settings.model_count = 0;
+    free(app->settings.model_absent);
+    app->settings.model_absent = NULL;
+    app->settings.model_absent_count = 0;
 }
 
 // ── dialog ──
@@ -364,15 +458,12 @@ static void settings_on_create(BooApp *app, HWND hwnd, const CREATESTRUCTW *cs) 
         L"COMBOBOX", NULL,
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_HASSTRINGS, m,
         scale(134, dpi), w, scale(160, dpi), hwnd, (HMENU)IDC_MODEL, cs->hInstance, NULL);
-    model_paths_free(app); // a reopened dialog re-enumerates
-    app->settings.model_count = boo_model_installed(&app->settings.model_paths);
-    for (int i = 0; i < app->settings.model_count; i++) {
-        WCHAR *base = to_wide(boo_model_basename(app->settings.model_paths[i]));
-        if (!base) continue;
-        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)base);
-        free(base);
-    }
-    model_combo_select_current(app, combo);
+    model_combo_fill(app, combo);
+    // Download progress for tagged entries; hidden until one is picked.
+    HWND dlbar = CreateWindowW(PROGRESS_CLASSW, NULL, WS_CHILD, m, scale(162, dpi), w,
+                               scale(10, dpi), hwnd, (HMENU)IDC_MODEL_PROGRESS,
+                               cs->hInstance, NULL);
+    SendMessageW(dlbar, PBM_SETRANGE32, 0, 100);
 
     HWND l2 =
         CreateWindowW(L"STATIC", L"Theme", WS_CHILD | WS_VISIBLE, m, scale(176, dpi), w,
@@ -426,6 +517,15 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case BOO_MSG_MODEL_SWAPPED:
         if (app) model_swapped(app, hwnd, wparam != 0, (ModelSwap *)lparam);
         return 0;
+    case BOO_MSG_DL_PROGRESS:
+        SendMessageW(GetDlgItem(hwnd, IDC_MODEL_PROGRESS), PBM_SETPOS, wparam, 0);
+        return 0;
+    case BOO_MSG_DL_DONE:
+        if (app)
+            model_downloaded(app, hwnd, wparam != 0, (char *)lparam);
+        else
+            free((char *)lparam);
+        return 0;
     case WM_CLOSE:
         DestroyWindow(hwnd);
         return 0;
@@ -448,7 +548,7 @@ void boo_settings_open(BooApp *app) {
 
     static bool registered;
     if (!registered) {
-        INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_BAR_CLASSES};
+        INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_BAR_CLASSES | ICC_PROGRESS_CLASS};
         InitCommonControlsEx(&icc);
         WNDCLASSEXW wc = {
             .cbSize = sizeof(wc),

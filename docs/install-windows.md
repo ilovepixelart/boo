@@ -41,6 +41,11 @@ intact.
 
 ## Get a model
 
+**The easy way: just launch Boo.** With no model installed it offers a
+download dialog (curated list, progress bar, checksum-verified) plus a
+Choose-a-File escape hatch, and you can change or download models later in
+Settings. The manual way:
+
 `curl.exe` ships with Windows 10 1803+ (the `.exe` matters: it's the real curl,
 not PowerShell's `curl` alias). In **PowerShell** (the Windows 11 default),
 paste each line on its own, no line continuation:

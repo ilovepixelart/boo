@@ -23,6 +23,10 @@
 #define BOO_MSG_MODEL_SWAPPED                                                            \
     (WM_APP + 4) // model switch worker -> settings dialog; wParam = ok,
                  // lParam = the malloc'd ModelSwap job (settings.c)
+#define BOO_MSG_DL_PROGRESS (WM_APP + 5) // download worker -> dialog; wParam = percent
+#define BOO_MSG_DL_DONE                                                                  \
+    (WM_APP + 6) // download worker -> dialog; wParam = ok, lParam = malloc'd
+                 // UTF-8 path (ok) or reason (fail); receiver frees
 
 // Transcript history depth (the macOS reference keeps a session-long stack; a
 // bounded one keeps the unscrolled card list honest).
@@ -81,6 +85,10 @@ typedef struct BooApp {
         char *model_current; // UTF-8 path of the loaded model (malloc'd)
         char **model_paths;  // model dropdown entries; dialog lifetime
         int model_count;
+        // Manifest models not on disk, shown after the on-disk rows; picking
+        // one downloads it first. Static core storage; the array is malloc'd.
+        const BooModelInfo **model_absent;
+        int model_absent_count;
     } settings;
 
     // Transcript history, chronological; cards[0] is the oldest. Each entry is
@@ -90,5 +98,11 @@ typedef struct BooApp {
     int card_count;
     WCHAR *live_text; // malloc'd, NULL when absent
 } BooApp;
+
+// Boot the whole app around `model_path` (malloc'd UTF-8; ownership moves):
+// core init, overlay, tray, hotkey. Lives in main.c; the onboarding dialog
+// calls it once a model lands. Shows the failure dialog and returns false if
+// the model cannot be loaded.
+bool boo_app_start(BooApp *app, char *model_path);
 
 #endif // BOO_APP_H

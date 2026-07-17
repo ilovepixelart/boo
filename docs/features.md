@@ -75,7 +75,7 @@ real-mic acceptance still runs on real hardware against this table.
 | Settings window | Y | Y | Y | Cmd+, (M), header-bar gear (L), tray menu (W) opens settings |
 | Window opacity control | Y | Y | Y | Settings > Opacity slider (0.1-1.0) changes window translucency |
 | Theme picker: search + per-theme swatch + palette preview | Y | Y | ~ | Settings > search filters 486 themes, each with a color swatch (W: name list only) |
-| Model switcher: dropdown + in-place swap + persisted choice | Y | Y | ~ | Settings > pick a model; absent manifest models download inline (M, L; W dropdown lists on-disk models only until its onboarding lands) |
+| Model switcher: dropdown + in-place swap + persisted choice | Y | Y | Y | Settings > pick a model; absent manifest models download inline with progress |
 | Permissions handled with clear prompts/messages | Y (mic, Accessibility, Automation) | Y (portals) | Y (none needed; privacy toggle noted) | First-run permission flow |
 
 ## 6. Privacy and security
@@ -98,5 +98,4 @@ From the columns above, the cross-platform work, in impact order:
    draws a live waveform with a timer.
 
 Deferred (smaller): the Windows theme picker's search, per-row swatches, and
-palette preview (it lists names only); download entries in the Windows model
-switcher, which arrive with its onboarding flow.
+palette preview (it lists names only).
