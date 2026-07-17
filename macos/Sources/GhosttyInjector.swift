@@ -17,6 +17,7 @@
 // non-fatal and the caller falls back to the CGEvent path.
 
 import AppKit
+import Carbon
 
 enum GhosttyInjector {
     static let ghosttyBundleID = "com.mitchellh.ghostty"
@@ -25,46 +26,46 @@ enum GhosttyInjector {
         app?.bundleIdentifier == ghosttyBundleID
     }
 
+    /// The script is a fixed handler; the transcript reaches it as an Apple
+    /// event parameter (see `inputText`), never as script source, so no
+    /// transcript content can become code. This is a security boundary
+    /// (see SECURITY.md): if you rework it, keep the text out of the source.
+    private static let injectSource = """
+        on boo_inject(theText)
+            tell application id "\(ghosttyBundleID)"
+                input text theText to focused terminal of selected tab of front window
+            end tell
+        end boo_inject
+        """
+
     /// Injects `text` into the focused terminal of Ghostty's front window.
     /// Returns false on any failure (Ghostty < 1.3, Automation permission
     /// denied, no terminal window) so the caller can fall back.
     static func inputText(_ text: String) -> Bool {
-        let source = """
-            tell application id "\(ghosttyBundleID)"
-                input text "\(escapeForAppleScript(text))" to focused terminal of selected tab of front window
-            end tell
-            """
-        guard let script = NSAppleScript(source: source) else { return false }
+        guard let script = NSAppleScript(source: injectSource) else { return false }
+
+        // Call the handler through an AppleScript subroutine event. The
+        // subroutine name must be the lowercase form of the handler identifier.
+        let event = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kASAppleScriptSuite),
+            eventID: AEEventID(kASSubroutineEvent),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID))
+        event.setDescriptor(
+            NSAppleEventDescriptor(string: "boo_inject"),
+            forKeyword: AEKeyword(keyASSubroutineName))
+        let params = NSAppleEventDescriptor.list()
+        params.insert(NSAppleEventDescriptor(string: text), at: 1)
+        event.setParam(params, forKeyword: AEKeyword(keyDirectObject))
 
         var error: NSDictionary?
-        script.executeAndReturnError(&error)
+        script.executeAppleEvent(event, error: &error)
         if let error {
             let message = error[NSAppleScript.errorMessage] as? String ?? "\(error)"
             NSLog("Boo: Ghostty AppleScript injection failed, falling back to paste: %@", message)
             return false
         }
         return true
-    }
-
-    /// Escape a transcript for embedding in an AppleScript string literal.
-    ///
-    /// The transcript is interpolated into AppleScript source, so a stray quote
-    /// could in principle break out of the literal and run arbitrary script. It
-    /// can't: a literal is delimited solely by `"`, and its only escapes are the
-    /// five below, so escaping backslash and quote closes the breakout. The
-    /// order matters, backslash MUST be first, or the backslashes this adds to
-    /// the quotes would themselves be doubled.
-    ///
-    /// Verified adversarially (see the repo's security notes): payloads such as
-    /// `" & (do shell script "…") & "` round-trip through AppleScript exactly
-    /// equal to the input, and no injected command runs. If you change this,
-    /// re-run that check, it is a security boundary, not cosmetics.
-    private static func escapeForAppleScript(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\\", with: "\\\\")  // must be first
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\t", with: "\\t")
     }
 }

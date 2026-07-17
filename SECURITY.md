@@ -14,7 +14,7 @@ The interesting surface is the opposite direction: Boo **injects text into other
 
 ## What has been reviewed
 
-**Text injection into AppleScript (macOS).** The transcript is interpolated into an AppleScript string literal to drive Ghostty's `input text`. This is escaped (backslash first, then quote) so a transcript cannot break out of the literal and run arbitrary script. Verified adversarially: payloads like `" & (do shell script "…") & "` round-trip through AppleScript exactly equal to the input, and no injected command runs. The escaper carries a comment marking it a security boundary.
+**Text injection into AppleScript (macOS).** The transcript drives Ghostty's `input text` through a fixed AppleScript handler and reaches it as an Apple event parameter, never interpolated into script source, so transcript content cannot become code. Verified adversarially: payloads like `" & (do shell script "…") & "` arrive in the handler byte-identical to the input, and no injected command runs. The handler carries a comment marking it a security boundary.
 
 **The RemoteDesktop restore token (Linux).** Auto-paste persists a portal restore token so the permission dialog appears only once. That token is a capability: it restores a session that can synthesize keyboard input, so it is written `0600` in `$XDG_STATE_HOME/boo/`, not the library default of `0644`.
 
