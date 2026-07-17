@@ -300,42 +300,19 @@ export fn boo_transcribe(ctx: ?*BooContext) ?[*:0]const u8 {
 }
 
 // ── themes ─────────────────────────────────────────────────────────────────
-// Independent of the audio context: the frontend loads a set once, populates
-// its picker from the names, applies the selected index's colors, and owns the
-// current selection and its persistence. See src/theme.zig.
+// Independent of the audio context: the frontend enumerates its themes
+// directory and calls boo_theme_parse_file per file (Ghostty-format parsing is
+// shared; directory listing is trivial per-OS). See src/theme.zig.
 
 const theme = @import("theme.zig");
 
-export fn boo_themes_load(dir_path: [*:0]const u8) ?*theme.ThemeSet {
-    return theme.load(c_allocator, std.mem.span(dir_path)) catch null;
-}
-
-export fn boo_themes_free(themes: ?*theme.ThemeSet) void {
-    if (themes) |t| t.deinit();
-}
-
-export fn boo_themes_count(themes: ?*theme.ThemeSet) c_int {
-    const t = themes orelse return 0;
-    return @intCast(t.themes.len);
-}
-
-export fn boo_themes_name(themes: ?*theme.ThemeSet, index: c_int) ?[*:0]const u8 {
-    const t = themes orelse return null;
-    if (index < 0 or @as(usize, @intCast(index)) >= t.themes.len) return null;
-    return t.themes[@intCast(index)].name.ptr;
-}
-
-export fn boo_themes_colors(themes: ?*theme.ThemeSet, index: c_int, out: ?*theme.Colors) bool {
-    const t = themes orelse return false;
+export fn boo_theme_parse_file(path: [*:0]const u8, out: ?*theme.Colors) bool {
     const o = out orelse return false;
-    if (index < 0 or @as(usize, @intCast(index)) >= t.themes.len) return false;
-    o.* = t.themes[@intCast(index)].colors;
-    return true;
-}
-
-export fn boo_themes_default_index(themes: ?*theme.ThemeSet) c_int {
-    const t = themes orelse return 0;
-    return t.default_index;
+    if (theme.parseFile(c_allocator, path)) |colors| {
+        o.* = colors;
+        return true;
+    }
+    return false;
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
