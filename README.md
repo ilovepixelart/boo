@@ -1,7 +1,19 @@
 # Boo 👻
 
 [![CI](https://github.com/ilovepixelart/boo/actions/workflows/ci.yml/badge.svg)](https://github.com/ilovepixelart/boo/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ilovepixelart/boo/actions/workflows/codeql.yml/badge.svg)](https://github.com/ilovepixelart/boo/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=bugs)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=ilovepixelart_boo&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=ilovepixelart_boo)
 
 Local-first speech-to-text overlay for **macOS**, **Linux**, and (experimentally) **Windows**. Press a hotkey, speak, get text, your audio never leaves the machine.
 
