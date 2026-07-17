@@ -57,8 +57,8 @@ static WCHAR *to_wide(const char *utf8) {
 // exe (how the release zip ships them), then the cwd, then the user dot-dir.
 static bool themes_dir(WCHAR *buf, size_t len) {
     WCHAR exe[MAX_PATH];
-    if (GetModuleFileNameW(NULL, exe, MAX_PATH) &&
-        GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    const DWORD exe_len = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (exe_len > 0 && exe_len < MAX_PATH) {
         PathRemoveFileSpecW(exe);
         if (swprintf(buf, len, L"%ls\\themes", exe) >= 0 &&
             GetFileAttributesW(buf) != INVALID_FILE_ATTRIBUTES)
@@ -146,9 +146,12 @@ static void load_prefs(BooApp *app) {
         ERROR_SUCCESS)
         app->settings.auto_type = val != 0;
 
+    // RegGetValueW, not RegQueryValueExW: only the former guarantees the
+    // string comes back null-terminated (an externally written value may not
+    // be), and the wcscmp below must never run off the buffer.
     WCHAR name[256];
     size = sizeof(name);
-    if (RegQueryValueExW(key, L"Theme", NULL, NULL, (BYTE *)name, &size) ==
+    if (RegGetValueW(key, NULL, L"Theme", RRF_RT_REG_SZ, NULL, name, &size) ==
         ERROR_SUCCESS) {
         for (int i = 0; i < app->settings.theme_count; i++)
             if (wcscmp(app->settings.themes[i].name, name) == 0) {
@@ -291,6 +294,13 @@ static void model_swap_begin(BooApp *app, HWND dlg, HWND combo, const char *path
     }
 
     model_set_frozen(app, dlg, true);
+    // The previous swap (if any) fully finished before the UI thawed; reclaim
+    // its handle before storing the new one.
+    if (app->model_swap_worker) {
+        WaitForSingleObject(app->model_swap_worker, INFINITE);
+        CloseHandle(app->model_swap_worker);
+        app->model_swap_worker = NULL;
+    }
     HANDLE worker = CreateThread(NULL, 0, model_swap_worker, job, 0, NULL);
     if (!worker) {
         model_set_frozen(app, dlg, false);
@@ -298,7 +308,9 @@ static void model_swap_begin(BooApp *app, HWND dlg, HWND combo, const char *path
         free(job);
         return;
     }
-    CloseHandle(worker);
+    // Kept for the shutdown join in main.c, not closed here: quitting the app
+    // mid-swap must wait for boo_reload_model before boo_deinit.
+    app->model_swap_worker = worker;
 }
 
 // (Re)fill the model combo: usable models on disk (ranked), then manifest

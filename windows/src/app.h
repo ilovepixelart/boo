@@ -19,7 +19,7 @@
 // Window-message space private to Boo's own windows.
 #define BOO_MSG_TRAY        (WM_APP + 1) // tray callback (NOTIFYICON_VERSION_4)
 #define BOO_MSG_TRANSCRIBED (WM_APP + 2) // worker -> UI; lParam = malloc'd UTF-8
-#define BOO_MSG_LIVE        (WM_APP + 3) // stream tick -> UI; lParam = malloc'd UTF-8
+#define BOO_MSG_LIVE        (WM_APP + 3) // stream tick -> UI; lParam = malloc'd WCHAR*
 #define BOO_MSG_MODEL_SWAPPED                                                            \
     (WM_APP + 4) // model switch worker -> settings dialog; wParam = ok,
                  // lParam = the malloc'd ModelSwap job (settings.c)
@@ -63,6 +63,10 @@ typedef struct BooApp {
     HWND paste_target;
 
     HANDLE worker; // transcription thread, NULL when idle
+
+    // Model-swap thread (settings.c). Joined at shutdown like the others:
+    // quitting mid-swap must not boo_deinit under a live boo_reload_model.
+    HANDLE model_swap_worker; // NULL when idle
 
     // Streaming: one background thread polls boo_stream_tick while recording
     // (the C API contract), posting committed text back as BOO_MSG_LIVE.

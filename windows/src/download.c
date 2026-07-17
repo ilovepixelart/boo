@@ -69,6 +69,10 @@ static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
         if (fwrite(buf, 1, n, out) != n) return false;
         BCryptHashData(hash, buf, n, 0);
         received += n;
+        // The manifest size is exact; a longer body is the wrong file, and
+        // without this bound a misbehaving server fills the disk before the
+        // digest check ever runs.
+        if (received > job->model->size) return false;
         const int pct = (int)(received * 100 / job->model->size);
         if (pct != last_pct) {
             last_pct = pct;

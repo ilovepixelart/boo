@@ -90,7 +90,10 @@ static void browse_for_model(BooApp *app, HWND dlg) {
         .lpstrFile = file,
         .nMaxFile = ARRAYSIZE(file),
         .lpstrTitle = L"Choose a speech model",
-        .Flags = OFN_FILEMUSTEXIST,
+        // NOCHANGEDIR: without it the picker changes the process CWD, and the
+        // relative "models"/"themes" fallbacks then resolve against wherever
+        // the user browsed to.
+        .Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR,
     };
     if (!GetOpenFileNameW(&ofn)) return;
     char *path = to_utf8(file);

@@ -12,6 +12,8 @@
 
 #include "inject_plan.h"
 
+#include <stdlib.h>
+
 // How long to wait for the user to lift Ctrl+Shift(+anything) from the hotkey
 // press before forcing key-ups. Transcription usually eats seconds before we
 // get here, so this almost never actually waits.
@@ -23,20 +25,18 @@
 #define CLIPBOARD_TRIES    5
 #define CLIPBOARD_RETRY_MS 20
 
-static bool clipboard_set(HWND owner, const char *utf8) {
-    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-    if (len <= 0) return false;
-
+bool boo_clipboard_set_wide(HWND owner, const WCHAR *text) {
     // GMEM_MOVEABLE is required by SetClipboardData; on success the system
     // owns the allocation and we must not touch or free it again.
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len * sizeof(WCHAR));
+    const SIZE_T bytes = (wcslen(text) + 1) * sizeof(WCHAR);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
     if (!mem) return false;
-    WCHAR *wide = GlobalLock(mem);
-    if (!wide) {
+    WCHAR *dst = GlobalLock(mem);
+    if (!dst) {
         GlobalFree(mem);
         return false;
     }
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
+    memcpy(dst, text, bytes);
     GlobalUnlock(mem);
 
     bool opened = false;
@@ -55,6 +55,17 @@ static bool clipboard_set(HWND owner, const char *utf8) {
     const bool ok = SetClipboardData(CF_UNICODETEXT, mem) != NULL;
     if (!ok) GlobalFree(mem);
     CloseClipboard();
+    return ok;
+}
+
+static bool clipboard_set(HWND owner, const char *utf8) {
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (len <= 0) return false;
+    WCHAR *wide = malloc((size_t)len * sizeof(WCHAR));
+    if (!wide) return false;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide, len);
+    const bool ok = boo_clipboard_set_wide(owner, wide);
+    free(wide);
     return ok;
 }
 

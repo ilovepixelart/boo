@@ -171,6 +171,10 @@ int WINAPI wWinMain(HINSTANCE hinst, HINSTANCE prev, PWSTR cmdline, int show) {
         WaitForSingleObject(app.worker, INFINITE);
         CloseHandle(app.worker);
     }
+    if (app.model_swap_worker) {
+        WaitForSingleObject(app.model_swap_worker, INFINITE);
+        CloseHandle(app.model_swap_worker);
+    }
     if (app.ctx) boo_deinit(app.ctx);
     for (int i = 0; i < app.card_count; i++) free(app.cards[i]);
     free(app.live_text);

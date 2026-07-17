@@ -667,24 +667,9 @@ static void paint(BooApp *app, HWND hwnd) {
 
 static void copy_card_to_clipboard(BooApp *app, int index) {
     if (index < 0 || index >= app->card_count) return;
-    const WCHAR *text = app->cards[index];
-    const SIZE_T bytes = (wcslen(text) + 1) * sizeof(WCHAR);
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (!mem) return;
-    WCHAR *dst = GlobalLock(mem);
-    if (!dst) {
-        GlobalFree(mem);
-        return;
-    }
-    memcpy(dst, text, bytes);
-    GlobalUnlock(mem);
-    if (!OpenClipboard(app->overlay)) {
-        GlobalFree(mem);
-        return;
-    }
-    EmptyClipboard();
-    if (!SetClipboardData(CF_UNICODETEXT, mem)) GlobalFree(mem);
-    CloseClipboard();
+    // The shared setter, retries included: a clipboard-manager collision must
+    // not make the copy button silently do nothing.
+    if (!boo_clipboard_set_wide(app->overlay, app->cards[index])) return;
 
     // Flash the copy icon, the reference's 0.5s confirmation.
     flash_card = index;

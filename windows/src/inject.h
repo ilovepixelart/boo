@@ -16,4 +16,8 @@ typedef enum {
 // transcript stays on the clipboard instead of landing in the wrong app.
 BooDeliverResult boo_inject_deliver(HWND owner, HWND target, const char *utf8);
 
+// Put `text` on the clipboard with the retry loop a clipboard-manager
+// collision needs; shared by delivery and the card copy button.
+bool boo_clipboard_set_wide(HWND owner, const WCHAR *text);
+
 #endif // BOO_INJECT_H
