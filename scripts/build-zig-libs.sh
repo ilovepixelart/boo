@@ -41,16 +41,29 @@ if [[ -z "$WHISPER_A" ]]; then
     exit 1
 fi
 
-echo "→ repacking $WHISPER_A for ld alignment"
 WORK=$(mktemp -d)
 # Single quotes: expand $WORK when the trap fires, not when it's installed.
 trap 'rm -rf "$WORK"' EXIT
-
 SDK=$(xcrun --sdk macosx --show-sdk-version)
-ld -r -arch "$ZIG_ARCH" -platform_version macos 14.0 "$SDK" -all_load "$PROJ/$WHISPER_A" -o "$WORK/whisper-merged.o"
-
 mkdir -p zig-out/lib
-rm -f zig-out/lib/libwhisper.a
-ar -rcs zig-out/lib/libwhisper.a "$WORK/whisper-merged.o"
+
+# Repack BOTH archives, not just whisper: Zig's archiver omits the 8-byte
+# member alignment Apple's ld needs, and the exact alignment is content-
+# dependent, so libboo-core.a links only by luck until a source change shifts
+# it and the Swift/Xcode link fails. Merge each via `ld -r -all_load` into one
+# aligned object and re-archive, exactly as build.zig does for `zig build app`.
+# boo-core's source is the archive the default build just installed.
+repack() { # <src.a> <name>
+    local src=$1 name=$2
+    ld -r -arch "$ZIG_ARCH" -platform_version macos 14.0 "$SDK" -all_load "$src" \
+        -o "$WORK/$name-merged.o"
+    rm -f "zig-out/lib/lib$name.a"
+    ar -rcs "zig-out/lib/lib$name.a" "$WORK/$name-merged.o"
+}
+
+echo "→ repacking libwhisper.a and libboo-core.a for ld alignment"
+cp "zig-out/lib/libboo-core.a" "$WORK/boo-core-src.a"
+repack "$WORK/boo-core-src.a" boo-core
+repack "$PROJ/$WHISPER_A" whisper
 
 echo "✓ libs ready: zig-out/lib/{libboo-core.a, libwhisper.a}"
