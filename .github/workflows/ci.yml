@@ -352,6 +352,9 @@ jobs:
           zig build test
           zig build test -Doptimize=ReleaseSafe
 
+      - name: Frontend logic tests (model discovery, download verify)
+        run: zig build win-tests
+
       - name: Build app
         run: zig build app -Doptimize=ReleaseFast
 

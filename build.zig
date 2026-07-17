@@ -444,6 +444,42 @@ pub fn build(b: *std.Build) void {
             .file = b.path("windows/res/boo.rc"),
         });
 
+        // Frontend logic tests, run natively on the Windows CI job
+        // (`zig build win-tests`). Each test TU #includes the source under
+        // test so its statics are reachable; two exes because model.c and
+        // download.c each define their own static string helpers.
+        const win_tests_step = b.step("win-tests", "Run Windows frontend logic tests");
+        for ([_][]const u8{ "model_test", "download_test" }) |test_name| {
+            const t = b.addExecutable(.{
+                .name = test_name,
+                .root_module = b.createModule(.{
+                    .target = target,
+                    .optimize = optimize,
+                    .link_libc = true,
+                }),
+            });
+            t.root_module.linkLibrary(boo_lib);
+            t.root_module.linkLibrary(whisper_lib);
+            linkAudioSystemDepsOnly(t.root_module, target_os);
+            for ([_][]const u8{ "user32", "advapi32", "winhttp", "bcrypt" }) |lib| {
+                t.root_module.linkSystemLibrary(lib, .{});
+            }
+            t.root_module.addIncludePath(b.path("include"));
+            t.root_module.addIncludePath(b.path("windows/src"));
+            t.root_module.addCSourceFiles(.{
+                .root = b.path("windows/tests"),
+                .files = &.{b.fmt("{s}.c", .{test_name})},
+                .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
+            });
+            // Cross-compiling hosts only build the tests (compile check);
+            // the native Windows CI job is where they actually execute.
+            if (target.query.isNative()) {
+                win_tests_step.dependOn(&b.addRunArtifact(t).step);
+            } else {
+                win_tests_step.dependOn(&b.addInstallArtifact(t, .{}).step);
+            }
+        }
+
         const install_win_app = b.addInstallArtifact(win_app, .{});
         b.getInstallStep().dependOn(&install_win_app.step);
 

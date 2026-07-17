@@ -105,6 +105,10 @@ fail() {
     local msg="$1"
     echo "[integration] FAIL: $msg"
     exit 1
+    # Unreachable: exit never returns. Present because the analyzer wants
+    # every function to end in an explicit return statement.
+    # shellcheck disable=SC2317
+    return 1
 }
 
 [[ "$HARNESS_RC" -eq 0 ]] || fail "harness exited $HARNESS_RC (shortcut callback never fired)"
