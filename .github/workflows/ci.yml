@@ -50,19 +50,6 @@ jobs:
         # which swiftc's link step does not provide.
         run: zig build app -Doptimize=ReleaseFast
 
-      - name: Swift unit tests + coverage
-        # macos/Tests/main.swift, compiled with the sources under test by plain
-        # swiftc (no Xcode project). Pins GhosttyInjector's subroutine event,
-        # the injection security boundary, without needing Ghostty; llvm-cov's
-        # lcov export becomes the Swift slice of the Sonar coverage report.
-        run: bash scripts/coverage.sh swift
-
-      - name: Upload coverage (Swift)
-        uses: actions/upload-artifact@v5
-        with:
-          name: coverage-swift
-          path: coverage/swift.xml
-
       - name: Cache bench models
         uses: actions/cache@v4
         with:
@@ -81,6 +68,24 @@ jobs:
           ./scripts/fetch-model.sh ~/.boo/models/ggml-silero-v6.2.0.bin \
             2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987 \
             https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin
+
+      - name: Swift unit tests + coverage
+        # macos/Tests/main.swift, compiled with ALL the Swift sources by plain
+        # swiftc (no Xcode project). Pins GhosttyInjector's subroutine event,
+        # the downloader against a local HTTP server, and the Settings and
+        # onboarding windows headless; BOO_HARNESS_BOOT boots the real app
+        # around the bench model fetched above (opt-in, because on a dev
+        # machine that grabs the mic TCC prompt and the global hotkey).
+        # llvm-cov's lcov export becomes the Swift slice of the Sonar report.
+        env:
+          BOO_HARNESS_BOOT: "1"
+        run: bash scripts/coverage.sh swift
+
+      - name: Upload coverage (Swift)
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-swift
+          path: coverage/swift.xml
 
       - name: Quality gate (speed + accuracy)
         # Real inference over jfk.wav, gated on realtime factor and word error

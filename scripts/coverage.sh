@@ -306,14 +306,18 @@ gen_swift() {
     if [[ ! -f "$root/zig-out/lib/libboo-core.a" || ! -f "$root/zig-out/lib/libwhisper.a" ]]; then
         (cd "$root" && bash scripts/build-zig-libs.sh)
     fi
+    # Every source except the app entry (its top-level code is the launch; the
+    # harness has its own), so the whole Swift frontend lands in the report.
+    local srcs=()
+    local f
+    for f in "$root"/macos/Sources/*.swift; do
+        [[ "$(basename "$f")" == "main.swift" ]] || srcs+=("$f")
+    done
     local work
     work=$(mktemp -d)
     swiftc -profile-generate -profile-coverage-mapping \
         -import-objc-header "$root/include/boo.h" \
-        "$root/macos/Sources/GhosttyInjector.swift" \
-        "$root/macos/Sources/Theme.swift" \
-        "$root/macos/Sources/ModelDownloader.swift" \
-        "$root/macos/Sources/Notifications.swift" \
+        "${srcs[@]}" \
         "$root/macos/Tests/main.swift" \
         "$root/zig-out/lib/libboo-core.a" "$root/zig-out/lib/libwhisper.a" \
         -lc++ -framework Cocoa -framework Accelerate -framework CoreAudio \
