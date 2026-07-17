@@ -53,6 +53,25 @@ check_pixel() { # <png> <x> <y> <rrggbb> <label> [tol]
 shot() { "${SHOT_CMD[@]}" -window root "$OUT/$1.png" 2>/dev/null; }
 alive() { kill -0 "$1" 2>/dev/null; }
 
+# The 40px record disc sits bottom-centre (x=200), but its exact screen y shifts
+# a few pixels with the runner's GTK header-bar height and DPI, so a single
+# hardcoded coordinate catches the anti-aliased circle edge on some runners.
+# Scan a vertical strip for the most red-dominant pixel (the disc centre) and
+# assert that is #FF3B30.
+check_disc() { # <png> <label>
+    local png=$1 label=$2 best=-1 best_y=0 y r g b score
+    for y in $(seq 445 3 495); do
+        read -r r g b < <("$MAGICK" "$png" -crop "1x1+200+$y" -depth 8 \
+            -format '%[fx:int(255*p.r)] %[fx:int(255*p.g)] %[fx:int(255*p.b)]' info: 2>/dev/null)
+        score=$((r - (g + b) / 2))
+        if ((score > best)); then
+            best=$score
+            best_y=$y
+        fi
+    done
+    check_pixel "$png" 200 "$best_y" "ff3b30" "$label (reddest at y=$best_y)"
+}
+
 echo "== Boo Linux UI smoke =="
 GSK_RENDERER=cairo "$APP" >"$OUT/app.log" 2>&1 &
 APP_PID=$!
@@ -73,14 +92,14 @@ shot idle
 # The reference default theme: window bg #282C34, record disc #FF3B30. These are
 # the exact tokens docs/ui-spec.md §2 pins, sampled from empty body and the disc.
 check_pixel "$OUT/idle.png" 200 250 "282c34" "idle window background"
-check_pixel "$OUT/idle.png" 200 463 "ff3b30" "record disc"
+check_disc "$OUT/idle.png" "record disc"
 
 # The record morph needs no audio: clicking Record starts a take and the disc
 # stays #FF3B30 while it morphs from circle to rounded square. This runs in CI.
 xdotool mousemove 200 463 click 1
 sleep 1
 shot recording
-check_pixel "$OUT/recording.png" 200 463 "ff3b30" "record disc while recording"
+check_disc "$OUT/recording.png" "record disc while recording"
 
 if [[ -n "$WAV" && -f "$WAV" ]]; then
     # Full dictation: play a clip through the virtual mic and expect a card.
