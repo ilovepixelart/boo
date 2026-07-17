@@ -19,7 +19,9 @@ const libc = @import("libc.zig");
 pub const Level = enum(c_int) { err = 0, warn = 1, info = 2, debug = 3 };
 
 var file: ?*libc.FILE = null;
-var min_level: c_int = @intFromEnum(Level.info);
+// Atomic so write()'s lock-free fast-path filter cannot race init() re-pointing
+// the sink at runtime (a torn read would mis-filter a single line).
+var min_level = std.atomic.Value(c_int).init(@intFromEnum(Level.info));
 var mutex: sync.Mutex = .{};
 
 fn tag(level: c_int) []const u8 {
@@ -40,14 +42,14 @@ pub fn init(path: ?[*:0]const u8, level: c_int) void {
         _ = libc.fclose(f);
         file = null;
     }
-    min_level = level;
+    min_level.store(level, .release);
     if (path) |p| file = libc.fopen(p, "a");
 }
 
 /// Write one already-formatted line at `level`. Below the minimum level it is
 /// dropped. Goes to the file (if open) and always to stderr.
 pub fn write(level: c_int, msg: []const u8) void {
-    if (level > min_level) return;
+    if (level > min_level.load(.acquire)) return;
     mutex.lock();
     defer mutex.unlock();
 
@@ -82,9 +84,10 @@ test "level filter drops messages below the minimum" {
     // assert the filter arithmetic here (the sink writes to stderr), so verify
     // the comparison the filter uses rather than captured output.
     init(null, @intFromEnum(Level.info));
-    try testing.expect(@intFromEnum(Level.debug) > min_level); // filtered
-    try testing.expect(@intFromEnum(Level.warn) <= min_level); // kept
-    try testing.expect(@intFromEnum(Level.err) <= min_level); // kept
+    const lvl = min_level.load(.acquire);
+    try testing.expect(@intFromEnum(Level.debug) > lvl); // filtered
+    try testing.expect(@intFromEnum(Level.warn) <= lvl); // kept
+    try testing.expect(@intFromEnum(Level.err) <= lvl); // kept
 }
 
 test "tag names each level" {
