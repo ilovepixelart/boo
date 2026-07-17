@@ -176,7 +176,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
-            pkg-config xvfb dbus-x11 python3-gi
+            pkg-config xvfb dbus-x11 python3-gi imagemagick
 
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
@@ -219,6 +219,20 @@ jobs:
           cmake -S /tmp/kcov -B /tmp/kcov/build -DCMAKE_BUILD_TYPE=Release
           cmake --build /tmp/kcov/build -j"$(nproc)"
           sudo cmake --install /tmp/kcov/build
+
+      - name: Cache smoke model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: smoke-model-c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b
+
+      - name: Fetch smoke model (tiny.en, pinned hash)
+        # The instrumented app slice of the linux coverage drives the real UI
+        # smoke, which needs a loadable speech model; tiny.en is the smallest.
+        run: |
+          bash scripts/fetch-model.sh models/ggml-tiny.en-q5_1.bin \
+            c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin
 
       - name: Coverage (Linux C, Windows planner, Zig core)
         # Generic XMLs for the sonar job, plus kcov over the Zig core. The

@@ -45,9 +45,11 @@ So both are worth doing, but they fix different symptoms.
    decoder), jfk final decode 237 to 337 ms, every CI WER/RTF gate still
    green. Kept because the cost lands only where the user already stopped,
    and upstream's reported gains are on harder audio than the suite.
-3. **Loosen `keepSegment`.** The `avg_logprob < -0.4` cutoff likely drops real
-   low-confidence speech; raise the bar (or require a stronger no_speech signal)
-   and re-measure WER on the LibriSpeech suite.
+3. **Loosen `keepSegment`.** Closed without a change: the filter already
+   requires BOTH a high no-speech probability and low decoder confidence
+   (OpenAI's own heuristic shape), so quiet-but-confident and
+   mumbled-but-present speech survive, and the clean suite shows no drops to
+   tune against. Revisit only with a real clip it eats.
 4. **Deterministic post-processing.** Core part done: repetition-loop
    collapse (a unit of 1 to 4 words repeated 3+ times back to back becomes
    one occurrence, doubles are kept as real speech) plus whitespace
@@ -58,7 +60,8 @@ So both are worth doing, but they fix different symptoms.
    commands stay on the roadmap. This fixes *formatting and repetition*,
    not drops.
 5. **Streaming LocalAgreement** (larger): cross-confirm chunk seams so words are
-   not lost or duplicated across pauses. Only if 1-4 don't settle it.
+   not lost or duplicated across pauses. Not pursued: 1-4 settled it, the
+   bottleneck was the model, and the switcher puts Parakeet one click away.
 
 Every decode change is measured with `zig build bench -- --cpu --assert-wer N`
 (single clip) and `--suite tests/eval` (12-speaker WER), red-first with a

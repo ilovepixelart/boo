@@ -85,6 +85,60 @@ gen_linux() {
             for g in *.gcov; do all_covs+=("$suite/$g"); done
             cd ..
         done
+        # The app itself, instrumented and driven by the pixel smoke: honest
+        # end-to-end coverage for the UI glue (overlay_window, main, models,
+        # waveform) that no unit harness reaches. Skipped quietly when a piece
+        # is missing (archives from `zig build`, ImageMagick, a display or
+        # xvfb-run, a model in models/), never a CI failure.
+        smoke_ready=true
+        [[ -f "$root/zig-out/lib/libboo-core.a" ]] || smoke_ready=false
+        [[ -f "$root/zig-out/lib/libwhisper.a" ]] || smoke_ready=false
+        command -v zig >/dev/null || smoke_ready=false
+        command -v magick >/dev/null || command -v convert >/dev/null || smoke_ready=false
+        ls "$root"/models/ggml-*.bin >/dev/null 2>&1 || smoke_ready=false
+        runner=""
+        if [[ -n "${DISPLAY:-}" ]]; then
+            runner=""
+        elif command -v xvfb-run >/dev/null; then
+            runner="xvfb-run -a"
+        else
+            smoke_ready=false
+        fi
+        if $smoke_ready; then
+            mkdir -p app
+            cd app
+            for src in "$root"/linux/src/*.c; do
+                # shellcheck disable=SC2046
+                cc --coverage -O0 -I "$root/linux/src" -I "$root/include" \
+                    $(pkg-config --cflags gtk4 libadwaita-1 libsoup-3.0) \
+                    -c "$src" -o "$(basename "${src%.c}").o"
+            done
+            # coverage_exit.c turns ui-smoke's SIGTERM into exit(), so the
+            # .gcda counters actually flush; without it the app dies unflushed.
+            cc --coverage -O0 -c "$root/linux/tests/coverage_exit.c" -o coverage_exit.o
+            # Linked by `zig c++`, not cc: the whisper archive was compiled
+            # against zig's bundled libc++ (std::__1 ABI), which no system
+            # libstdc++ provides. GCC's libgcov.a supplies the counter runtime
+            # for the gcov-instrumented frontend objects.
+            # shellcheck disable=SC2046
+            zig c++ ./*.o "$root/zig-out/lib/libboo-core.a" \
+                "$root/zig-out/lib/libwhisper.a" \
+                $(pkg-config --libs gtk4 libadwaita-1 libsoup-3.0 libpipewire-0.3) \
+                "$(gcc -print-file-name=libgcov.a)" -lm -lpthread -o boo-app-cov
+            appdir=$PWD
+            # Run from the repo root so ./models and ./themes resolve. A
+            # failing smoke still flushed counters up to the failure; keep
+            # whatever landed rather than dropping the slice.
+            (cd "$root" && GSK_RENDERER=cairo $runner \
+                bash linux/tests/ui-smoke.sh "$appdir/boo-app-cov") ||
+                echo "coverage: linux: smoke run failed; using partial counters" >&2
+            gcov ./*.gcda >/dev/null 2>&1 || true
+            for g in *.gcov; do all_covs+=("app/$g"); done
+            cd ..
+        else
+            echo "coverage: linux: app smoke slice skipped (needs zig-out libs, ImageMagick, a display/xvfb-run, and a model in models/)" >&2
+        fi
+
         if [[ ${#all_covs[@]} -eq 0 ]]; then
             echo "coverage: linux: gcov produced no reports" >&2
             empty_report "$out/linux.xml"

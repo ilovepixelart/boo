@@ -367,8 +367,19 @@ pub fn build(b: *std.Build) void {
         const install_linux_app = b.addInstallArtifact(linux_app, .{});
         b.getInstallStep().dependOn(&install_linux_app.step);
 
+        // The instrumented coverage build (scripts/coverage.sh, linux slice)
+        // recompiles the frontend C with the system cc and links it against
+        // these archives; hang them off the app step too, since CI builds
+        // with `zig build app`, which skips the default install step.
+        const install_core_lib = b.addInstallArtifact(boo_lib, .{});
+        const install_whisper_lib = b.addInstallArtifact(whisper_lib, .{});
+        b.getInstallStep().dependOn(&install_core_lib.step);
+        b.getInstallStep().dependOn(&install_whisper_lib.step);
+
         const app_step = b.step("app", "Build Boo Linux app");
         app_step.dependOn(&install_linux_app.step);
+        app_step.dependOn(&install_core_lib.step);
+        app_step.dependOn(&install_whisper_lib.step);
     }
 
     // ── Windows Win32 app ──
