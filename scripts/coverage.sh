@@ -158,12 +158,25 @@ gen_swift() {
         empty_report "$out/swift.xml"
         return
     fi
+    # Theme.swift talks to the real core parser, so the harness links the
+    # repacked archives (build them when absent; build-zig-libs.sh is the
+    # same path the Xcode project uses).
+    if [[ ! -f "$root/zig-out/lib/libboo-core.a" || ! -f "$root/zig-out/lib/libwhisper.a" ]]; then
+        (cd "$root" && bash scripts/build-zig-libs.sh)
+    fi
     local work
     work=$(mktemp -d)
     swiftc -profile-generate -profile-coverage-mapping \
-        "$root/macos/Sources/GhosttyInjector.swift" "$root/macos/Tests/main.swift" \
+        -import-objc-header "$root/include/boo.h" \
+        "$root/macos/Sources/GhosttyInjector.swift" \
+        "$root/macos/Sources/Theme.swift" \
+        "$root/macos/Tests/main.swift" \
+        "$root/zig-out/lib/libboo-core.a" "$root/zig-out/lib/libwhisper.a" \
+        -lc++ -framework Cocoa -framework Accelerate -framework CoreAudio \
+        -framework AudioToolbox -framework Metal -framework MetalKit \
         -o "$work/swift_tests"
-    LLVM_PROFILE_FILE="$work/swift.profraw" "$work/swift_tests"
+    # Run from the repo root so ThemeManager finds ./themes.
+    (cd "$root" && LLVM_PROFILE_FILE="$work/swift.profraw" "$work/swift_tests")
     xcrun llvm-profdata merge -sparse "$work/swift.profraw" -o "$work/swift.profdata"
     xcrun llvm-cov export --format=lcov -instr-profile "$work/swift.profdata" \
         "$work/swift_tests" >"$work/swift.lcov"

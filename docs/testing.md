@@ -62,10 +62,13 @@ human UAT.**
   from `-profile-generate -profile-coverage-mapping` + `xcrun llvm-cov export
   --format=lcov`, converted by `scripts/lcov_to_sonar.py`.
 - **Best practice**: keep the **testable logic free of app state** so the
-  harness can compile just the file under test (model:
-  `GhosttyInjector.injectEvent`, the injection security boundary). Name unused
-  delegate params `_`, prefer value types, and run `swift format lint --strict`
-  (CI enforces `.swift-format`).
+  harness can compile just the file under test (models:
+  `GhosttyInjector.injectEvent`, the injection security boundary, and
+  `ThemeManager`, linked against the real core parser via the repacked
+  archives). A file that mixes a testable class with an `extension AppDelegate`
+  cannot join the harness without dragging in the whole app; keep such classes
+  in their own files. Name unused delegate params `_`, prefer value types, and
+  run `swift format lint --strict` (CI enforces `.swift-format`).
 
 ### Python (test harness, `linux/tests`)
 - **Framework**: the harness (`mock_portal.py`) supports the Linux integration

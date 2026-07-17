@@ -6,7 +6,9 @@
 // boundary. The transcript must reach the boo_inject handler byte-identical
 // as event DATA, never as script source, so no payload can execute. The
 // round-trip goes through a local echo handler, so no Ghostty (and no
-// Automation permission) is needed.
+// Automation permission) is needed. Plus ThemeManager against the REAL core
+// parser (the harness links libboo-core): the full Ghostty theme set loads,
+// the default is present, and selection stays in bounds.
 
 import AppKit
 
@@ -46,5 +48,29 @@ for payload in payloads {
 check(
     !FileManager.default.fileExists(atPath: "/tmp/boo-test-canary"),
     "no payload executed (no canary file)")
+
+// Theme handling through the REAL core parser (boo_theme_parse_file): the
+// harness runs from the repo root, so ThemeManager finds ./themes and parses
+// the full Ghostty set. Pins the load, the default, and selection bounds.
+let themes = ThemeManager.shared
+check(themes.themes.count >= 400, "parses the Ghostty theme set (\(themes.themes.count) themes)")
+check(
+    themes.themes.contains { $0.name == "Ghostty Default Style Dark" },
+    "the default theme is present")
+check(
+    themes.current.palette.count == 16,
+    "a theme carries the full 16-color palette")
+
+let originalIndex = themes.currentIndex
+themes.selectTheme(at: -1)
+check(themes.currentIndex == originalIndex, "negative selection is ignored")
+themes.selectTheme(at: themes.themes.count)
+check(themes.currentIndex == originalIndex, "past-the-end selection is ignored")
+if themes.themes.count > 1 {
+    let target = (originalIndex + 1) % themes.themes.count
+    themes.selectTheme(at: target)
+    check(themes.currentIndex == target, "selectTheme moves the current index")
+    check(themes.current.name == themes.themes[target].name, "current follows the index")
+}
 
 exit(failures == 0 ? 0 : 1)
