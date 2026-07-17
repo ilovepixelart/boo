@@ -10,12 +10,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindowController: SettingsWindowController?
     var statusBarTimer: Timer?
 
+    /// Open the diagnostic log at ~/Library/Logs/Boo/boo.log. Never logs
+    /// recognized text (see docs/logging-and-crash-reporting.md).
+    private func initLogging() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Boo", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        boo_log_init(dir.appendingPathComponent("boo.log").path, Int32(BOO_LOG_INFO))
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        initLogging()
         // Microphone only. Accessibility is requested later, the first time a
         // paste actually needs it, see PermissionsManager.
         PermissionsManager.ensurePermissions()
 
         guard let modelPath = findModelPath() else {
+            boo_log(Int32(BOO_LOG_ERROR), "no speech model found")
             showModelNotFoundAlert()
             NSApp.terminate(nil)
             return
@@ -23,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("Boo: loading model %@", modelPath)
 
         guard let ctx = boo_init(modelPath) else {
+            boo_log(Int32(BOO_LOG_ERROR), "speech model failed to load")
             let alert = NSAlert()
             alert.messageText = "Could not load the model"
             alert.informativeText = """
@@ -37,6 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         booCtx = ctx
+        boo_log(Int32(BOO_LOG_INFO), "speech model loaded")
 
         // Optional streaming VAD: when a Silero model is present, utterances
         // are transcribed at natural pauses while still recording, and only
