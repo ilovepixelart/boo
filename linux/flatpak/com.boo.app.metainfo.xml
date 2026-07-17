@@ -56,6 +56,18 @@
   </requires>
 
   <releases>
+    <release version="0.5.0" date="2026-07-17">
+      <description>
+        <p>In-app model management, better transcription, and local crash capture.</p>
+        <ul>
+          <li>First run offers a model download dialog (curated list, progress bar, checksum-verified) on every platform, no more copy-a-curl-command.</li>
+          <li>Settings gains a model switcher: one dropdown of models on disk plus downloadable ones; picking a model swaps it in place and the choice persists.</li>
+          <li>Sharper transcripts: beam search on the final decode and a cleanup pass that removes repetition loops.</li>
+          <li>Partial model files from interrupted downloads are detected and offered for re-download instead of failing at load.</li>
+          <li>Diagnostic logging plus local crash capture; a crash report is surfaced on the next launch and never uploaded.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.2" date="2026-07-16">
       <description>
         <p>Adds a native ARM64 Windows build.</p>
