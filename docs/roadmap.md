@@ -37,6 +37,12 @@ Status: `have` (shipped, keep it working), `verify` (probably fine, prove it),
 | 15 | Spoken punctuation commands ("new line", "new paragraph") as a pre-delivery transform | build | The number-one gripe of long-form dictation veterans |
 | 16 | Windows CPU baseline stays `-mcpu baseline` with runtime feature detection when SIMD tiers ever diverge | have | Illegal-instruction crashes on older CPUs are a recurring release-day failure elsewhere |
 
+A pick-and-download model onboarding dialog (dropdown of curated models,
+progress bar, then load and open the app) is under design in
+[model-onboarding.md](model-onboarding.md); it replaces the copy-a-curl-command
+first run. It is consistent with the privacy stance, the VAD model is already
+auto-fetched over TLS against a pinned hash, and a user-initiated, hash-verified
+download from a curated list is strictly more conservative than that.
+
 Explicitly rejected for now: muting other audio while recording (fails to restore
-volume reliably on external DACs elsewhere), an in-app model downloader (would
-falsify the zero-network claim), and cloud anything.
+volume reliably on external DACs elsewhere), and cloud anything.
