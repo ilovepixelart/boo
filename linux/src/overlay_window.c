@@ -59,6 +59,11 @@ typedef struct {
         // closing the window mid-transcription joins it rather than leaving
         // its completion idle to fire against freed state.
         GThread *transcribe_thread; // NULL == no thread to join
+        // The model-switch thread (boo_reload_model). Joinable for the same
+        // reason: closing the window mid-swap must wait for it before freeing
+        // state, since the worker reads the context through this state. The
+        // dropdown is disabled while a swap runs, so there is only ever one.
+        GThread *swap_thread; // NULL == no thread to join
         // Idles queued by the workers, kept as GSource refs so teardown can
         // cancel them: joining the threads stops NEW idles, but one already
         // queued would otherwise fire against freed state. g_source_destroy
@@ -94,6 +99,9 @@ static void window_state_free(gpointer data) {
     // must not leave it finishing against freed state. boo_deinit already
     // flushes the in-flight boo_transcribe, so this join is bounded.
     if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
+    // The model-swap thread reads state->ctx; wait it out before the free (it
+    // also queues a tracked completion idle, cancelled just below).
+    if (state->workers.swap_thread) g_thread_join(state->workers.swap_thread);
     // With the workers gone, the pending set is stable: cancel anything the
     // main loop has not dispatched yet (their notifies free the payloads).
     if (state->workers.pending_idles) {
@@ -108,6 +116,12 @@ static void window_state_free(gpointer data) {
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     if (state->settings.css) g_object_unref(state->settings.css);
+    // Destroy the settings dialog while this state is still valid: it is not
+    // auto-destroyed with its transient parent, and its destroy handler writes
+    // through this state and its rows borrow the theme names freed just below.
+    // Its callbacks hold state, not the freed-here ui, so this is safe even
+    // though the ui is finalized by the destroy.
+    if (state->settings.dialog) gtk_window_destroy(state->settings.dialog);
     if (state->settings.themes) {
         for (guint i = 0; i < state->settings.themes->len; i++)
             g_free(g_array_index(state->settings.themes, ThemeEntry, i).name);
@@ -796,62 +810,81 @@ static void model_list_rebuild(SettingsUI *ui) {
     ui->model_updating = FALSE;
 }
 
+// Holds the WindowState, not the SettingsUI: the settings dialog can be
+// destroyed at teardown while this swap is in flight, so the completion
+// callback looks the (still valid or gone) dialog up fresh rather than
+// dereferencing a freed ui. `ok` is written by the worker, read on the main
+// loop after the thread is done, so no lock is needed.
 typedef struct {
-    SettingsUI *ui;
+    WindowState *st;
     char *path;
+    gboolean ok;
 } ModelSwitchJob;
 
-static void model_switch_worker(GTask *task, gpointer source, gpointer task_data,
-                                GCancellable *cancel) {
-    (void)source;
-    (void)cancel;
-    ModelSwitchJob *job = task_data;
-    g_task_return_boolean(task, boo_reload_model(job->ui->st->ctx, job->path));
-}
-
-static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer data) {
-    (void)source;
+static void model_switch_job_free(gpointer data) {
     ModelSwitchJob *job = data;
-    SettingsUI *ui = job->ui;
-    gboolean ok = g_task_propagate_boolean(G_TASK(result), NULL);
-    g_autofree char *base = g_path_get_basename(job->path);
-
-    settings_set_busy(ui, FALSE);
-    if (ok) {
-        g_free(ui->st->settings.model_current);
-        ui->st->settings.model_current = g_strdup(job->path);
-        g_free(ui->st->settings.model_choice);
-        ui->st->settings.model_choice = g_strdup(job->path);
-        settings_save(ui->st);
-        boo_log(BOO_LOG_INFO, "model switched");
-        g_autofree const char *msg = g_strdup_printf("Loaded %s.", base);
-        gtk_label_set_text(ui->model_status, msg);
-    } else {
-        g_autofree const char *msg =
-            g_strdup_printf("Could not load %s; keeping the previous model.", base);
-        gtk_label_set_text(ui->model_status, msg);
-    }
-    model_list_rebuild(ui);
     g_free(job->path);
     g_free(job);
 }
 
+// On the main loop after the worker finishes (or cancelled at teardown, in
+// which case job_free just frees the job). Persists the choice regardless;
+// touches the dialog only if it is still open.
+static gboolean model_switch_done(gpointer data) {
+    ModelSwitchJob *job = data;
+    WindowState *st = job->st;
+    g_autofree char *base = g_path_get_basename(job->path);
+
+    if (job->ok) {
+        g_free(st->settings.model_current);
+        st->settings.model_current = g_strdup(job->path);
+        g_free(st->settings.model_choice);
+        st->settings.model_choice = g_strdup(job->path);
+        settings_save(st);
+        boo_log(BOO_LOG_INFO, "model switched");
+    }
+    if (st->settings.dialog) {
+        SettingsUI *ui =
+            g_object_get_data(G_OBJECT(st->settings.dialog), "boo-settings-ui");
+        if (ui) {
+            settings_set_busy(ui, FALSE);
+            g_autofree const char *msg =
+                job->ok ? g_strdup_printf("Loaded %s.", base)
+                        : g_strdup_printf(
+                              "Could not load %s; keeping the previous model.", base);
+            gtk_label_set_text(ui->model_status, msg);
+            model_list_rebuild(ui);
+        }
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer model_switch_worker(gpointer data) {
+    ModelSwitchJob *job = data;
+    job->ok = boo_reload_model(job->st->ctx, job->path);
+    queue_tracked_idle(job->st, model_switch_done, job, model_switch_job_free);
+    return NULL;
+}
+
 // Swap models off the main loop (loading takes seconds; boo_reload_model
-// keeps the old model on failure). The settings window's close button is
-// disabled for the duration so these widgets cannot die under the worker.
+// keeps the old model on failure). The settings window's close button and
+// dropdown are disabled for the duration, and window_state_free joins this
+// thread before freeing the state it reads.
 static void model_switch_start(SettingsUI *ui, const char *path) {
+    WindowState *st = ui->st;
     settings_set_busy(ui, TRUE);
     g_autofree char *base = g_path_get_basename(path);
     g_autofree const char *msg = g_strdup_printf("Loading %s…", base);
     gtk_label_set_text(ui->model_status, msg);
 
+    // Reap the previous swap thread (long finished: the dropdown was disabled
+    // until its completion thawed it) before replacing the handle.
+    if (st->workers.swap_thread) g_thread_join(st->workers.swap_thread);
+
     ModelSwitchJob *job = g_new0(ModelSwitchJob, 1);
-    job->ui = ui;
+    job->st = st;
     job->path = g_strdup(path);
-    GTask *task = g_task_new(NULL, NULL, model_switch_finish, job);
-    g_task_set_task_data(task, job, NULL);
-    g_task_run_in_thread(task, model_switch_worker);
-    g_object_unref(task);
+    st->workers.swap_thread = g_thread_new("boo-swap", model_switch_worker, job);
 }
 
 static void on_model_download_done(const char *path, gpointer data) {

@@ -401,6 +401,16 @@ int main(void) {
     // The manifest download engine against the wrapper's local server.
     check_downloads();
 
+    // Leave a settings dialog open at teardown and start a model switch: the
+    // dialog is not auto-destroyed with the main window, and the swap thread
+    // reads this state, so window_state_free must destroy the dialog and join
+    // the thread. Exercised here so valgrind proves that teardown is UAF-free.
+    open_settings(NULL, st);
+    check(st->settings.dialog != NULL, "a settings dialog is open at teardown");
+    SettingsUI *teardown_ui =
+        g_object_get_data(G_OBJECT(st->settings.dialog), "boo-settings-ui");
+    if (teardown_ui) model_switch_start(teardown_ui, "/nonexistent/ggml-teardown.bin");
+
     // Full window teardown: joins workers, cancels pending idles, frees state.
     gtk_window_destroy(win);
     pump_ms(300);
