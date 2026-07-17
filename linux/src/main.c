@@ -196,7 +196,7 @@ typedef struct {
 static void on_onboarding_done(const char *path, gpointer user_data) {
     OnboardingUI *ui = user_data;
     AppState *state = ui->state;
-    g_autofree char *loaded = g_strdup(path);
+    g_autofree const char *loaded = g_strdup(path);
     gtk_window_destroy(GTK_WINDOW(ui->win)); // frees ui, the window owns it
     start_with_model(state, loaded);         // open the app
 }

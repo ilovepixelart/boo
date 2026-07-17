@@ -32,7 +32,7 @@ static gboolean is_speech_model(const char *dir, const char *name) {
     if (!g_str_has_prefix(name, "ggml-")) return FALSE;
     if (!g_str_has_suffix(name, ".bin")) return FALSE;
     if (g_str_has_prefix(name, "ggml-silero")) return FALSE;
-    g_autofree char *path = g_build_filename(dir, name, NULL);
+    g_autofree const char *path = g_build_filename(dir, name, NULL);
     return boo_model_verify(path) != BOO_MODEL_FILE_TRUNCATED;
 }
 
@@ -144,8 +144,8 @@ char *boo_models_write_dir(void) {
 static gint model_path_cmp(gconstpointer a, gconstpointer b) {
     const char *pa = *(const char *const *)a;
     const char *pb = *(const char *const *)b;
-    g_autofree char *na = g_path_get_basename(pa);
-    g_autofree char *nb = g_path_get_basename(pb);
+    g_autofree const char *na = g_path_get_basename(pa);
+    g_autofree const char *nb = g_path_get_basename(pb);
     unsigned ra = boo_model_rank(na);
     unsigned rb = boo_model_rank(nb);
     if (ra != rb) return ra < rb ? -1 : 1;
