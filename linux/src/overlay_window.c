@@ -338,6 +338,14 @@ static void toggle_recording(WindowState *state) {
         // UI, since the core ignores a start while a transcription is in flight.
         if (boo_is_transcribing(state->ctx)) return;
 
+        // No microphone: Boo still runs, but recording is a no-op. Say so
+        // instead of faking a take (which the auto-stop poll would then misread
+        // as the 10-minute cap).
+        if (!boo_has_microphone(state->ctx)) {
+            set_hint_transient(state, "no microphone");
+            return;
+        }
+
         // Collect the previous take's tick thread; it exits within one
         // cadence of its stop signal, so this join is effectively instant.
         if (state->stream_thread) {

@@ -23,6 +23,10 @@ void boo_start_recording(BooContext *ctx);
 void boo_stop_recording(BooContext *ctx);
 bool boo_is_recording(BooContext *ctx);
 bool boo_is_transcribing(BooContext *ctx);
+// Whether a microphone/audio backend was acquired at init. When false, Boo
+// still runs (the model is loaded, the UI shows) but recording is a no-op;
+// the frontend should say "no microphone" rather than appear to record.
+bool boo_has_microphone(BooContext *ctx);
 
 // Audio data
 const float *boo_get_waveform(BooContext *ctx, int *out_bars);
