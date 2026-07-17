@@ -454,6 +454,44 @@ export fn boo_models(out_count: ?*usize) [*]const BooModelInfo {
     return &models_list;
 }
 
+// Completeness check for a model file already on disk. Our own downloads
+// verify SHA-256 and move into place atomically, but a hand-run curl can be
+// interrupted and leave a truncated file that lists as usable and only fails
+// (slowly, with a generic message) at load time. For files named like a
+// manifest entry, comparing the on-disk size against the pinned size catches
+// truncation with one stat-priced call; a full hash here would cost seconds
+// per file on every enumeration. Files not in the manifest cannot be judged.
+pub const BOO_MODEL_FILE_OK: c_int = 0;
+pub const BOO_MODEL_FILE_TRUNCATED: c_int = 1;
+pub const BOO_MODEL_FILE_UNKNOWN: c_int = 2;
+
+// libc, hand-declared like theme.zig: portable across the mingw build where
+// @cImport of stdio.h does not translate.
+const SEEK_END: c_int = 2;
+extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+extern "c" fn fclose(f: *anyopaque) c_int;
+extern "c" fn fseek(f: *anyopaque, off: c_long, whence: c_int) c_int;
+extern "c" fn ftell(f: *anyopaque) c_long;
+extern "c" fn remove(path: [*:0]const u8) c_int;
+
+export fn boo_model_verify(path: [*:0]const u8) c_int {
+    const basename = std.fs.path.basename(std.mem.span(path));
+    const expected: u64 = for (models_list) |m| {
+        if (std.mem.eql(u8, basename, std.mem.span(m.filename))) break m.size;
+    } else return BOO_MODEL_FILE_UNKNOWN;
+
+    // Every manifest size fits c_long even on mingw (all under 2 GB).
+    const f = fopen(path, "rb") orelse return BOO_MODEL_FILE_TRUNCATED;
+    defer _ = fclose(f);
+    if (fseek(f, 0, SEEK_END) != 0) return BOO_MODEL_FILE_TRUNCATED;
+    const size = ftell(f);
+    if (size < 0) return BOO_MODEL_FILE_TRUNCATED;
+    return if (@as(u64, @intCast(size)) == expected)
+        BOO_MODEL_FILE_OK
+    else
+        BOO_MODEL_FILE_TRUNCATED;
+}
+
 // ── diagnostic logging ────────────────────────────────────────────────────────
 // See src/log.zig. The frontend passes the per-OS log file path (or null for
 // stderr only) and the minimum level (0=error 1=warn 2=info 3=debug). Never log
@@ -567,6 +605,47 @@ test "the transcribing flag is atomic, not a plain bool" {
     // plain bool, that is a data race, so pin the type.
     const Field = @FieldType(BooContext, "transcribing");
     try testing.expectEqual(std.atomic.Value(bool), Field);
+}
+
+test "boo_model_verify flags truncated manifest models, cannot judge unknowns" {
+    // Not in the manifest: no pinned size to compare against.
+    try testing.expectEqual(
+        BOO_MODEL_FILE_UNKNOWN,
+        boo_model_verify("/nonexistent/ggml-mystery.bin"),
+    );
+    // Manifest-named but unreadable: unusable either way.
+    try testing.expectEqual(
+        BOO_MODEL_FILE_TRUNCATED,
+        boo_model_verify("/nonexistent/ggml-base.en.bin"),
+    );
+
+    // A manifest-named file with the wrong size is a partial download. An
+    // empty file with the exact manifest name is the cheapest stand-in.
+    const tmp = std.c.getenv("TMPDIR") orelse "/tmp";
+    var buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrintSentinel(
+        &buf,
+        "{s}/ggml-base.en.bin",
+        .{std.mem.span(tmp)},
+        0,
+    );
+    const f = fopen(path, "wb") orelse return error.SkipZigTest;
+    _ = fclose(f);
+    defer _ = remove(path);
+    try testing.expectEqual(BOO_MODEL_FILE_TRUNCATED, boo_model_verify(path));
+
+    // A real, complete download passes. Skips on checkouts without models.
+    const home = std.c.getenv("HOME") orelse return;
+    var hbuf: [512]u8 = undefined;
+    const model = std.fmt.bufPrintSentinel(
+        &hbuf,
+        "{s}/.boo/models/ggml-base.en.bin",
+        .{std.mem.span(home)},
+        0,
+    ) catch return;
+    const probe = fopen(model, "rb") orelse return;
+    _ = fclose(probe);
+    try testing.expectEqual(BOO_MODEL_FILE_OK, boo_model_verify(model));
 }
 
 test "boo_reload_model swaps the engine in place and survives a bad path" {

@@ -102,6 +102,18 @@ typedef struct {
 // every frontend's model-download dialog offers the same set from one place.
 const BooModelInfo *boo_models(size_t *out_count);
 
+// Completeness of a model file on disk, judged by comparing its size against
+// the pinned manifest size (catches a hand-run download that was interrupted;
+// stat-priced, no hashing). Files not named like a manifest entry cannot be
+// judged and come back UNKNOWN; treat those as usable. Skip TRUNCATED files
+// when enumerating or auto-picking models.
+enum {
+    BOO_MODEL_FILE_OK = 0,
+    BOO_MODEL_FILE_TRUNCATED = 1,
+    BOO_MODEL_FILE_UNKNOWN = 2,
+};
+int boo_model_verify(const char *path);
+
 // Diagnostic logging (see docs/logging-and-crash-reporting.md). boo_log_init
 // sets the file sink (per-OS path from the frontend; NULL == stderr only) and
 // the minimum level; boo_log writes one line. Levels below.

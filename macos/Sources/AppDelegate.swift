@@ -291,10 +291,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // A model the user explicitly picked in Settings wins over the
-        // capability ranking below; a stale choice (file deleted since) just
-        // falls through to auto-discovery.
+        // capability ranking below; a stale choice (file deleted or truncated
+        // since) just falls through to auto-discovery.
         if let saved = UserDefaults.standard.string(forKey: AppDelegate.modelDefaultsKey),
-            FileManager.default.fileExists(atPath: saved)
+            FileManager.default.fileExists(atPath: saved),
+            boo_model_verify(saved) != Int32(BOO_MODEL_FILE_TRUNCATED)
         {
             return saved
         }
@@ -308,6 +309,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // ggml-silero-* is the VAD model, not a speech model; without
                 // this exclusion it could win the alphabetical tiebreak.
                 .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin") && !$0.hasPrefix("ggml-silero") }
+                // A truncated file (interrupted manual download) must not be
+                // auto-picked; it would fail seconds into launch.
+                .filter {
+                    boo_model_verify((dir as NSString).appendingPathComponent($0))
+                        != Int32(BOO_MODEL_FILE_TRUNCATED)
+                }
                 .sorted()
             guard !models.isEmpty else { continue }
 
@@ -328,7 +335,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Speech models on disk for the Settings popup: every ggml-*.bin in the
     /// search directories (minus the silero VAD models), deduplicated by
     /// filename so ~/.boo/models shadows a bundled copy, ranked most capable
-    /// first with alphabetical tiebreak.
+    /// first with alphabetical tiebreak. Truncated files (an interrupted
+    /// manual download, caught by boo_model_verify) are excluded, so the
+    /// Settings dropdown offers the re-download entry for them instead.
     func installedModels() -> [(name: String, path: String)] {
         let fm = FileManager.default
         var seen = Set<String>()
@@ -339,7 +348,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             where name.hasPrefix("ggml-") && name.hasSuffix(".bin")
                 && !name.hasPrefix("ggml-silero") && seen.insert(name).inserted
             {
-                out.append((name, (dir as NSString).appendingPathComponent(name)))
+                let path = (dir as NSString).appendingPathComponent(name)
+                if boo_model_verify(path) == Int32(BOO_MODEL_FILE_TRUNCATED) { continue }
+                out.append((name, path))
             }
         }
         return out.sorted { (boo_model_rank($0.name), $0.name) < (boo_model_rank($1.name), $1.name) }
