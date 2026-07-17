@@ -59,6 +59,12 @@ typedef struct {
         // closing the window mid-transcription joins it rather than leaving
         // its completion idle to fire against freed state.
         GThread *transcribe_thread; // NULL == no thread to join
+        // Idles queued by the workers, kept as GSource refs so teardown can
+        // cancel them: joining the threads stops NEW idles, but one already
+        // queued would otherwise fire against freed state. g_source_destroy
+        // on an already-dispatched source is a warning-free no-op.
+        GMutex idle_lock;
+        GPtrArray *pending_idles; // GSource*, pruned as they dispatch
     } workers;
 } WindowState;
 
@@ -88,6 +94,17 @@ static void window_state_free(gpointer data) {
     // must not leave it finishing against freed state. boo_deinit already
     // flushes the in-flight boo_transcribe, so this join is bounded.
     if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
+    // With the workers gone, the pending set is stable: cancel anything the
+    // main loop has not dispatched yet (their notifies free the payloads).
+    if (state->workers.pending_idles) {
+        for (guint i = 0; i < state->workers.pending_idles->len; i++) {
+            GSource *src = g_ptr_array_index(state->workers.pending_idles, i);
+            g_source_destroy(src);
+            g_source_unref(src);
+        }
+        g_ptr_array_free(state->workers.pending_idles, TRUE);
+    }
+    g_mutex_clear(&state->workers.idle_lock);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
     if (state->settings.css) g_object_unref(state->settings.css);
@@ -233,6 +250,35 @@ static void live_card_remove(WindowState *st) {
 // Ordering with the final transcript is safe: both this and transcribe_done
 // run on the main loop, and begin_transcription clears ui_recording there
 // first, so a stale live update queued behind the final text drops itself.
+static void transcribe_result_free(gpointer data) {
+    TranscribeResult *res = data;
+    g_free(res->text);
+    g_free(res);
+}
+
+// Queue a worker-thread idle whose GSource is tracked for teardown; `notify`
+// frees the payload whether the idle dispatches or gets cancelled.
+static void queue_tracked_idle(WindowState *st, GSourceFunc fn, gpointer data,
+                               GDestroyNotify notify) {
+    GSource *src = g_idle_source_new();
+    g_source_set_callback(src, fn, data, notify);
+    g_mutex_lock(&st->workers.idle_lock);
+    // Opportunistic prune keeps the array session-bounded.
+    guint i = 0;
+    while (i < st->workers.pending_idles->len) {
+        GSource *old = g_ptr_array_index(st->workers.pending_idles, i);
+        if (g_source_is_destroyed(old)) {
+            g_source_unref(old);
+            g_ptr_array_remove_index_fast(st->workers.pending_idles, i);
+        } else {
+            i++;
+        }
+    }
+    g_ptr_array_add(st->workers.pending_idles, src);
+    g_source_attach(src, NULL);
+    g_mutex_unlock(&st->workers.idle_lock);
+}
+
 static gboolean live_text_update(gpointer user_data) {
     TranscribeResult *res = user_data;
     WindowState *st = res->state;
@@ -246,8 +292,6 @@ static gboolean live_text_update(gpointer user_data) {
         gtk_label_set_text(st->live_label, res->text);
         g_idle_add(scroll_to_newest, st);
     }
-    g_free(res->text);
-    g_free(res);
     return G_SOURCE_REMOVE;
 }
 
@@ -263,7 +307,7 @@ static gpointer stream_tick_worker(gpointer data) {
                 TranscribeResult *res = g_new0(TranscribeResult, 1);
                 res->state = state;
                 res->text = g_strdup(live);
-                g_idle_add(live_text_update, res);
+                queue_tracked_idle(state, live_text_update, res, transcribe_result_free);
             }
         }
         g_usleep(250 * 1000);
@@ -295,9 +339,6 @@ static gboolean transcribe_done(gpointer user_data) {
         set_hint_transient(state, "no speech detected");
     }
     set_button_idle(state);
-
-    g_free(res->text);
-    g_free(res);
     return G_SOURCE_REMOVE;
 }
 
@@ -308,7 +349,7 @@ static gpointer transcribe_worker(gpointer task_data) {
     TranscribeResult *res = g_new0(TranscribeResult, 1);
     res->state = state;
     res->text = text ? g_strdup(text) : NULL;
-    g_idle_add(transcribe_done, res);
+    queue_tracked_idle(state, transcribe_done, res, transcribe_result_free);
     return NULL;
 }
 
@@ -333,6 +374,17 @@ static void begin_transcription(WindowState *state) {
     // Reap the prior take's thread (long finished by now) before replacing the
     // handle, so a completed thread is never leaked.
     if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
+    // With the workers gone, the pending set is stable: cancel anything the
+    // main loop has not dispatched yet (their notifies free the payloads).
+    if (state->workers.pending_idles) {
+        for (guint i = 0; i < state->workers.pending_idles->len; i++) {
+            GSource *src = g_ptr_array_index(state->workers.pending_idles, i);
+            g_source_destroy(src);
+            g_source_unref(src);
+        }
+        g_ptr_array_free(state->workers.pending_idles, TRUE);
+    }
+    g_mutex_clear(&state->workers.idle_lock);
     state->workers.transcribe_thread =
         g_thread_new("boo-transcribe", transcribe_worker, state);
 }
@@ -1000,6 +1052,8 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx,
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
     state->settings.model_current = g_strdup(model_path);
+    g_mutex_init(&state->workers.idle_lock);
+    state->workers.pending_idles = g_ptr_array_new();
     state->window = GTK_WINDOW(window);
     state->hotkey_ok = TRUE; // downgraded by on_shortcut_unavailable
     g_object_set_data_full(G_OBJECT(window), "boo-state", state, window_state_free);
