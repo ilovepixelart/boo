@@ -290,7 +290,7 @@ static gboolean live_text_update(gpointer user_data) {
             gtk_box_append(st->card_stack, st->live_card);
         }
         gtk_label_set_text(st->live_label, res->text);
-        g_idle_add(scroll_to_newest, st);
+        queue_tracked_idle(st, scroll_to_newest, st, NULL);
     }
     return G_SOURCE_REMOVE;
 }
@@ -324,7 +324,7 @@ static gboolean transcribe_done(gpointer user_data) {
     live_card_remove(state);
     if (res->text && *res->text) {
         gtk_box_append(state->card_stack, card_new(state, res->text, FALSE));
-        g_idle_add(scroll_to_newest, state);
+        queue_tracked_idle(state, scroll_to_newest, state, NULL);
         copy_to_clipboard(state, res->text);
         show_toast(state, "Copied to clipboard");
         set_hint_idle(state);
