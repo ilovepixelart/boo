@@ -101,7 +101,7 @@ windows_native_slice() {
     # Unit tests, one subdir per exe so the shared strconv/inject_plan
     # counters cannot collide across tests.
     local t
-    for t in model_test download_test inject_test crash_test waveform_test; do
+    for t in model_test download_test download_transfer_test inject_test crash_test waveform_test; do
         mkdir -p "$t"
         (
             cd "$t"
