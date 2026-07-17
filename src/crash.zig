@@ -14,7 +14,10 @@ const builtin = @import("builtin");
 
 extern "c" fn backtrace(buffer: [*]?*anyopaque, size: c_int) c_int;
 extern "c" fn backtrace_symbols_fd(buffer: [*]?*anyopaque, size: c_int, fd: c_int) void;
-extern "c" fn open(path: [*:0]const u8, flags: c_int, mode: c_int) c_int;
+// Variadic exactly as libc declares it: on arm64 macOS variadic arguments are
+// passed on the stack, so a fixed three-argument declaration hands libc a
+// garbage mode and the report file comes out with random permission bits.
+extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 extern "c" fn close(fd: c_int) c_int;
 extern "c" fn raise(sig: c_int) c_int;
@@ -63,7 +66,7 @@ fn writeReport(fd: c_int, sig: c_int) void {
 
 fn handler(sig: SigParam) callconv(.c) void {
     const num = sigNum(sig);
-    const fd = open(&dump_path, O_WRONLY | O_CREAT | O_APPEND, 0o600);
+    const fd = open(&dump_path, O_WRONLY | O_CREAT | O_APPEND, @as(c_int, 0o600));
     if (fd >= 0) {
         writeReport(fd, num);
         _ = close(fd);
