@@ -24,12 +24,11 @@ static GPtrArray *model_dirs(void) {
     return boo_data_dirs("models");
 }
 
-// Whether `name` in `dir` is a usable speech model: any ggml-*.bin except the
-// silero VAD models, and not a truncated partial download.
+// Whether `name` in `dir` is a usable speech model: the core says it is a
+// speech model (ggml-*.bin, not the VAD), and it is not a truncated partial
+// download.
 static gboolean is_speech_model(const char *dir, const char *name) {
-    if (!g_str_has_prefix(name, "ggml-")) return FALSE;
-    if (!g_str_has_suffix(name, ".bin")) return FALSE;
-    if (g_str_has_prefix(name, "ggml-silero")) return FALSE;
+    if (boo_model_classify(name) != BOO_MODEL_SPEECH) return FALSE;
     g_autofree const char *path = g_build_filename(dir, name, NULL);
     return boo_model_verify(path) != BOO_MODEL_FILE_TRUNCATED;
 }
@@ -77,8 +76,7 @@ static char *find_vad_model_in(const char *dir) {
     char *best = NULL;
     const char *name;
     while ((name = g_dir_read_name(d))) {
-        if (!g_str_has_prefix(name, "ggml-silero")) continue;
-        if (!g_str_has_suffix(name, ".bin")) continue;
+        if (boo_model_classify(name) != BOO_MODEL_VAD) continue;
         if (!best || g_strcmp0(name, best) < 0) {
             g_free(best);
             best = g_strdup(name);

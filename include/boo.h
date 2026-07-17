@@ -91,6 +91,18 @@ bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 // preference order lives in one place. Directory listing stays per-OS.
 uint32_t boo_model_rank(const char *name);
 
+// What kind of model a filename names, judged on its basename (a full path
+// works too): a ggml-*.bin speech model, the Silero VAD (ggml-silero*), or
+// neither. The three frontends share this so the "silero is the VAD, not a
+// speech model" rule lives in one place instead of drifting. Layer
+// boo_model_verify on top to also skip truncated files.
+enum {
+    BOO_MODEL_OTHER = 0,  // not a recognized model filename
+    BOO_MODEL_SPEECH = 1, // a whisper/parakeet speech model
+    BOO_MODEL_VAD = 2,    // a Silero VAD model (enables streaming)
+};
+int boo_model_classify(const char *name);
+
 // One downloadable speech model in the curated manifest. All string pointers are
 // static (valid for the process lifetime). `sha256` is the pinned lowercase hex
 // digest; a download must verify against it before the file is accepted.

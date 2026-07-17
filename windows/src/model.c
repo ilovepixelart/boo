@@ -24,6 +24,17 @@ static unsigned rank_of(const WCHAR *name) {
     return r;
 }
 
+// Model kind (speech / VAD / neither) via the shared core policy
+// (boo_model_classify), which takes UTF-8. The "ggml-silero is the VAD, not a
+// speech model" rule lives in the core so all three frontends agree.
+static int kind_of(const WCHAR *name) {
+    char *u = boo_to_utf8(name);
+    if (!u) return BOO_MODEL_OTHER;
+    const int kind = boo_model_classify(u);
+    free(u);
+    return kind;
+}
+
 // Whether the model at dir\name is usable: not a truncated partial download
 // (an interrupted hand-run curl), judged by the core against the pinned
 // manifest size.
@@ -50,8 +61,8 @@ static WCHAR *find_model_in(const WCHAR *dir) {
     unsigned best_rank = 0;
     do {
         if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        // ggml-silero-* is the VAD model, not a speech model.
-        if (wcsncmp(entry.cFileName, L"ggml-silero", 11) == 0) continue;
+        // Skips the silero VAD, which the glob's ggml-*.bin also matches.
+        if (kind_of(entry.cFileName) != BOO_MODEL_SPEECH) continue;
         if (!usable_model(dir, entry.cFileName)) continue;
 
         const unsigned rank = rank_of(entry.cFileName);
@@ -152,13 +163,16 @@ char *boo_model_find_vad(void) {
     const size_t ndirs = model_dirs(dirs);
     for (size_t i = 0; i < ndirs; i++) {
         WCHAR pattern[MAX_PATH];
-        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-silero*.bin", dirs[i]) < 0) continue;
+        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dirs[i]) < 0) continue;
         WIN32_FIND_DATAW e;
         HANDLE it = FindFirstFileW(pattern, &e);
         if (it == INVALID_HANDLE_VALUE) continue;
         WCHAR best[MAX_PATH] = L"";
         do {
             if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            // The core decides which ggml-*.bin is the VAD; first name wins so
+            // a newer silero version beats an older one.
+            if (kind_of(e.cFileName) != BOO_MODEL_VAD) continue;
             if (best[0] == 0 || wcscmp(e.cFileName, best) < 0) wcscpy(best, e.cFileName);
         } while (FindNextFileW(it, &e));
         FindClose(it);
@@ -221,7 +235,7 @@ static void scan_model_dir(const WCHAR *dir, char ***paths, int *count, int *cap
     if (it == INVALID_HANDLE_VALUE) return;
     do {
         if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        if (wcsncmp(e.cFileName, L"ggml-silero", 11) == 0) continue;
+        if (kind_of(e.cFileName) != BOO_MODEL_SPEECH) continue;
         if (!usable_model(dir, e.cFileName)) continue;
         WCHAR full[MAX_PATH];
         if (swprintf(full, MAX_PATH, L"%ls\\%ls", dir, e.cFileName) < 0) continue;

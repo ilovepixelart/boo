@@ -392,6 +392,26 @@ export fn boo_model_rank(name: [*:0]const u8) u32 {
     return recommended_models.len;
 }
 
+// What kind of model a filename names, so the "ggml-*.bin is a speech model,
+// ggml-silero* is the VAD, everything else is neither" policy lives here once
+// instead of drifting across three frontends. Judged on the basename, so a
+// full path works too; case-sensitive, matching the pinned manifest names.
+pub const BOO_MODEL_OTHER: c_int = 0;
+pub const BOO_MODEL_SPEECH: c_int = 1;
+pub const BOO_MODEL_VAD: c_int = 2;
+
+export fn boo_model_classify(name: [*:0]const u8) c_int {
+    const full = std.mem.span(name);
+    // Basename after either separator: std.fs.path.basename only splits on the
+    // target's own, but a frontend may hand us a foreign-looking path.
+    var base = full;
+    if (std.mem.lastIndexOfAny(u8, full, "/\\")) |i| base = full[i + 1 ..];
+    if (!std.mem.startsWith(u8, base, "ggml-")) return BOO_MODEL_OTHER;
+    if (!std.mem.endsWith(u8, base, ".bin")) return BOO_MODEL_OTHER;
+    if (std.mem.startsWith(u8, base, "ggml-silero")) return BOO_MODEL_VAD;
+    return BOO_MODEL_SPEECH;
+}
+
 // The curated download manifest: what the model-onboarding dialog offers, one
 // source for every frontend. Recommended first. SHA-256s are pinned (the HF LFS
 // oids); a download must verify against them. Keep in step with docs/models.md
@@ -561,6 +581,24 @@ test "boo_model_rank orders the recommended models best-first" {
     // always beats an unrecognized one.
     try testing.expectEqual(recommended_models.len, boo_model_rank("ggml-something-else.bin"));
     try testing.expect(boo_model_rank("ggml-small.en.bin") < boo_model_rank("ggml-base.en.bin"));
+}
+
+test "boo_model_classify sorts speech, VAD, and non-models" {
+    // Speech: any ggml-*.bin that is not the VAD, path or bare name.
+    try testing.expectEqual(BOO_MODEL_SPEECH, boo_model_classify("ggml-base.en.bin"));
+    try testing.expectEqual(BOO_MODEL_SPEECH, boo_model_classify("ggml-parakeet-tdt-0.6b-v3-q8_0.bin"));
+    try testing.expectEqual(BOO_MODEL_SPEECH, boo_model_classify("/home/u/.boo/models/ggml-small.en.bin"));
+    try testing.expectEqual(BOO_MODEL_SPEECH, boo_model_classify("C:\\Users\\u\\ggml-tiny.en-q5_1.bin"));
+    // VAD: the silero family, which pickers must never offer as speech.
+    try testing.expectEqual(BOO_MODEL_VAD, boo_model_classify("ggml-silero-v6.2.0.bin"));
+    try testing.expectEqual(BOO_MODEL_VAD, boo_model_classify("/x/ggml-silero-v5.1.2.bin"));
+    // The pinned VAD entry must classify as VAD, or streaming discovery breaks.
+    try testing.expectEqual(BOO_MODEL_VAD, boo_model_classify(boo_vad_model().filename));
+    // Neither: wrong prefix, wrong suffix, or unrelated files.
+    try testing.expectEqual(BOO_MODEL_OTHER, boo_model_classify("model.bin"));
+    try testing.expectEqual(BOO_MODEL_OTHER, boo_model_classify("ggml-base.en.txt"));
+    try testing.expectEqual(BOO_MODEL_OTHER, boo_model_classify("README.md"));
+    try testing.expectEqual(BOO_MODEL_OTHER, boo_model_classify("ggml-silero.txt"));
 }
 
 test "the download manifest is well-formed" {

@@ -411,13 +411,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// capable model still wins auto-discovery by default.
     static let modelDefaultsKey = "modelPath"
 
-    /// Whether `name` inside `dir` is a usable speech model: any ggml-*.bin
-    /// except the silero VAD models (which would otherwise win alphabetical
-    /// tiebreaks), and not a truncated partial download (boo_model_verify).
+    /// Whether `name` inside `dir` is a usable speech model: the core
+    /// classifies it as a speech model (a ggml-*.bin that is not the silero
+    /// VAD, which would otherwise win alphabetical tiebreaks), and it is not a
+    /// truncated partial download (boo_model_verify).
     private func isUsableSpeechModel(_ name: String, in dir: String) -> Bool {
-        guard name.hasPrefix("ggml-"), name.hasSuffix(".bin"),
-            !name.hasPrefix("ggml-silero")
-        else { return false }
+        guard boo_model_classify(name) == Int32(BOO_MODEL_SPEECH) else { return false }
         let path = (dir as NSString).appendingPathComponent(name)
         return boo_model_verify(path) != Int32(BOO_MODEL_FILE_TRUNCATED)
     }
@@ -484,7 +483,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
             let models =
                 entries
-                .filter { $0.hasPrefix("ggml-silero") && $0.hasSuffix(".bin") }
+                .filter { boo_model_classify($0) == Int32(BOO_MODEL_VAD) }
                 .sorted()
             if let chosen = models.first {
                 return (dir as NSString).appendingPathComponent(chosen)
