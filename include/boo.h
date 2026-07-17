@@ -78,6 +78,19 @@ bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 // preference order lives in one place. Directory listing stays per-OS.
 uint32_t boo_model_rank(const char *name);
 
+// Diagnostic logging (see docs/logging-and-crash-reporting.md). boo_log_init
+// sets the file sink (per-OS path from the frontend; NULL == stderr only) and
+// the minimum level; boo_log writes one line. Levels below.
+// PRIVACY: never pass recognized/transcript text, log metadata only.
+enum {
+    BOO_LOG_ERROR = 0,
+    BOO_LOG_WARN = 1,
+    BOO_LOG_INFO = 2,
+    BOO_LOG_DEBUG = 3,
+};
+void boo_log_init(const char *path, int min_level);
+void boo_log(int level, const char *msg);
+
 #ifdef __cplusplus
 }
 #endif
