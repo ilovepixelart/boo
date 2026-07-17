@@ -25,6 +25,7 @@
 
 typedef struct {
     BooContext *ctx;
+    GtkApplication *app; // for callbacks that outlive on_activate (file picker)
 } AppState;
 
 // Pick a whisper (or parakeet) model out of `dir`, or NULL if it holds none.
@@ -239,17 +240,10 @@ static void init_logging(void) {
     boo_log_init(path, BOO_LOG_INFO);
 }
 
-static void on_activate(AdwApplication *app, gpointer user_data) {
-    AppState *state = user_data;
-    init_logging();
-
-    g_autofree char *model_path = find_model_path();
-    if (!model_path) {
-        boo_log(BOO_LOG_ERROR, "no speech model found");
-        g_autofree char *hint = model_install_hint();
-        show_error(GTK_APPLICATION(app), "No speech model found", hint);
-        return;
-    }
+// Load `model_path`, wire optional VAD, and open the overlay. On a load failure
+// shows the error dialog (which quits). Shared by auto-discovery and the picker.
+static void start_with_model(AppState *state, const char *model_path) {
+    GtkApplication *app = state->app;
     g_print("Boo 👻 loading model: %s\n", model_path);
 
     state->ctx = boo_init(model_path);
@@ -259,7 +253,7 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
             "%s\n\nThe file exists but whisper could not read it. It may be "
             "corrupt or truncated, try downloading it again.",
             model_path);
-        show_error(GTK_APPLICATION(app), "Could not load the model", body);
+        show_error(app, "Could not load the model", body);
         return;
     }
     g_print("Model loaded.\n");
@@ -280,8 +274,72 @@ static void on_activate(AdwApplication *app, gpointer user_data) {
         download_vad_model(state);
     }
 
-    GtkWindow *window = boo_overlay_window_new(GTK_APPLICATION(app), state->ctx);
-    gtk_window_present(window);
+    gtk_window_present(boo_overlay_window_new(app, state->ctx));
+}
+
+// The "Choose a File" path on the no-model dialog: a native file chooser, then
+// load the picked model and open the app. Zero network, the friendly
+// alternative to editing BOO_MODEL for a user who already has a GGML model.
+static void on_model_picked(GObject *source, GAsyncResult *result, gpointer user_data) {
+    AppState *state = user_data;
+    g_autoptr(GError) error = NULL;
+    g_autoptr(GFile) file =
+        gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error);
+    if (file) {
+        g_autofree char *path = g_file_get_path(file);
+        if (path) start_with_model(state, path);
+    }
+    // Balances the hold taken in choose_model_file; on cancel this drops the
+    // last hold and the app exits.
+    g_application_release(G_APPLICATION(state->app));
+}
+
+static void choose_model_file(AppState *state) {
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Choose a speech model");
+    g_application_hold(G_APPLICATION(state->app));
+    gtk_file_dialog_open(dialog, NULL, NULL, on_model_picked, state);
+    g_object_unref(dialog);
+}
+
+static void on_no_model_response(AdwAlertDialog *dialog, const char *response,
+                                 gpointer user_data) {
+    (void)dialog;
+    AppState *state = user_data;
+    if (g_strcmp0(response, "choose") == 0) {
+        choose_model_file(state); // takes its own hold before we drop the dialog's
+    } else {
+        g_application_quit(G_APPLICATION(state->app));
+    }
+    g_application_release(G_APPLICATION(state->app));
+}
+
+// The no-model dialog: the download hint plus a "Choose a File" button, so a
+// user who already has a model on disk never has to touch a terminal.
+static void show_no_model_dialog(AppState *state, const char *hint) {
+    AdwAlertDialog *dialog =
+        ADW_ALERT_DIALOG(adw_alert_dialog_new("No speech model found", hint));
+    adw_alert_dialog_add_response(dialog, "choose", "Choose a File…");
+    adw_alert_dialog_add_response(dialog, "quit", "Quit");
+    adw_alert_dialog_set_default_response(dialog, "choose");
+    g_signal_connect(dialog, "response", G_CALLBACK(on_no_model_response), state);
+    g_application_hold(G_APPLICATION(state->app));
+    adw_dialog_present(ADW_DIALOG(dialog), NULL);
+}
+
+static void on_activate(AdwApplication *app, gpointer user_data) {
+    AppState *state = user_data;
+    state->app = GTK_APPLICATION(app);
+    init_logging();
+
+    g_autofree char *model_path = find_model_path();
+    if (!model_path) {
+        boo_log(BOO_LOG_ERROR, "no speech model found");
+        g_autofree char *hint = model_install_hint();
+        show_no_model_dialog(state, hint);
+        return;
+    }
+    start_with_model(state, model_path);
 }
 
 static void on_shutdown(GApplication *app, gpointer user_data) {
