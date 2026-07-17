@@ -190,6 +190,13 @@ void boo_settings_apply(BooApp *app) {
 }
 
 void boo_settings_free(BooApp *app) {
+    // Destroy the modeless Settings dialog first: it holds no theme strings of
+    // its own (the listbox copied them), but a theme-selection notify still
+    // queued for it would run select_theme -> save_prefs against the theme
+    // array we free just below. DestroyWindow runs the dialog's WM_DESTROY
+    // synchronously (clearing settings.win and freeing its model arrays), so
+    // nothing can reach the freed themes afterward.
+    if (app->settings.win) DestroyWindow(app->settings.win);
     free(app->settings.model_current);
     app->settings.model_current = NULL;
     for (int i = 0; i < app->settings.theme_count; i++)
