@@ -15,14 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BOO_SETTINGS_CLASS L"BooSettings"
-#define IDC_OPACITY        2001
-#define IDC_AUTOTYPE       2002
-#define IDC_THEMES         2003
-#define IDC_OPACITY_VAL    2004
-#define IDC_MODEL          2005
-#define IDC_MODEL_PROGRESS 2006
-
 // Live opacity readout, the reference's "1.00" label (shown as a percentage).
 static void set_opacity_label(HWND dlg, int pct) {
     WCHAR text[8];

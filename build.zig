@@ -450,7 +450,7 @@ pub fn build(b: *std.Build) void {
         // test so its statics are reachable; two exes because model.c and
         // download.c each define their own static string helpers.
         const win_tests_step = b.step("win-tests", "Run Windows frontend logic tests");
-        for ([_][]const u8{ "model_test", "download_test" }) |test_name| {
+        for ([_][]const u8{ "model_test", "download_test", "inject_test", "crash_test", "waveform_test" }) |test_name| {
             const t = b.addExecutable(.{
                 .name = test_name,
                 .root_module = b.createModule(.{
@@ -462,7 +462,9 @@ pub fn build(b: *std.Build) void {
             t.root_module.linkLibrary(boo_lib);
             t.root_module.linkLibrary(whisper_lib);
             linkAudioSystemDepsOnly(t.root_module, target_os);
-            for ([_][]const u8{ "user32", "advapi32", "winhttp", "bcrypt" }) |lib| {
+            // gdi32: the waveform painter's DIB canvas. dbghelp: the crash
+            // filter's MiniDumpWriteDump.
+            for ([_][]const u8{ "user32", "advapi32", "winhttp", "bcrypt", "gdi32", "dbghelp" }) |lib| {
                 t.root_module.linkSystemLibrary(lib, .{});
             }
             t.root_module.addIncludePath(b.path("include"));
@@ -472,10 +474,11 @@ pub fn build(b: *std.Build) void {
                 .files = &.{b.fmt("{s}.c", .{test_name})},
                 .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
             });
-            // The included sources under test call the shared converters.
+            // The included sources under test call the shared converters and
+            // (inject.c) the pure paste-chord planner.
             t.root_module.addCSourceFiles(.{
                 .root = b.path("windows/src"),
-                .files = &.{"strconv.c"},
+                .files = &.{ "strconv.c", "inject_plan.c" },
                 .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
             });
             // Cross-compiling hosts only build the tests (compile check);
@@ -487,11 +490,37 @@ pub fn build(b: *std.Build) void {
             }
         }
 
+        // The coverage smoke driver (windows/tests/drive_app.c) pokes a live
+        // instrumented app from outside. Built here so every win-tests build
+        // compile-checks it, but never executed by zig: only the coverage
+        // section of scripts/coverage.sh runs it, against its own app build.
+        const driver = b.addExecutable(.{
+            .name = "drive_app",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        driver.root_module.linkSystemLibrary("user32", .{});
+        driver.root_module.addIncludePath(b.path("include"));
+        driver.root_module.addIncludePath(b.path("windows/src"));
+        driver.root_module.addCSourceFiles(.{
+            .root = b.path("windows/tests"),
+            .files = &.{"drive_app.c"},
+            .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
+        });
+        win_tests_step.dependOn(&b.addInstallArtifact(driver, .{}).step);
+
         const install_win_app = b.addInstallArtifact(win_app, .{});
         b.getInstallStep().dependOn(&install_win_app.step);
 
         const app_step = b.step("app", "Build Boo Windows app");
         app_step.dependOn(&install_win_app.step);
+        // The archives too, like the Linux branch: the coverage slice links
+        // its gcov-instrumented frontend objects against these.
+        app_step.dependOn(&b.addInstallArtifact(boo_lib, .{}).step);
+        app_step.dependOn(&b.addInstallArtifact(whisper_lib, .{}).step);
     }
 
     // ── macOS app bundle ──

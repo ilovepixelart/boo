@@ -8,6 +8,10 @@
 
 #include "app.h"
 
+// Shared with the coverage smoke driver (windows/tests/drive_app.c), which
+// closes the first-run dialog to exercise the quit-without-a-model path.
+#define BOO_ONBOARDING_CLASS L"BooOnboarding"
+
 // False when the dialog cannot be created (the caller falls back to the
 // static instructions dialog and quits).
 bool boo_onboarding_open(BooApp *app);

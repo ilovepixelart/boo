@@ -11,12 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define BOO_ONBOARDING_CLASS L"BooOnboarding"
-#define IDC_OB_MODELS        3001
-#define IDC_OB_PROGRESS      3002
-#define IDC_OB_STATUS        3003
-#define IDC_OB_DOWNLOAD      3004
-#define IDC_OB_BROWSE        3005
+#define IDC_OB_MODELS   3001
+#define IDC_OB_PROGRESS 3002
+#define IDC_OB_STATUS   3003
+#define IDC_OB_DOWNLOAD 3004
+#define IDC_OB_BROWSE   3005
 
 static void set_status(HWND dlg, const char *text) {
     WCHAR *wide = boo_to_wide(text);
