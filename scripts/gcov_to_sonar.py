@@ -39,7 +39,12 @@ def parse_gcov(path):
 def add_line(files, src_root, source, lineno, covered):
     """Merge one executable line into `files`; a line any report covered stays
     covered. Paths outside `src_root` (system headers) are dropped."""
-    rel = os.path.relpath(os.path.abspath(source), src_root)
+    try:
+        rel = os.path.relpath(os.path.abspath(source), src_root)
+    except ValueError:
+        # Windows: a system header on another drive than the repo (relpath
+        # cannot express that); out of tree either way, drop it.
+        return
     if rel.startswith(".."):
         return
     # The Windows slice runs gcov natively; Sonar merges the report on Linux,
