@@ -41,13 +41,19 @@ intact.
 
 ## Get a model
 
-curl ships with Windows 10 1803+:
+`curl.exe` ships with Windows 10 1803+ (the `.exe` matters: it's the real curl,
+not PowerShell's `curl` alias). In **PowerShell** (the Windows 11 default),
+paste each line on its own, no line continuation:
 
-```bat
-mkdir "%USERPROFILE%\.boo\models"
-curl.exe -L -o "%USERPROFILE%\.boo\models\ggml-base.en.bin" ^
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+```powershell
+mkdir "$env:USERPROFILE\.boo\models" -Force
+curl.exe -L -o "$env:USERPROFILE\.boo\models\ggml-base.en.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
+
+In the classic **Command Prompt** it's `%USERPROFILE%` instead of
+`$env:USERPROFILE`. Don't split the `curl.exe` line, the `^` and backtick
+continuation characters differ between the two shells and are a common paste
+error.
 
 Model alternatives, streaming, and non-English dictation:
 [models.md](models.md).
