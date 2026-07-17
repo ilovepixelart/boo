@@ -341,6 +341,7 @@ pub fn build(b: *std.Build) void {
             .root = b.path("linux/src"),
             .files = &.{
                 "main.c",
+                "models.c",
                 "overlay_window.c",
                 "waveform_widget.c",
                 "portal.c",

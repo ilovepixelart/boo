@@ -5,6 +5,7 @@
 
 #include "overlay_window.h"
 #include "global_shortcut.h"
+#include "models.h"
 #include "text_inject.h"
 #include "waveform_widget.h"
 
@@ -24,12 +25,18 @@ typedef struct {
     AdwToastOverlay *toast_overlay;
     BooGlobalShortcut *shortcut;
     BooTextInject *inject;
-    GtkCssProvider *css; // reloaded on theme change
-    GArray *themes;      // ThemeEntry, all parsed themes sorted by name
-    int current_theme;   // index into themes, -1 == the built-in default
-    double opacity;      // window opacity, 0.1..1.0
-    gboolean auto_type;  // paste into the focused app vs clipboard-only
-    guint hint_reset;    // 0 == no pending reset to the idle hint
+    // Theme + preferences: set from the Settings dialog, persisted in
+    // settings.ini, applied through the CSS provider.
+    struct {
+        GtkCssProvider *css; // reloaded on theme change
+        GArray *themes;      // ThemeEntry, all parsed themes sorted by name
+        int current_theme;   // index into themes, -1 == the built-in default
+        double opacity;      // window opacity, 0.1..1.0
+        gboolean auto_type;  // paste into the focused app vs clipboard-only
+        char *model_current; // full path of the loaded speech model
+        char *model_choice;  // the user's explicit pick, persisted; NULL until made
+    } settings;
+    guint hint_reset; // 0 == no pending reset to the idle hint
     gboolean hotkey_ok;
 
     // The UI's own view of whether we're recording. Deliberately not
@@ -37,16 +44,19 @@ typedef struct {
     gboolean ui_recording;
     guint auto_stop_poll; // 0 == not polling
 
-    // Streaming transcription: one dedicated thread polls boo_stream_tick
-    // while recording (the C API wants ticks from a single background thread;
-    // each call may block for one utterance's inference). The flag is the
-    // thread's stop signal; the handle is joined before reuse or teardown.
-    GThread *stream_thread; // NULL == no thread to join
-    gint stream_running;    // atomic
-    // The batch transcription thread. Kept joinable (not detached) so closing
-    // the window mid-transcription joins it rather than leaving its completion
-    // idle to fire against freed state.
-    GThread *transcribe_thread; // NULL == no thread to join
+    struct {
+        // Streaming transcription: one dedicated thread polls boo_stream_tick
+        // while recording (the C API wants ticks from a single background
+        // thread; each call may block for one utterance's inference). The flag
+        // is the thread's stop signal; the handle is joined before reuse or
+        // teardown.
+        GThread *stream_thread; // NULL == no thread to join
+        gint stream_running;    // atomic
+        // The batch transcription thread. Kept joinable (not detached) so
+        // closing the window mid-transcription joins it rather than leaving
+        // its completion idle to fire against freed state.
+        GThread *transcribe_thread; // NULL == no thread to join
+    } workers;
 } WindowState;
 
 typedef struct {
@@ -67,22 +77,24 @@ static void window_state_free(gpointer data) {
     if (state->auto_stop_poll != 0) g_source_remove(state->auto_stop_poll);
     if (state->hint_reset != 0) g_source_remove(state->hint_reset);
     // The tick thread reads this state; it must be gone before the free.
-    if (state->stream_thread) {
-        g_atomic_int_set(&state->stream_running, 0);
-        g_thread_join(state->stream_thread);
+    if (state->workers.stream_thread) {
+        g_atomic_int_set(&state->workers.stream_running, 0);
+        g_thread_join(state->workers.stream_thread);
     }
     // Likewise the transcribe thread: closing the window during "Transcribing…"
     // must not leave it finishing against freed state. boo_deinit already
     // flushes the in-flight boo_transcribe, so this join is bounded.
-    if (state->transcribe_thread) g_thread_join(state->transcribe_thread);
+    if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
-    if (state->css) g_object_unref(state->css);
-    if (state->themes) {
-        for (guint i = 0; i < state->themes->len; i++)
-            g_free(g_array_index(state->themes, ThemeEntry, i).name);
-        g_array_free(state->themes, TRUE);
+    if (state->settings.css) g_object_unref(state->settings.css);
+    if (state->settings.themes) {
+        for (guint i = 0; i < state->settings.themes->len; i++)
+            g_free(g_array_index(state->settings.themes, ThemeEntry, i).name);
+        g_array_free(state->settings.themes, TRUE);
     }
+    g_free(state->settings.model_current);
+    g_free(state->settings.model_choice);
     g_free(state);
 }
 
@@ -241,7 +253,7 @@ static gboolean live_text_update(gpointer user_data) {
 // slot simply starts late. Ticks become no-ops once recording stops.
 static gpointer stream_tick_worker(gpointer data) {
     WindowState *state = data;
-    while (g_atomic_int_get(&state->stream_running)) {
+    while (g_atomic_int_get(&state->workers.stream_running)) {
         if (boo_stream_tick(state->ctx)) {
             const char *live = boo_get_live_transcript(state->ctx);
             if (live) {
@@ -273,7 +285,7 @@ static gboolean transcribe_done(gpointer user_data) {
         // the target app, auto-paste there. When our own window is focused
         // (Record button click), pasting would land back in Boo; skip it.
         // Auto-type off makes Boo clipboard-only (never paste).
-        if (state->auto_type && !gtk_window_is_active(state->window)) {
+        if (state->settings.auto_type && !gtk_window_is_active(state->window)) {
             boo_text_inject_paste(state->inject);
         }
     } else {
@@ -309,7 +321,7 @@ static void begin_transcription(WindowState *state) {
     // inference would stall the main thread. The core serializes tick against
     // boo_transcribe internally, and the handle is joined before the next
     // recording (or at window teardown).
-    g_atomic_int_set(&state->stream_running, 0);
+    g_atomic_int_set(&state->workers.stream_running, 0);
 
     boo_stop_recording(state->ctx);
     set_hint(state, "thinking...");
@@ -317,8 +329,8 @@ static void begin_transcription(WindowState *state) {
     gtk_widget_set_sensitive(GTK_WIDGET(state->record_button), FALSE);
     // Reap the prior take's thread (long finished by now) before replacing the
     // handle, so a completed thread is never leaked.
-    if (state->transcribe_thread) g_thread_join(state->transcribe_thread);
-    state->transcribe_thread = g_thread_new("boo-transcribe", transcribe_worker, state);
+    if (state->workers.transcribe_thread) g_thread_join(state->workers.transcribe_thread);
+    state->workers.transcribe_thread = g_thread_new("boo-transcribe", transcribe_worker, state);
 }
 
 // The core stops capturing by itself once a recording hits MAX_RECORDING_SECONDS
@@ -366,9 +378,9 @@ static void toggle_recording(WindowState *state) {
 
         // Collect the previous take's tick thread; it exits within one
         // cadence of its stop signal, so this join is effectively instant.
-        if (state->stream_thread) {
-            g_thread_join(state->stream_thread);
-            state->stream_thread = NULL;
+        if (state->workers.stream_thread) {
+            g_thread_join(state->workers.stream_thread);
+            state->workers.stream_thread = NULL;
         }
 
         boo_warm_up(state->ctx);
@@ -382,12 +394,12 @@ static void toggle_recording(WindowState *state) {
 
         // Without a VAD model every tick is an immediate no-op, so the thread
         // idles harmlessly; with one, utterances land as you pause.
-        g_atomic_int_set(&state->stream_running, 1);
-        state->stream_thread = g_thread_new("boo-stream", stream_tick_worker, state);
+        g_atomic_int_set(&state->workers.stream_running, 1);
+        state->workers.stream_thread = g_thread_new("boo-stream", stream_tick_worker, state);
     }
 }
 
-static void on_record_clicked(GtkButton *btn, gpointer data) {
+static void on_record_clicked(const GtkButton *btn, gpointer data) {
     (void)btn;
     toggle_recording(data);
 }
@@ -469,7 +481,7 @@ static BooThemeColors default_theme_colors(void) {
 static void apply_theme(WindowState *st, const BooThemeColors *c) {
     char *css = g_strdup_printf(BOO_CSS_FMT, c->bg, c->fg, c->fg, c->palette[8],
                                 c->palette[8], c->palette[14], c->palette[8]);
-    gtk_css_provider_load_from_string(st->css, css);
+    gtk_css_provider_load_from_string(st->settings.css, css);
     g_free(css);
     if (st->waveform)
         boo_waveform_widget_set_colors(st->waveform, c->palette[14], c->palette[9],
@@ -483,8 +495,8 @@ static gint theme_name_cmp(gconstpointer a, gconstpointer b) {
 // Enumerate the themes dir and parse every file via the shared core parser,
 // sorted by name. Empty when no themes dir is found (built-in default only).
 static void load_theme_list(WindowState *st) {
-    st->themes = g_array_new(FALSE, FALSE, sizeof(ThemeEntry));
-    st->current_theme = -1;
+    st->settings.themes = g_array_new(FALSE, FALSE, sizeof(ThemeEntry));
+    st->settings.current_theme = -1;
     g_autofree const char *dir = find_themes_dir();
     if (!dir) return;
     GDir *d = g_dir_open(dir, 0, NULL);
@@ -500,7 +512,7 @@ static void load_theme_list(WindowState *st) {
         BooThemeColors c;
         if (boo_theme_parse_file(path, &c)) {
             ThemeEntry e = {g_strdup(names->pdata[i]), c};
-            g_array_append_val(st->themes, e);
+            g_array_append_val(st->settings.themes, e);
         }
     }
     g_ptr_array_free(names, TRUE);
@@ -520,39 +532,51 @@ static char *settings_path(void) {
 static void settings_save(WindowState *st) {
     g_autoptr(GKeyFile) kf = g_key_file_new();
     const char *theme =
-        (st->themes && st->current_theme >= 0)
-            ? g_array_index(st->themes, ThemeEntry, st->current_theme).name
+        (st->settings.themes && st->settings.current_theme >= 0)
+            ? g_array_index(st->settings.themes, ThemeEntry, st->settings.current_theme).name
             : "";
     g_key_file_set_string(kf, "boo", "theme", theme);
-    g_key_file_set_double(kf, "boo", "opacity", st->opacity);
-    g_key_file_set_boolean(kf, "boo", "auto-type", st->auto_type);
+    g_key_file_set_double(kf, "boo", "opacity", st->settings.opacity);
+    g_key_file_set_boolean(kf, "boo", "auto-type", st->settings.auto_type);
+    if (st->settings.model_choice)
+        g_key_file_set_string(kf, "boo", "model", st->settings.model_choice);
     g_autofree const char *path = settings_path();
     g_key_file_save_to_file(kf, path, NULL);
 }
 
+char *boo_saved_model_read(void) {
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    g_autofree const char *path = settings_path();
+    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) return NULL;
+    return g_key_file_get_string(kf, "boo", "model", NULL);
+}
+
 static void settings_load(WindowState *st) {
-    st->opacity = 1.0;
-    st->auto_type = TRUE;
+    st->settings.opacity = 1.0;
+    st->settings.auto_type = TRUE;
     g_autoptr(GKeyFile) kf = g_key_file_new();
     g_autofree const char *path = settings_path();
     if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) return;
     double o = g_key_file_get_double(kf, "boo", "opacity", NULL);
-    if (o >= 0.1 && o <= 1.0) st->opacity = o;
+    if (o >= 0.1 && o <= 1.0) st->settings.opacity = o;
     if (g_key_file_has_key(kf, "boo", "auto-type", NULL))
-        st->auto_type = g_key_file_get_boolean(kf, "boo", "auto-type", NULL);
+        st->settings.auto_type = g_key_file_get_boolean(kf, "boo", "auto-type", NULL);
     g_autofree const char *theme = g_key_file_get_string(kf, "boo", "theme", NULL);
-    if (theme && st->themes)
-        for (guint i = 0; i < st->themes->len; i++)
-            if (g_strcmp0(g_array_index(st->themes, ThemeEntry, i).name, theme) == 0) {
-                st->current_theme = (int)i;
+    if (theme && st->settings.themes)
+        for (guint i = 0; i < st->settings.themes->len; i++)
+            if (g_strcmp0(g_array_index(st->settings.themes, ThemeEntry, i).name, theme) == 0) {
+                st->settings.current_theme = (int)i;
                 break;
             }
+    // Keep the explicit model choice across saves: settings_save rewrites the
+    // whole file, so an unloaded key would be silently dropped.
+    st->settings.model_choice = g_key_file_get_string(kf, "boo", "model", NULL);
 }
 
 static void select_theme(WindowState *st, int index) {
-    if (!st->themes || index < 0 || index >= (int)st->themes->len) return;
-    st->current_theme = index;
-    apply_theme(st, &g_array_index(st->themes, ThemeEntry, index).colors);
+    if (!st->settings.themes || index < 0 || index >= (int)st->settings.themes->len) return;
+    st->settings.current_theme = index;
+    apply_theme(st, &g_array_index(st->settings.themes, ThemeEntry, index).colors);
     settings_save(st);
 }
 
@@ -577,10 +601,37 @@ static GtkWidget *swatch_new(guint32 rgb, int size) {
 
 typedef struct {
     WindowState *st;
+    GtkWindow *win;
     GtkListBox *list;
     GtkSearchEntry *search;
     GtkBox *palette; // 16-swatch preview strip
+    // Model switcher (see ui-spec §Settings): one dropdown merging models on
+    // disk with the curated manifest, a progress bar for inline downloads.
+    GtkDropDown *model_dd;
+    GtkProgressBar *model_progress;
+    GtkLabel *model_status;
+    GPtrArray *model_entries; // ModelEntry*, parallel to the dropdown rows
+    gboolean model_updating;  // guard against programmatic selection changes
 } SettingsUI;
+
+// One model-dropdown entry: a model on disk (`path` set) or a curated
+// manifest model not yet downloaded (`manifest` set; picking it downloads).
+typedef struct {
+    char *path;                   // NULL == needs download first
+    const BooModelInfo *manifest; // static core storage; NULL for on-disk files
+} ModelEntry;
+
+static void model_entry_free(gpointer data) {
+    ModelEntry *e = data;
+    g_free(e->path);
+    g_free(e);
+}
+
+static void settings_ui_free(gpointer data) {
+    SettingsUI *ui = data;
+    if (ui->model_entries) g_ptr_array_unref(ui->model_entries);
+    g_free(ui);
+}
 
 static void palette_preview(SettingsUI *ui, const BooThemeColors *c) {
     GtkWidget *child;
@@ -590,13 +641,13 @@ static void palette_preview(SettingsUI *ui, const BooThemeColors *c) {
         gtk_box_append(ui->palette, swatch_new(c->palette[i], 16));
 }
 
-static void on_theme_row(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+static void on_theme_row(const GtkListBox *box, GtkListBoxRow *row, gpointer data) {
     (void)box;
     SettingsUI *ui = data;
     if (!row) return;
     int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "boo-theme-index"));
     select_theme(ui->st, index);
-    palette_preview(ui, &g_array_index(ui->st->themes, ThemeEntry, index).colors);
+    palette_preview(ui, &g_array_index(ui->st->settings.themes, ThemeEntry, index).colors);
 }
 
 static gboolean theme_filter(GtkListBoxRow *row, gpointer data) {
@@ -609,24 +660,180 @@ static gboolean theme_filter(GtkListBoxRow *row, gpointer data) {
     return strstr(lname, lq) != NULL;
 }
 
-static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
+static void on_search_changed(const GtkSearchEntry *entry, gpointer data) {
     (void)entry;
     gtk_list_box_invalidate_filter(((SettingsUI *)data)->list);
 }
 
 static void on_opacity_changed(GtkRange *range, gpointer data) {
     SettingsUI *ui = data;
-    ui->st->opacity = gtk_range_get_value(range);
-    gtk_widget_set_opacity(GTK_WIDGET(ui->st->window), ui->st->opacity);
+    ui->st->settings.opacity = gtk_range_get_value(range);
+    gtk_widget_set_opacity(GTK_WIDGET(ui->st->window), ui->st->settings.opacity);
     settings_save(ui->st);
 }
 
-static gboolean on_autotype_changed(GtkSwitch *sw, gboolean active, gpointer data) {
+static gboolean on_autotype_changed(const GtkSwitch *sw, gboolean active,
+                                    gpointer data) {
     (void)sw;
     SettingsUI *ui = data;
-    ui->st->auto_type = active;
+    ui->st->settings.auto_type = active;
     settings_save(ui->st);
     return FALSE; // let the default handler update the visual state
+}
+
+// Refill the model dropdown: models on disk first (ranked), then curated
+// manifest models not yet downloaded, tagged with their size. Selects the
+// loaded model.
+static void model_list_rebuild(SettingsUI *ui) {
+    ui->model_updating = TRUE;
+    g_ptr_array_set_size(ui->model_entries, 0);
+    GtkStringList *labels = gtk_string_list_new(NULL);
+    guint selected = GTK_INVALID_LIST_POSITION;
+
+    g_autoptr(GPtrArray) installed = boo_installed_models();
+    for (guint i = 0; i < installed->len; i++) {
+        const char *path = g_ptr_array_index(installed, i);
+        ModelEntry *e = g_new0(ModelEntry, 1);
+        e->path = g_strdup(path);
+        g_ptr_array_add(ui->model_entries, e);
+        g_autofree char *base = g_path_get_basename(path);
+        gtk_string_list_append(labels, base);
+        if (g_strcmp0(path, ui->st->settings.model_current) == 0)
+            selected = ui->model_entries->len - 1;
+    }
+
+    size_t count = 0;
+    const BooModelInfo *models = boo_models(&count);
+    for (size_t i = 0; i < count; i++) {
+        gboolean on_disk = FALSE;
+        for (guint j = 0; j < installed->len && !on_disk; j++) {
+            g_autofree char *base =
+                g_path_get_basename(g_ptr_array_index(installed, j));
+            on_disk = g_strcmp0(base, models[i].filename) == 0;
+        }
+        if (on_disk) continue;
+        ModelEntry *e = g_new0(ModelEntry, 1);
+        e->manifest = &models[i];
+        g_ptr_array_add(ui->model_entries, e);
+        g_autofree char *label =
+            g_strdup_printf("%s  (download, %u MB)", models[i].filename,
+                            (unsigned)(models[i].size / 1000000));
+        gtk_string_list_append(labels, label);
+    }
+
+    gtk_drop_down_set_model(ui->model_dd, G_LIST_MODEL(labels));
+    g_object_unref(labels);
+    if (selected != GTK_INVALID_LIST_POSITION)
+        gtk_drop_down_set_selected(ui->model_dd, selected);
+    ui->model_updating = FALSE;
+}
+
+typedef struct {
+    SettingsUI *ui;
+    char *path;
+} ModelSwitchJob;
+
+static void model_switch_worker(GTask *task, gpointer source, gpointer task_data,
+                                GCancellable *cancel) {
+    (void)source;
+    (void)cancel;
+    ModelSwitchJob *job = task_data;
+    g_task_return_boolean(task, boo_reload_model(job->ui->st->ctx, job->path));
+}
+
+static void model_switch_finish(GObject *source, GAsyncResult *result, gpointer data) {
+    (void)source;
+    ModelSwitchJob *job = data;
+    SettingsUI *ui = job->ui;
+    gboolean ok = g_task_propagate_boolean(G_TASK(result), NULL);
+    g_autofree char *base = g_path_get_basename(job->path);
+
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), TRUE);
+    gtk_window_set_deletable(ui->win, TRUE);
+    if (ok) {
+        g_free(ui->st->settings.model_current);
+        ui->st->settings.model_current = g_strdup(job->path);
+        g_free(ui->st->settings.model_choice);
+        ui->st->settings.model_choice = g_strdup(job->path);
+        settings_save(ui->st);
+        boo_log(BOO_LOG_INFO, "model switched");
+        g_autofree char *msg = g_strdup_printf("Loaded %s.", base);
+        gtk_label_set_text(ui->model_status, msg);
+    } else {
+        g_autofree char *msg =
+            g_strdup_printf("Could not load %s; keeping the previous model.", base);
+        gtk_label_set_text(ui->model_status, msg);
+    }
+    model_list_rebuild(ui);
+    g_free(job->path);
+    g_free(job);
+}
+
+// Swap models off the main loop (loading takes seconds; boo_reload_model
+// keeps the old model on failure). The settings window's close button is
+// disabled for the duration so these widgets cannot die under the worker.
+static void model_switch_start(SettingsUI *ui, const char *path) {
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), FALSE);
+    gtk_window_set_deletable(ui->win, FALSE);
+    g_autofree char *base = g_path_get_basename(path);
+    g_autofree char *msg = g_strdup_printf("Loading %s…", base);
+    gtk_label_set_text(ui->model_status, msg);
+
+    ModelSwitchJob *job = g_new0(ModelSwitchJob, 1);
+    job->ui = ui;
+    job->path = g_strdup(path);
+    GTask *task = g_task_new(NULL, NULL, model_switch_finish, job);
+    g_task_set_task_data(task, job, NULL);
+    g_task_run_in_thread(task, model_switch_worker);
+    g_object_unref(task);
+}
+
+static void on_model_download_done(const char *path, gpointer data) {
+    SettingsUI *ui = data;
+    gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), FALSE);
+    model_switch_start(ui, path);
+}
+
+static void on_model_download_fail(const char *why, gpointer data) {
+    SettingsUI *ui = data;
+    gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), TRUE);
+    gtk_window_set_deletable(ui->win, TRUE);
+    gtk_label_set_text(ui->model_status, why);
+    model_list_rebuild(ui);
+}
+
+static void model_download_start(SettingsUI *ui, const BooModelInfo *model) {
+    gtk_widget_set_sensitive(GTK_WIDGET(ui->model_dd), FALSE);
+    gtk_window_set_deletable(ui->win, FALSE);
+    gtk_progress_bar_set_fraction(ui->model_progress, 0);
+    gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), TRUE);
+    g_autofree char *msg = g_strdup_printf("Downloading %s…", model->filename);
+    gtk_label_set_text(ui->model_status, msg);
+    boo_model_download(model, ui->model_progress, on_model_download_done,
+                       on_model_download_fail, ui);
+}
+
+static void on_model_selected(GObject *dd, GParamSpec *spec, gpointer data) {
+    (void)dd;
+    (void)spec;
+    SettingsUI *ui = data;
+    if (ui->model_updating) return;
+    guint idx = gtk_drop_down_get_selected(ui->model_dd);
+    if (idx >= ui->model_entries->len) return;
+    ModelEntry *e = g_ptr_array_index(ui->model_entries, idx);
+
+    if (!e->path) {
+        if (e->manifest) model_download_start(ui, e->manifest);
+        return;
+    }
+    if (g_strcmp0(e->path, ui->st->settings.model_current) == 0) return;
+    if (boo_is_recording(ui->st->ctx) || boo_is_transcribing(ui->st->ctx)) {
+        gtk_label_set_text(ui->model_status, "Stop recording first.");
+        model_list_rebuild(ui); // snap the selection back to the loaded model
+        return;
+    }
+    model_switch_start(ui, e->path);
 }
 
 static void open_settings(GtkButton *btn, gpointer data) {
@@ -637,9 +844,10 @@ static void open_settings(GtkButton *btn, gpointer data) {
 
     GtkWidget *win = adw_window_new();
     gtk_window_set_title(GTK_WINDOW(win), "Boo Settings");
-    gtk_window_set_default_size(GTK_WINDOW(win), 360, 520);
+    gtk_window_set_default_size(GTK_WINDOW(win), 360, 600);
     gtk_window_set_transient_for(GTK_WINDOW(win), st->window);
-    g_object_set_data_full(G_OBJECT(win), "boo-settings-ui", ui, g_free);
+    ui->win = GTK_WINDOW(win);
+    g_object_set_data_full(G_OBJECT(win), "boo-settings-ui", ui, settings_ui_free);
 
     GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_top(content, 12);
@@ -658,7 +866,7 @@ static void open_settings(GtkButton *btn, gpointer data) {
     gtk_box_append(GTK_BOX(orow), gtk_label_new("Opacity"));
     GtkWidget *scale =
         gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.1, 1.0, 0.05);
-    gtk_range_set_value(GTK_RANGE(scale), st->opacity);
+    gtk_range_set_value(GTK_RANGE(scale), st->settings.opacity);
     gtk_widget_set_hexpand(scale, TRUE);
     // Live value readout, the reference's monospace "1.00" label.
     gtk_scale_set_draw_value(GTK_SCALE(scale), TRUE);
@@ -675,11 +883,31 @@ static void open_settings(GtkButton *btn, gpointer data) {
     gtk_widget_set_halign(alabel, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(arow), alabel);
     GtkWidget *sw = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(sw), st->auto_type);
+    gtk_switch_set_active(GTK_SWITCH(sw), st->settings.auto_type);
     gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
     g_signal_connect(sw, "state-set", G_CALLBACK(on_autotype_changed), ui);
     gtk_box_append(GTK_BOX(arow), sw);
     gtk_box_append(GTK_BOX(content), arow);
+
+    // Model switcher: dropdown + inline download progress + status line.
+    gtk_box_append(GTK_BOX(content), gtk_label_new("Model"));
+    GtkWidget *model_dd = gtk_drop_down_new(NULL, NULL);
+    ui->model_dd = GTK_DROP_DOWN(model_dd);
+    ui->model_entries = g_ptr_array_new_with_free_func(model_entry_free);
+    gtk_box_append(GTK_BOX(content), model_dd);
+    GtkWidget *model_progress = gtk_progress_bar_new();
+    ui->model_progress = GTK_PROGRESS_BAR(model_progress);
+    gtk_widget_set_visible(model_progress, FALSE);
+    gtk_box_append(GTK_BOX(content), model_progress);
+    GtkWidget *model_status = gtk_label_new("");
+    gtk_widget_add_css_class(model_status, "boo-hint");
+    gtk_widget_set_halign(model_status, GTK_ALIGN_START);
+    ui->model_status = GTK_LABEL(model_status);
+    gtk_box_append(GTK_BOX(content), model_status);
+    model_list_rebuild(ui);
+    // Connected after the initial rebuild; later rebuilds are guarded by
+    // model_updating.
+    g_signal_connect(model_dd, "notify::selected", G_CALLBACK(on_model_selected), ui);
 
     gtk_box_append(GTK_BOX(content), gtk_label_new("Theme"));
 
@@ -695,8 +923,8 @@ static void open_settings(GtkButton *btn, gpointer data) {
     ui->list = GTK_LIST_BOX(list);
     gtk_list_box_set_filter_func(GTK_LIST_BOX(list), theme_filter, ui, NULL);
     g_signal_connect(list, "row-activated", G_CALLBACK(on_theme_row), ui);
-    for (guint i = 0; st->themes && i < st->themes->len; i++) {
-        ThemeEntry *e = &g_array_index(st->themes, ThemeEntry, i);
+    for (guint i = 0; st->settings.themes && i < st->settings.themes->len; i++) {
+        ThemeEntry *e = &g_array_index(st->settings.themes, ThemeEntry, i);
         GtkWidget *row = gtk_list_box_row_new();
         g_object_set_data(G_OBJECT(row), "boo-theme-index", GINT_TO_POINTER((int)i));
         g_object_set_data(G_OBJECT(row), "boo-theme-name", e->name);
@@ -716,14 +944,15 @@ static void open_settings(GtkButton *btn, gpointer data) {
     GtkWidget *palette = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     ui->palette = GTK_BOX(palette);
     gtk_box_append(GTK_BOX(content), palette);
-    if (st->themes && st->current_theme >= 0)
+    if (st->settings.themes && st->settings.current_theme >= 0)
         palette_preview(ui,
-                        &g_array_index(st->themes, ThemeEntry, st->current_theme).colors);
+                        &g_array_index(st->settings.themes, ThemeEntry, st->settings.current_theme).colors);
 
     gtk_window_present(GTK_WINDOW(win));
 }
 
-GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
+GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx,
+                                  const char *model_path) {
     GtkWidget *window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Boo");
     // The reference geometry.
@@ -732,15 +961,16 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
 
     WindowState *state = g_new0(WindowState, 1);
     state->ctx = ctx;
+    state->settings.model_current = g_strdup(model_path);
     state->window = GTK_WINDOW(window);
     state->hotkey_ok = TRUE; // downgraded by on_shortcut_unavailable
     g_object_set_data_full(G_OBJECT(window), "boo-state", state, window_state_free);
 
     // The CSS provider is reloaded on every theme change; apply_theme (below,
     // once the waveform exists) fills it from the default theme.
-    state->css = gtk_css_provider_new();
+    state->settings.css = gtk_css_provider_new();
     gtk_style_context_add_provider_for_display(gtk_widget_get_display(window),
-                                               GTK_STYLE_PROVIDER(state->css),
+                                               GTK_STYLE_PROVIDER(state->settings.css),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     AdwHeaderBar *header = ADW_HEADER_BAR(adw_header_bar_new());
@@ -818,15 +1048,15 @@ GtkWindow *boo_overlay_window_new(GtkApplication *app, BooContext *ctx) {
     // default. Opacity is a whole-window property.
     load_theme_list(state);
     settings_load(state);
-    if (state->themes && state->current_theme >= 0) {
+    if (state->settings.themes && state->settings.current_theme >= 0) {
         apply_theme(
             state,
-            &g_array_index(state->themes, ThemeEntry, state->current_theme).colors);
+            &g_array_index(state->settings.themes, ThemeEntry, state->settings.current_theme).colors);
     } else {
         const BooThemeColors colors = default_theme_colors();
         apply_theme(state, &colors);
     }
-    gtk_widget_set_opacity(window, state->opacity);
+    gtk_widget_set_opacity(window, state->settings.opacity);
 
     return GTK_WINDOW(window);
 }
