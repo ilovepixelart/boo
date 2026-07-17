@@ -20,7 +20,7 @@ for suite in global_shortcut text_inject; do
     echo "── $suite ──"
 
     define=""
-    [ "$suite" = "text_inject" ] && define="-DTEST_TEXT_INJECT"
+    [[ "$suite" = "text_inject" ]] && define="-DTEST_TEXT_INJECT"
 
     # portal.c holds the Request/Response plumbing both clients call into.
     # shellcheck disable=SC2086  # $define/$CFLAGS/$LIBS are multi-flag; splitting is the point.
@@ -32,7 +32,7 @@ for suite in global_shortcut text_inject; do
     "$OUT/$suite" || fail=1
 done
 
-if [ "$fail" -ne 0 ]; then
+if [[ "$fail" -ne 0 ]]; then
     echo "FAILED"
     exit 1
 fi

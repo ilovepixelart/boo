@@ -35,7 +35,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 WHISPER="$(find .zig-cache -name libwhisper.a -size +1M | head -1)"
-[ -n "$WHISPER" ] || {
+[[ -n "$WHISPER" ]] || {
     echo "[audio] libwhisper.a not found"
     exit 1
 }
@@ -52,7 +52,7 @@ zig cc -o "$WORK/audio_smoke" linux/tests/audio_smoke.c \
     $(pkg-config --cflags --libs libpipewire-0.3) \
     -lc++ -lm -lpthread -std=c11
 
-if [ -n "$WAV" ]; then
+if [[ -n "$WAV" ]]; then
     # A null sink's monitor is a perfectly good fake microphone: whatever is
     # played into the sink appears on its monitor, which we make the default
     # source. Boo autoconnects to the default, so it lands on our audio.
@@ -86,7 +86,7 @@ grep -q "\[smoke\] PASS" <<<"$OUT" || {
 # and captures pure silence. Whisper would return nothing, so a non-empty
 # transcript is the proof that real audio made it through.
 TRANSCRIPT="$(sed -n 's/^\[smoke\] TRANSCRIPT: //p' <<<"$OUT" | tr -d ' ')"
-[ -n "$TRANSCRIPT" ] || {
+[[ -n "$TRANSCRIPT" ]] || {
     echo "[audio] FAIL: captured audio but transcript empty"
     exit 1
 }

@@ -53,7 +53,7 @@ PORTAL=$!
 # how a suite starts failing intermittently on a loaded CI runner.
 wait_for() {
     local pattern="$1" what="$2" deadline=$((SECONDS + 30))
-    while [ "$SECONDS" -lt "$deadline" ]; do
+    while [[ "$SECONDS" -lt "$deadline" ]]; do
         grep -q "$pattern" "$WORK/events.jsonl" 2>/dev/null && return 0
         sleep 0.2
     done
@@ -102,11 +102,12 @@ echo "$EVENTS"
 echo "───────────────────────────────────────────"
 
 fail() {
-    echo "[integration] FAIL: $1"
+    local msg="$1"
+    echo "[integration] FAIL: $msg"
     exit 1
 }
 
-[ "$HARNESS_RC" -eq 0 ] || fail "harness exited $HARNESS_RC (shortcut callback never fired)"
+[[ "$HARNESS_RC" -eq 0 ]] || fail "harness exited $HARNESS_RC (shortcut callback never fired)"
 
 # GlobalShortcuts: the hotkey must actually be bound, with our ID and trigger.
 grep -q '"event": "gs.CreateSession"' <<<"$EVENTS" || fail "no GlobalShortcuts CreateSession"
@@ -123,7 +124,7 @@ grep -q '"persist_mode": 2' <<<"$EVENTS" || fail "did not ask to persist the gra
 CHORD="$(grep '"event": "rd.NotifyKeyboardKeysym"' <<<"$EVENTS" |
     sed -E 's/.*"keysym": ([0-9]+), "state": ([0-9]+).*/\1:\2/' | paste -sd' ' -)"
 EXPECT="65507:1 65505:1 118:1 118:0 65505:0 65507:0"
-[ "$CHORD" = "$EXPECT" ] || fail "paste chord was [$CHORD], expected [$EXPECT]"
+[[ "$CHORD" = "$EXPECT" ]] || fail "paste chord was [$CHORD], expected [$EXPECT]"
 echo "[integration] paste chord correct: Ctrl+Shift+V, press/release ordered"
 
 echo "[integration] PASS, both portal handshakes completed against a live bus"
@@ -141,7 +142,7 @@ PORTAL=$!
 
 (
     deadline=$((SECONDS + 30))
-    while [ "$SECONDS" -lt "$deadline" ]; do
+    while [[ "$SECONDS" -lt "$deadline" ]]; do
         grep -q '"event": "ready"' "$WORK/events2.jsonl" 2>/dev/null && exit 0
         sleep 0.2
     done

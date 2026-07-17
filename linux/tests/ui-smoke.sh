@@ -28,10 +28,14 @@ MAGICK=$(command -v magick || command -v convert)
 if command -v import >/dev/null 2>&1; then SHOT_CMD=(import); else SHOT_CMD=("$MAGICK" import); fi
 
 fail=0
-pass() { echo "  ok   $*"; }
+pass() {
+    echo "  ok   $*"
+    return 0
+}
 bad() {
     echo "  FAIL $*"
     fail=1
+    return 0
 }
 
 # Assert one pixel of PNG at (x,y) is within TOL (per channel) of #RRGGBB.
@@ -48,10 +52,19 @@ check_pixel() { # <png> <x> <y> <rrggbb> <label> [tol]
     else
         bad "$label = rgb($r,$g,$b), expected ~#$want (tol $tol)"
     fi
+    return 0
 }
 
-shot() { "${SHOT_CMD[@]}" -window root "$OUT/$1.png" 2>/dev/null; }
-alive() { kill -0 "$1" 2>/dev/null; }
+shot() {
+    local name="$1"
+    "${SHOT_CMD[@]}" -window root "$OUT/$name.png" 2>/dev/null
+    return $?
+}
+alive() {
+    local pid="$1"
+    kill -0 "$pid" 2>/dev/null
+    return $?
+}
 
 # The 40px record disc sits bottom-centre (x=200), but its exact screen y shifts
 # a few pixels with the runner's GTK header-bar height and DPI, so a single
@@ -70,6 +83,7 @@ check_disc() { # <png> <label>
         fi
     done
     check_pixel "$png" 200 "$best_y" "ff3b30" "$label (reddest at y=$best_y)"
+    return 0
 }
 
 # Locate the "3024 Day" reference theme the way the app does, so the switch test
@@ -169,5 +183,5 @@ wait "$APP_PID" 2>/dev/null
 # With the main app down, verify a persisted theme paints a different window.
 check_theme_switch
 
-echo "== $([ $fail -eq 0 ] && echo PASS || echo FAIL) (screenshots in $OUT) =="
+echo "== $([[ $fail -eq 0 ]] && echo PASS || echo FAIL) (screenshots in $OUT) =="
 exit $fail
