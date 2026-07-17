@@ -85,6 +85,36 @@ static WCHAR *find_model_in(const WCHAR *dir) {
     return path;
 }
 
+// Best Silero VAD model in `dir`, or NULL. First name wins so a newer silero
+// version beats an older one. Returned path is malloc'd, wide. Mirrors
+// find_model_in; the core decides which ggml-*.bin is the VAD.
+static WCHAR *find_vad_in(const WCHAR *dir) {
+    WCHAR pattern[MAX_PATH];
+    if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dir) < 0) return NULL;
+
+    WIN32_FIND_DATAW e;
+    HANDLE it = FindFirstFileW(pattern, &e);
+    if (it == INVALID_HANDLE_VALUE) return NULL;
+
+    WCHAR best[MAX_PATH] = L"";
+    do {
+        if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        if (kind_of(e.cFileName) != BOO_MODEL_VAD) continue;
+        if (best[0] == 0 || wcscmp(e.cFileName, best) < 0) wcscpy(best, e.cFileName);
+    } while (FindNextFileW(it, &e));
+    FindClose(it);
+
+    if (best[0] == 0) return NULL;
+
+    WCHAR *path = malloc(MAX_PATH * sizeof(WCHAR));
+    if (!path) return NULL;
+    if (swprintf(path, MAX_PATH, L"%ls\\%ls", dir, best) < 0) {
+        free(path);
+        return NULL;
+    }
+    return path;
+}
+
 // %USERPROFILE%\.boo\models, the same dot-dir as macOS/Linux (and the ollama /
 // LM Studio convention on Windows, rather than AppData).
 static bool primary_model_dir(WCHAR *buf, size_t len) {
@@ -162,24 +192,11 @@ char *boo_model_find_vad(void) {
     WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
     const size_t ndirs = model_dirs(dirs);
     for (size_t i = 0; i < ndirs; i++) {
-        WCHAR pattern[MAX_PATH];
-        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dirs[i]) < 0) continue;
-        WIN32_FIND_DATAW e;
-        HANDLE it = FindFirstFileW(pattern, &e);
-        if (it == INVALID_HANDLE_VALUE) continue;
-        WCHAR best[MAX_PATH] = L"";
-        do {
-            if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-            // The core decides which ggml-*.bin is the VAD; first name wins so
-            // a newer silero version beats an older one.
-            if (kind_of(e.cFileName) != BOO_MODEL_VAD) continue;
-            if (best[0] == 0 || wcscmp(e.cFileName, best) < 0) wcscpy(best, e.cFileName);
-        } while (FindNextFileW(it, &e));
-        FindClose(it);
-        if (best[0] != 0) {
-            WCHAR full[MAX_PATH];
-            if (swprintf(full, MAX_PATH, L"%ls\\%ls", dirs[i], best) >= 0)
-                return boo_to_utf8(full);
+        WCHAR *found = find_vad_in(dirs[i]);
+        if (found) {
+            char *utf8 = boo_to_utf8(found);
+            free(found);
+            return utf8;
         }
     }
     return NULL;
