@@ -141,6 +141,36 @@ char *boo_model_find(void) {
     return NULL;
 }
 
+char *boo_model_find_vad(void) {
+    WCHAR env[MAX_PATH];
+    const DWORD env_len = GetEnvironmentVariableW(L"BOO_VAD_MODEL", env, MAX_PATH);
+    if (env_len > 0 && env_len < MAX_PATH) {
+        if (GetFileAttributesW(env) != INVALID_FILE_ATTRIBUTES) return boo_to_utf8(env);
+    }
+
+    WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
+    const size_t ndirs = model_dirs(dirs);
+    for (size_t i = 0; i < ndirs; i++) {
+        WCHAR pattern[MAX_PATH];
+        if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-silero*.bin", dirs[i]) < 0) continue;
+        WIN32_FIND_DATAW e;
+        HANDLE it = FindFirstFileW(pattern, &e);
+        if (it == INVALID_HANDLE_VALUE) continue;
+        WCHAR best[MAX_PATH] = L"";
+        do {
+            if (e.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            if (best[0] == 0 || wcscmp(e.cFileName, best) < 0) wcscpy(best, e.cFileName);
+        } while (FindNextFileW(it, &e));
+        FindClose(it);
+        if (best[0] != 0) {
+            WCHAR full[MAX_PATH];
+            if (swprintf(full, MAX_PATH, L"%ls\\%ls", dirs[i], best) >= 0)
+                return boo_to_utf8(full);
+        }
+    }
+    return NULL;
+}
+
 const char *boo_model_basename(const char *path) {
     const char *base = path;
     for (const char *p = path; *p; p++)

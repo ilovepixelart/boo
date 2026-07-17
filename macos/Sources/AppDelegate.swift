@@ -1,6 +1,5 @@
 import Carbon
 import Cocoa
-import CryptoKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var overlayWindow: OverlayWindow?
@@ -11,6 +10,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBarTimer: Timer?
     // Retained while the onboarding download runs (ModelOnboarding.swift).
     var modelDownloader: ModelDownloader?
+    // Retained while the first-run VAD fetch runs (downloadVadModel).
+    private var vadDownloader: ModelDownloader?
     var downloadWindow: NSWindow?
     // The onboarding Download button's prepared action, wired to its widgets.
     var onboardingStart: (() -> Void)?
@@ -492,74 +493,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    /// Fetch the Silero VAD model in the background on first run. It is under
-    /// 1 MB and carries no size/language decision the user needs to make
-    /// (unlike the speech models), so streaming transcription just starts
-    /// working; batch mode covers the seconds until it lands. boo_load_vad is
-    /// safe to call at any time, including mid-recording.
-    // Pinned SHA-256 of ggml-silero-v6.2.0.bin (HuggingFace LFS oid). The file
-    // is fetched over TLS, but pinning defends against a compromised mirror
-    // handing a substituted GGUF straight to the ggml parser.
-    private static let vadModelSHA256 =
-        "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
-
-    private static let vadModelName = "ggml-silero-v6.2.0.bin"
-
-    /// Default VAD download base. Fixed on purpose: the SHA-256 pin applies
-    /// to whatever the URL serves, so pointing elsewhere cannot weaken it.
-    private static let vadModelBaseURL =
-        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"
-
-    /// The VAD download source. $BOO_VAD_MODEL_URL lets a mirror stand in for
-    /// Hugging Face; the SHA-256 pin applies to whatever the URL serves.
-    private static var vadModelURL: URL {
-        let fallback = vadModelBaseURL + vadModelName
-        let raw = ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"] ?? fallback
-        return URL(string: raw) ?? URL(string: fallback)!
-    }
-
+    /// Fetch the Silero VAD model in the background on first run, through
+    /// the same verified downloader the model switcher uses. The pinned entry
+    /// (name, URL, SHA-256) comes from the core: boo_vad_model, one copy for
+    /// every frontend. $BOO_VAD_MODEL_URL lets a mirror stand in for Hugging
+    /// Face; the SHA-256 pin applies to whatever the URL serves, so pointing
+    /// elsewhere cannot weaken it. Any failure just leaves batch mode on.
     private func downloadVadModel() {
-        let dir = AppDelegate.userModelsDir
-        let dest = URL(fileURLWithPath: dir)
-            .appendingPathComponent(AppDelegate.vadModelName)
-        let url = AppDelegate.vadModelURL
-
-        NSLog("Boo: fetching the VAD model to enable streaming transcription")
-        let task = URLSession.shared.downloadTask(with: url) { [weak self] tmp, response, error in
-            guard let tmp = tmp, error == nil,
-                (response as? HTTPURLResponse)?.statusCode == 200
-            else {
-                NSLog(
-                    "Boo: VAD model download failed (%@); staying in batch mode",
-                    error?.localizedDescription ?? "bad response")
-                return
-            }
-            // Verify before trusting the bytes: a wrong hash means a corrupt or
-            // substituted file, so drop it and stay in batch mode.
-            guard let data = try? Data(contentsOf: tmp),
-                SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined()
-                    == AppDelegate.vadModelSHA256
-            else {
-                NSLog("Boo: VAD model failed checksum; staying in batch mode")
-                return
-            }
-            do {
-                try FileManager.default.createDirectory(
-                    atPath: dir, withIntermediateDirectories: true)
-                try? FileManager.default.removeItem(at: dest)
-                try FileManager.default.moveItem(at: tmp, to: dest)
-            } catch {
-                NSLog("Boo: could not save the VAD model: %@", error.localizedDescription)
-                return
-            }
-            DispatchQueue.main.async {
-                guard let self = self, let ctx = self.booCtx else { return }
-                if boo_load_vad(ctx, dest.path) {
-                    NSLog("Boo: streaming transcription enabled (%@)", dest.path)
-                }
-            }
+        var model = boo_vad_model().pointee
+        if let override = ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"] {
+            // strdup leaks one small string for the process lifetime; the
+            // struct wants a stable C pointer and this runs at most once.
+            model.url = UnsafePointer(strdup(override))
         }
-        task.resume()
+        NSLog("Boo: fetching the VAD model to enable streaming transcription")
+        vadDownloader = ModelDownloader(
+            onProgress: { _ in },
+            onDone: { [weak self] path in
+                self?.vadDownloader = nil
+                guard let ctx = self?.booCtx else { return }
+                if boo_load_vad(ctx, path) {
+                    NSLog("Boo: streaming transcription enabled (%@)", path)
+                }
+            },
+            onFail: { [weak self] why in
+                self?.vadDownloader = nil
+                NSLog("Boo: VAD model download failed (%@); staying in batch mode", why)
+            })
+        vadDownloader?.start(model: model)
     }
 
     // MARK: - Global Hotkey (Ctrl+Shift+Space)

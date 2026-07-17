@@ -37,21 +37,18 @@ The `.en` models are English-only. Everything else is multilingual, but see
 [Non-English dictation](#non-english-dictation), or they'll silently produce
 English.
 
-## Streaming transcription (optional)
+## Streaming transcription (automatic)
 
-Drop a Silero VAD model next to your speech model and Boo transcribes each
-phrase *while you're still talking*, at the natural pauses. Committed text
-appears live in the overlay, and stopping only waits for the final phrase
-instead of the whole recording, so long dictations land near-instantly:
+With a Silero VAD model beside your speech model, Boo transcribes each phrase
+*while you're still talking*, at the natural pauses. Committed text appears
+live in the overlay, and stopping only waits for the final phrase instead of
+the whole recording, so long dictations land near-instantly.
 
-```sh
-curl -L -o ~/.boo/models/ggml-silero-v6.2.0.bin \
-  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin
-```
-
-It's less than 1 MB. Without it, Boo transcribes the whole recording after you
-stop, as before. `BOO_VAD_MODEL=/path/to/model.bin` overrides the search,
-matching `BOO_MODEL`.
+**Every frontend fetches this model itself** on first run (it is under 1 MB,
+verified against a SHA-256 pinned in the binary), so streaming just starts
+working; until it lands, Boo transcribes the whole recording after you stop.
+`BOO_VAD_MODEL=/path/to/model.bin` overrides the search, matching
+`BOO_MODEL`.
 
 ## Non-English dictation
 

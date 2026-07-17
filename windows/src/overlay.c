@@ -851,6 +851,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                      suggested->bottom - suggested->top, SWP_NOACTIVATE | SWP_NOZORDER);
         return 0;
     }
+    case BOO_MSG_DL_PROGRESS:
+        return 0; // the background VAD fetch; nothing to show
+    case BOO_MSG_DL_DONE: {
+        // The background VAD fetch (main.c) reporting in; on success
+        // streaming starts working mid-session, exactly like macOS/Linux.
+        char *text = (char *)lparam;
+        if (wparam && text && app && app->ctx && boo_load_vad(app->ctx, text))
+            boo_log(BOO_LOG_INFO, "streaming transcription enabled");
+        free(text);
+        return 0;
+    }
     case WM_CLOSE:
         ShowWindow(hwnd, SW_HIDE); // tray apps hide; Quit lives in the tray menu
         return 0;

@@ -21,6 +21,11 @@ int boo_model_installed(char ***out);
 // The filename part of a UTF-8 path (after the last slash or backslash).
 const char *boo_model_basename(const char *path);
 
+// Best Silero VAD model on disk (first alphabetically, so a newer version
+// wins), as a malloc'd UTF-8 path, or NULL. %BOO_VAD_MODEL% wins outright,
+// matching the other frontends.
+char *boo_model_find_vad(void);
+
 // Fills `buf` with the "no model installed" instructions, download command
 // included, with the primary directory expanded for this user.
 void boo_model_missing_hint(wchar_t *buf, size_t len);

@@ -10,6 +10,7 @@
 
 #include "app.h"
 #include "crash.h"
+#include "download.h"
 #include "hotkey.h"
 #include "model.h"
 #include "onboarding.h"
@@ -109,6 +110,18 @@ bool boo_app_start(BooApp *app, char *model_path) {
     } else {
         // Rest on the visible hotkey hint now that registration settled.
         boo_overlay_status_idle(app);
+    }
+
+    // Optional streaming VAD, at last matching the other frontends: load a
+    // Silero model if one is on disk, else fetch the pinned one in the
+    // background; the overlay loads it when BOO_MSG_DL_DONE arrives.
+    char *vad = boo_model_find_vad();
+    if (vad) {
+        if (boo_load_vad(ctx, vad))
+            boo_log(BOO_LOG_INFO, "streaming transcription enabled");
+        free(vad);
+    } else {
+        boo_download_start(app->overlay, boo_vad_model());
     }
     return true;
 }
