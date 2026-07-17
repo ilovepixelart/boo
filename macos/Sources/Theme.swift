@@ -21,7 +21,10 @@ struct BooTheme {
     }
 
     func surfaceColor(_ alpha: CGFloat) -> NSColor {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
         bg.getRed(&r, green: &g, blue: &b, alpha: &a)
         return NSColor(red: min(r + 0.05, 1), green: min(g + 0.05, 1), blue: min(b + 0.05, 1), alpha: alpha)
     }

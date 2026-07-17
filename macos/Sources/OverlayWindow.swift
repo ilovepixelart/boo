@@ -179,12 +179,12 @@ class OverlayWindow: NSWindow {
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
-                if let button = self.standardWindowButton(buttonType) {
-                    if button.alphaValue < 1 || button.isHidden {
-                        button.isHidden = false
-                        button.alphaValue = 1
-                        button.needsDisplay = true
-                    }
+                if let button = self.standardWindowButton(buttonType),
+                    button.alphaValue < 1 || button.isHidden
+                {
+                    button.isHidden = false
+                    button.alphaValue = 1
+                    button.needsDisplay = true
                 }
             }
         }
@@ -202,10 +202,11 @@ class OverlayWindow: NSWindow {
         // Update all existing transcript bubbles
         for view in transcriptStack.arrangedSubviews {
             for subview in view.subviews {
-                if let label = subview as? NSTextField, label.font?.fontName.contains("System") == true {
-                    if label.font?.pointSize == 13 {
-                        label.textColor = theme.fg  // transcript text
-                    }
+                if let label = subview as? NSTextField,
+                    label.font?.fontName.contains("System") == true,
+                    label.font?.pointSize == 13
+                {
+                    label.textColor = theme.fg  // transcript text
                 }
                 if let button = subview as? NSButton {
                     button.contentTintColor = theme.dim

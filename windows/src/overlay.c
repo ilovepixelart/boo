@@ -60,7 +60,15 @@
 #define BOO_SC_SETTINGS 0x0010
 
 typedef struct {
-    COLORREF bg, text, subtext, record, wave_idle, wave_rec, wave_think, card, card_live;
+    COLORREF bg;
+    COLORREF text;
+    COLORREF subtext;
+    COLORREF record;
+    COLORREF wave_idle;
+    COLORREF wave_rec;
+    COLORREF wave_think;
+    COLORREF card;
+    COLORREF card_live;
 } Palette;
 
 // GDI/interaction state. One overlay per process (single-instance mutex), so
@@ -530,14 +538,17 @@ static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT 
     const int gap = px(CARD_GAP, dpi);
 
     int heights[BOO_HISTORY_MAX + 1];
-    int total = app->card_count + (app->live_text ? 1 : 0);
+    const int cap = (int)(sizeof(heights) / sizeof(heights[0]));
     int idx = 0;
-    for (int i = 0; i < app->card_count; i++)
+    // Bound by the array size as well as card_count: the write index is then
+    // provably in range even if card_count were ever off (history_push caps it).
+    for (int i = 0; i < app->card_count && idx < cap; i++)
         heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right, app->cards[i],
                                     false, i, true);
-    if (app->live_text)
+    if (app->live_text && idx < cap)
         heights[idx++] = paint_card(dc, pal, dpi, 0, area.left, area.right,
                                     app->live_text, true, -1, true);
+    const int total = idx;
 
     // Find the first card that still fits when stacking up from the bottom.
     int first = total;

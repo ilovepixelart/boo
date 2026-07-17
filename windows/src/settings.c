@@ -119,7 +119,8 @@ static void load_prefs(BooApp *app) {
         ERROR_SUCCESS)
         return;
 
-    DWORD val, size = sizeof(val);
+    DWORD val;
+    DWORD size = sizeof(val);
     if (RegQueryValueExW(key, L"Opacity", NULL, NULL, (BYTE *)&val, &size) ==
             ERROR_SUCCESS &&
         val >= 10 && val <= 100)
@@ -208,7 +209,8 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)app);
         const UINT dpi = GetDpiForWindow(hwnd);
         HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-        const int m = scale(16, dpi), w = scale(288, dpi);
+        const int m = scale(16, dpi);
+        const int w = scale(288, dpi);
 
         const int vw = scale(44, dpi);
         HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m,
