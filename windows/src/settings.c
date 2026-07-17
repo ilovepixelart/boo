@@ -15,6 +15,14 @@
 #define IDC_OPACITY        2001
 #define IDC_AUTOTYPE       2002
 #define IDC_THEMES         2003
+#define IDC_OPACITY_VAL    2004
+
+// Live opacity readout, the reference's "1.00" label (shown as a percentage).
+static void set_opacity_label(HWND dlg, int pct) {
+    WCHAR text[8];
+    swprintf(text, ARRAYSIZE(text), L"%d%%", pct);
+    SetDlgItemTextW(dlg, IDC_OPACITY_VAL, text);
+}
 
 static int scale(int base, UINT dpi) {
     return MulDiv(base, (int)dpi, 96);
@@ -202,14 +210,19 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         const int m = scale(16, dpi), w = scale(288, dpi);
 
-        HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m, w,
-                                scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+        const int vw = scale(44, dpi);
+        HWND l1 = CreateWindowW(L"STATIC", L"Opacity", WS_CHILD | WS_VISIBLE, m, m,
+                                w - vw, scale(18, dpi), hwnd, NULL, cs->hInstance, NULL);
+        HWND val = CreateWindowW(L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_RIGHT,
+                                 m + w - vw, m, vw, scale(18, dpi), hwnd,
+                                 (HMENU)IDC_OPACITY_VAL, cs->hInstance, NULL);
         HWND bar = CreateWindowW(TRACKBAR_CLASSW, NULL,
                                  WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m,
                                  scale(38, dpi), w, scale(30, dpi), hwnd,
                                  (HMENU)IDC_OPACITY, cs->hInstance, NULL);
         SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
         SendMessageW(bar, TBM_SETPOS, TRUE, app->opacity_pct);
+        set_opacity_label(hwnd, app->opacity_pct);
 
         HWND chk =
             CreateWindowW(L"BUTTON", L"Auto-type into focused app",
@@ -230,7 +243,7 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
         if (app->current_theme >= 0)
             SendMessageW(list, LB_SETCURSEL, app->current_theme, 0);
 
-        HWND kids[] = {l1, bar, chk, l2, list};
+        HWND kids[] = {l1, val, bar, chk, l2, list};
         for (size_t i = 0; i < ARRAYSIZE(kids); i++)
             SendMessageW(kids[i], WM_SETFONT, (WPARAM)font, TRUE);
         return 0;
@@ -238,6 +251,7 @@ static LRESULT CALLBACK settings_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     case WM_HSCROLL:
         if (app && GetDlgCtrlID((HWND)lparam) == IDC_OPACITY) {
             app->opacity_pct = (int)SendMessageW((HWND)lparam, TBM_GETPOS, 0, 0);
+            set_opacity_label(hwnd, app->opacity_pct);
             boo_settings_apply(app);
             save_prefs(app);
         }

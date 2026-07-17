@@ -76,9 +76,14 @@ over the C API (`boo.h`); the three frontends share that one parser and theme
 list rather than re-implementing it. See [Settings](#settings-all-platforms).
 The `#FF3B30` record disc is the one color that stays fixed across every theme.
 
-Interim, until each frontend ships the picker: Linux pins the dark default;
-Windows follows the system light/dark toggle (the dark values above in dark mode,
-light-surface equivalents in light mode).
+All three frontends now ship the picker (macOS `SettingsWindow`, the Linux
+header-bar dialog, the Windows tray / system-menu dialog), each parsing every
+theme through the shared core parser and persisting the choice. When **no** theme
+is picked, Linux shows the dark default and Windows follows the system light/dark
+toggle (the dark values above in dark mode, light-surface equivalents in light).
+One share is still outstanding: each frontend enumerates the theme dir and calls
+the core parser per file rather than reading a single list the core builds once
+(the cross-frontend de-duplication work).
 
 ## 3. Components
 
@@ -207,7 +212,7 @@ platform-native chrome and the deferred items, nothing else.
 |---|---|---|---|
 | Window chrome | hidden titlebar, translucent, shadowed | adwaita header bar, opaque | native title bar, minimize + close, topmost |
 | Placement | top-right | window-manager decided | top-right of the work area |
-| Background | `theme.bg` at opacity | `#282C34` opaque, pinned dark | `#282C34` in dark mode; light-equivalents follow the system toggle |
+| Background | `theme.bg` at opacity | `theme.bg` at opacity (dark default until a theme is picked) | `theme.bg` at opacity (system light/dark until a theme is picked) |
 | Waveform, 3 states + colors | reference | full (Cairo, real per-bar alpha) | full (GDI) |
 | History cards + copy + dismiss | full, text selectable | full | full |
 | Live (provisional) card | `white@3%`, dim, no buttons | same | same |
@@ -218,8 +223,8 @@ platform-native chrome and the deferred items, nothing else.
 | Status line, all six states | yes | yes | yes |
 | Elapsed timer | status + menu bar | status | status + tray tooltip |
 | Tray / menu bar | live waveform + timer + menu | none (GNOME has no tray) | icon + menu; elapsed in tooltip only |
-| Settings: opacity + auto-type + theme picker | full (reference) | target (none yet) | target (none yet) |
-| Theme colors applied | 486-theme picker | interim pinned dark, picker is target | interim system light/dark, picker is target |
+| Settings: opacity + auto-type + theme picker | full (reference: slider w/ live value, checkbox, search + swatch + palette preview) | full (dialog: slider w/ live value, checkbox, search + swatch list + palette preview) | full (dialog: trackbar w/ live %, checkbox, theme name list); per-row swatch + search + palette preview deferred |
+| Theme colors applied | 486-theme picker | 486-theme picker (dark default until one is picked) | 486-theme picker (system light/dark until one is picked) |
 
 The behavior-parity matrix and the remaining backlog live in
 [features.md](features.md).
