@@ -330,11 +330,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_: Notification) {
+        // Stop the overlay's background stream ticks and recording first: a
+        // quit mid-dictation would otherwise free the context under a live
+        // boo_stream_tick (the timer is only cancelled by stopAndTranscribe,
+        // which a quit bypasses).
+        overlayWindow?.stopForTeardown()
         // A quit mid-swap must wait for boo_reload_model before the context
         // is torn down; the load is seconds at worst.
         modelSwapGroup.wait()
         if let ctx = booCtx {
             boo_deinit(ctx)
+            booCtx = nil
         }
     }
 

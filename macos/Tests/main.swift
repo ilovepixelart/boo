@@ -372,6 +372,9 @@ settings.window?.close()
 // polling touch the core and stay behind BOO_HARNESS_BOOT below.
 let overlay = OverlayWindow(booCtx: OpaquePointer(bitPattern: 0xB00)!)
 check(overlay.canBecomeKey && overlay.canBecomeMain, "the overlay can become the key and main window")
+// ARC owns the overlay, so AppKit must not release it on close (closing it
+// while Settings keeps the app alive would otherwise over-release it).
+check(!overlay.isReleasedWhenClosed, "the overlay is not auto-released on close")
 
 overlay.appDidActivate(Notification(name: NSWorkspace.didActivateApplicationNotification))  // no app: ignored
 if let other = NSWorkspace.shared.runningApplications.first(where: {

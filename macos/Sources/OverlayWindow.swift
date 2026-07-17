@@ -48,6 +48,11 @@ class OverlayWindow: NSWindow {
         )
         self.minSize = NSSize(width: 400, height: 300)
         self.maxSize = NSSize(width: 400, height: 800)
+        // ARC owns this window (AppDelegate holds it strongly), so AppKit must
+        // not also release it on close, or closing the overlay while another
+        // window keeps the app alive over-releases it. SettingsWindow does the
+        // same.
+        self.isReleasedWhenClosed = false
 
         // Normal window level, can go behind other windows like a regular app
         self.level = .normal
@@ -276,6 +281,17 @@ class OverlayWindow: NSWindow {
     private func stopStreamTicks() {
         streamTimer?.cancel()
         streamTimer = nil
+    }
+
+    /// Stop the background stream ticks and recording so no core call is in
+    /// flight when the context is torn down: cancelling the timer stops future
+    /// ticks, and the serial-queue barrier waits out any tick already running.
+    /// Without this a Cmd+Q mid-dictation frees the context under a live
+    /// boo_stream_tick. Safe to call repeatedly and off any prior state.
+    func stopForTeardown() {
+        stopStreamTicks()
+        streamQueue.sync {}
+        boo_stop_recording(booCtx)
     }
 
     /// Show the committed-so-far text in a dimmed, button-less bubble while
