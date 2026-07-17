@@ -2,6 +2,7 @@
 #define BOO_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -77,6 +78,23 @@ bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 // frontends call this to pick the most capable installed model, so the
 // preference order lives in one place. Directory listing stays per-OS.
 uint32_t boo_model_rank(const char *name);
+
+// One downloadable speech model in the curated manifest. All string pointers are
+// static (valid for the process lifetime). `sha256` is the pinned lowercase hex
+// digest; a download must verify against it before the file is accepted.
+typedef struct {
+    const char *filename; // e.g. "ggml-base.en.bin"
+    const char *url;       // full https download URL
+    const char *sha256;    // pinned SHA-256, 64 lowercase hex chars
+    const char *label;     // short display name
+    const char *note;      // one-line size + tradeoff
+    uint64_t size;         // bytes
+} BooModelInfo;
+
+// The curated download manifest, recommended first (index 0). `*out_count` gets
+// the entry count. The returned pointer and its strings are static. One list, so
+// every frontend's model-download dialog offers the same set from one place.
+const BooModelInfo *boo_models(size_t *out_count);
 
 // Diagnostic logging (see docs/logging-and-crash-reporting.md). boo_log_init
 // sets the file sink (per-OS path from the frontend; NULL == stderr only) and
