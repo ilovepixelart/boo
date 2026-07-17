@@ -41,6 +41,19 @@ static gboolean wait_hint(WindowState *st, const char *want, guint ms) {
     return FALSE;
 }
 
+// Pump until `label`'s text contains `substr`; FALSE on timeout. Used for the
+// model switcher, whose GTask finish updates the status label on the main loop.
+static gboolean pump_hint_until(GtkLabel *label, const char *substr, guint ms) {
+    gint64 end = g_get_monotonic_time() + (gint64)ms * 1000;
+    while (g_get_monotonic_time() < end) {
+        const char *t = gtk_label_get_text(label);
+        if (t && strstr(t, substr)) return TRUE;
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(2000);
+    }
+    return FALSE;
+}
+
 // ── download engine, against the wrapper's local HTTP server ──
 
 typedef struct {
@@ -317,6 +330,49 @@ int main(void) {
         settings_set_busy(ui, FALSE);
         check(on_settings_close_request(ui->win, ui) == FALSE,
               "closing is allowed when idle");
+
+        // The model switcher. With a NULL context boo_reload_model returns
+        // false, so a switch runs its worker + finish and reports the failure
+        // without needing a real model load or network. This covers the GTask
+        // path, the download callbacks, and on_model_selected.
+        model_switch_start(ui, "/nonexistent/ggml-switch-target.bin");
+        check(pump_hint_until(ui->model_status, "Could not load", 5000),
+              "a failed model switch reports and re-enables");
+        on_model_download_fail("harness download failure", ui);
+        check(g_strcmp0(gtk_label_get_text(ui->model_status),
+                        "harness download failure") == 0,
+              "a failed model download surfaces its reason");
+        on_model_download_done("/nonexistent/ggml-downloaded.bin", ui);
+        check(pump_hint_until(ui->model_status, "Could not load", 5000),
+              "a completed download swaps to the new model");
+
+        // on_model_selected on a real on-disk entry: seed a fake model so the
+        // dropdown lists it, then select it and drive the notify handler.
+        g_autofree char *mdir = boo_models_write_dir();
+        g_autofree char *fake = g_build_filename(mdir, "ggml-harness-fake.bin", NULL);
+        g_file_set_contents(fake, "x", 1, NULL);
+        model_list_rebuild(ui);
+        guint fake_idx = 0;
+        gboolean seeded = FALSE;
+        for (guint i = 0; i < ui->model_entries->len; i++) {
+            ModelEntry *e = g_ptr_array_index(ui->model_entries, i);
+            if (e->path && strstr(e->path, "ggml-harness-fake")) {
+                fake_idx = i;
+                seeded = TRUE;
+                break;
+            }
+        }
+        check(seeded, "a seeded on-disk model appears in the dropdown");
+        if (seeded) {
+            ui->model_updating = TRUE;
+            gtk_drop_down_set_selected(ui->model_dd, fake_idx);
+            ui->model_updating = FALSE;
+            on_model_selected(NULL, NULL, ui);
+            check(pump_hint_until(ui->model_status, "Could not load", 5000),
+                  "selecting an on-disk model drives a switch");
+        }
+        g_unlink(fake);
+
         gtk_window_destroy(st->settings.dialog);
         pump_ms(300);
         check(st->settings.dialog == NULL, "destroying the dialog clears the singleton");
