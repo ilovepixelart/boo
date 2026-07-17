@@ -196,6 +196,58 @@ jobs:
         # portal replies on, get that wrong and Boo waits forever.
         run: ./linux/tests/integration.sh
 
+  linux-ui-smoke:
+    name: Linux (UI smoke, pixel-asserted)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install runtime + smoke tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libsoup-3.0-dev libpipewire-0.3-dev \
+            pkg-config pipewire wireplumber xvfb dbus-x11 imagemagick xdotool
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Build GTK4 app
+        run: zig build app -Doptimize=ReleaseFast
+
+      - name: Fetch a small model
+        # boo_init loads a whisper model; a tiny one is enough to reach the UI.
+        run: |
+          mkdir -p models
+          curl -fSL --retry 3 -o models/ggml-tiny.en-q5_1.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin
+
+      - name: UI smoke under Xvfb + PipeWire
+        # boo_init needs the audio stack up (with PipeWire killed the window
+        # renders black), but the render + record-morph checks need no mic.
+        # ui-smoke.sh asserts the ACTUAL rendered colours (bg #282C34, disc
+        # #FF3B30) so a theme or layout regression fails here, not on a desktop.
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
+          Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+          sleep 2
+          export DISPLAY=:99
+          eval "$(dbus-launch --sh-syntax)"
+          pipewire >/dev/null 2>&1 &
+          wireplumber >/dev/null 2>&1 &
+          sleep 3
+          BOO_SMOKE_OUT="$RUNNER_TEMP/smoke" bash linux/tests/ui-smoke.sh zig-out/bin/boo-app
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-ui-smoke
+          path: ${{ runner.temp }}/smoke/*.png
+          if-no-files-found: ignore
+
   windows-cross:
     name: Windows (cross-compile, ${{ matrix.target }})
     strategy:
@@ -250,6 +302,25 @@ jobs:
         run: |
           if (-not (Test-Path zig-out/bin/boo-app.exe)) { exit 1 }
           Write-Output "windows app ok"
+
+      - name: Launch smoke (proves native x86_64 runs, not just links)
+        # The runner is native x86_64, so this answers whether the x86_64 build
+        # actually executes on real hardware (the UTM ARM VM crash was pure x86
+        # emulation). It also catches init/null crashes before a user ever runs it.
+        shell: pwsh
+        run: |
+          $models = "$env:USERPROFILE\.boo\models"
+          New-Item -ItemType Directory -Force $models | Out-Null
+          curl.exe -fSL --retry 3 -o "$models\ggml-tiny.en-q5_1.bin" `
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin
+          $p = Start-Process -FilePath zig-out/bin/boo-app.exe -PassThru
+          Start-Sleep -Seconds 6
+          if ($p.HasExited) {
+            Write-Output "::error::boo-app.exe exited within 6s (exit $($p.ExitCode)) - native x86_64 launch/init crash"
+            exit 1
+          }
+          Write-Output "boo-app.exe launched and stayed up on native x86_64"
+          Stop-Process -Id $p.Id -Force
 
   flatpak-metadata:
     name: Linux (flatpak metadata)
