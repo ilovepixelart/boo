@@ -25,5 +25,6 @@ The interesting surface is the opposite direction: Boo **injects text into other
 ## Known, accepted limitations
 
 - **The clipboard is used as a paste channel.** Transcripts pass through the system clipboard (on macOS the prior contents are restored afterward). A clipboard manager will see them. This is inherent to pasting.
+- **User-supplied model files are trusted to `whisper.cpp`.** The pinned SHA-256 covers only the one file Boo downloads (the Silero VAD). Any speech model you install yourself, through the models directory, `BOO_MODEL`/`BOO_VAD_MODEL`, or the file picker, is handed to `whisper.cpp`/`ggml` after only a size check; a malformed file reaches ggml's loader as-is. This needs local write access equal to your own, and is the by-design cost of accepting any GGML model.
 - **macOS builds are ad-hoc signed, not notarized.** They carry no Developer ID. Verify the download's checksum against the release if that matters to you.
 - **On X11, display access is not isolated.** Any X11 client can observe input to any other, a property of X11, not of Boo. Wayland does not have this.
