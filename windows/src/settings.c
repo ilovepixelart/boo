@@ -7,6 +7,7 @@
 
 #include "download.h"
 #include "model.h"
+#include "modelsel.h"
 #include "strconv.h"
 
 #include <commctrl.h>
@@ -232,13 +233,10 @@ static DWORD WINAPI model_swap_worker(LPVOID param) {
 
 // Point the combo selection back at the loaded model (or clear it).
 static void model_combo_select_current(BooApp *app, HWND combo) {
-    for (int i = 0; i < app->settings.model_count; i++)
-        if (app->settings.model_current &&
-            strcmp(app->settings.model_paths[i], app->settings.model_current) == 0) {
-            SendMessageW(combo, CB_SETCURSEL, (WPARAM)i, 0);
-            return;
-        }
-    SendMessageW(combo, CB_SETCURSEL, (WPARAM)-1, 0);
+    const int i =
+        boo_model_current_index((const char *const *)app->settings.model_paths,
+                                app->settings.model_count, app->settings.model_current);
+    SendMessageW(combo, CB_SETCURSEL, (WPARAM)i, 0);
 }
 
 // Freeze or thaw the dialog around background work (a swap or a download):
@@ -314,8 +312,8 @@ static void model_combo_fill(BooApp *app, HWND combo) {
         if (on_disk) continue;
         app->settings.model_absent[app->settings.model_absent_count++] = &manifest[i];
         char label[300];
-        snprintf(label, sizeof(label), "%s  (download, %u MB)", manifest[i].filename,
-                 (unsigned)(manifest[i].size / 1000000));
+        boo_model_download_label(label, sizeof(label), manifest[i].filename,
+                                 manifest[i].size);
         WCHAR *wide = boo_to_wide(label);
         if (!wide) continue;
         SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)wide);
@@ -341,14 +339,18 @@ static void model_download_begin(BooApp *app, HWND dlg, HWND combo,
 
 static void model_switch(BooApp *app, HWND dlg, HWND combo) {
     const int idx = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
-    if (idx < 0) return;
-    if (idx < app->settings.model_count) {
-        model_swap_begin(app, dlg, combo, app->settings.model_paths[idx]);
-        return;
+    int sub = 0;
+    switch (boo_model_pick(idx, app->settings.model_count,
+                           app->settings.model_absent_count, &sub)) {
+    case BOO_PICK_DISK:
+        model_swap_begin(app, dlg, combo, app->settings.model_paths[sub]);
+        break;
+    case BOO_PICK_DOWNLOAD:
+        model_download_begin(app, dlg, combo, app->settings.model_absent[sub]);
+        break;
+    default:
+        break;
     }
-    const int a = idx - app->settings.model_count;
-    if (a < app->settings.model_absent_count)
-        model_download_begin(app, dlg, combo, app->settings.model_absent[a]);
 }
 
 // The download finished: swap to the fresh file, or report and reset.
