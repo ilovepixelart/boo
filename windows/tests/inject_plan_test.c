@@ -53,8 +53,10 @@ static void test_every_interfering_modifier_is_released(void) {
 }
 
 static void test_target_eligibility(void) {
-    // Three stand-in window handles; only their identities matter.
-    int owner_win, target_win, other_win;
+    // Three stand-in window handles; only their distinct identities matter. They
+    // are initialized (the addresses are all this test reads) so a -Werror build
+    // does not flag taking the address of an untouched local.
+    int owner_win = 0, target_win = 0, other_win = 0;
     const void *owner = &owner_win;
     const void *target = &target_win;
     const void *other = &other_win;
