@@ -202,6 +202,20 @@ int main(void) {
         check(GetFileAttributesW(part) == INVALID_FILE_ATTRIBUTES,
               "the .part is cleaned up after a failed transfer");
 
+    // post_done hands the strdup'd outcome text to the sink via PostMessage. A
+    // valid target delivers it (already exercised by the failure transfers
+    // above); an invalid target makes the post fail, and post_done must then
+    // free the copy rather than leak it. Pin both, the leak-guard directly.
+    dl_done = false;
+    post_done(sink, false, "delivered");
+    MSG pd;
+    while (PeekMessageW(&pd, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&pd);
+    check(dl_done, "post_done delivers the outcome to a valid sink");
+    dl_done = false;
+    post_done((HWND)(LONG_PTR)1, false, "leak-guarded"); // no such window
+    while (PeekMessageW(&pd, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&pd);
+    check(!dl_done, "post_done frees the copy when the post fails, nothing delivered");
+
     DestroyWindow(sink);
     printf("download_transfer_test: %s\n", failures ? "FAIL" : "all checks passed");
     return failures ? 1 : 0;
