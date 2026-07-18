@@ -127,6 +127,30 @@ static void test_select_devices_restore_token(void) {
     g_print("  ok  no session handle yields no payload\n");
 }
 
+// A portal failure BEFORE the restore token is replayed (CreateSession) or AFTER
+// it is consumed (Start) must not wipe a still-valid token; only a failure at
+// SelectDevices, the step that sends it, drops it. Wiping on any failure forced a
+// needless permission re-prompt on the next launch after a transient error.
+static void test_restore_token_kept_on_unrelated_failure(void) {
+    g_print("Restore token on failure:\n");
+
+    g_autoptr(GVariant) empty = g_variant_ref_sink(g_variant_new_parsed("@a{sv} {}"));
+
+    save_restore_token("keep-me");
+    BooTextInject early = {0};
+    early.state = BOO_INJECT_CREATING_SESSION;
+    on_response(2, empty, &early); // generic failure, token never sent yet
+    g_autofree char *survived = load_restore_token();
+    g_assert_cmpstr(survived, ==, "keep-me");
+
+    BooTextInject selecting = {0};
+    selecting.state = BOO_INJECT_SELECTING_DEVICES;
+    on_response(2, empty, &selecting); // failure where the token was replayed
+    g_assert_null(load_restore_token());
+
+    g_print("  ok  kept on unrelated failure, dropped at SelectDevices\n");
+}
+
 // The paste chord must be a well-formed Ctrl+Shift+V: the modifiers enclose the
 // key so the target sees exactly that shortcut, and every press is mirrored by a
 // release in reverse order so nothing stays held (a stuck Shift or Ctrl would
@@ -323,6 +347,7 @@ int main(void) {
     test_select_devices_options();
     test_restore_token_roundtrip();
     test_select_devices_restore_token();
+    test_restore_token_kept_on_unrelated_failure();
     test_paste_chord();
 #else
     test_global_shortcuts();

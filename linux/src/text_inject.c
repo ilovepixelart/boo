@@ -214,9 +214,12 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
     BooTextInject *ti = user_data;
 
     if (response != 0) {
-        // A stale restore token can sour the whole chain, so drop it, the next
-        // run then gets a fresh permission dialog instead of failing forever.
-        clear_restore_token();
+        // A stale restore token can sour the SelectDevices step where it is
+        // replayed, so drop it only there; the next run then gets a fresh
+        // permission dialog instead of failing forever. A failure before the
+        // token is sent (CreateSession) or after it is consumed (Start) is
+        // unrelated, so keep the still-valid token rather than re-prompting.
+        if (ti->state == BOO_INJECT_SELECTING_DEVICES) clear_restore_token();
         fail(ti, response == 1 ? "permission was declined" : "the portal request failed");
         return;
     }
