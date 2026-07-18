@@ -198,12 +198,12 @@ do {
 check(port > 0, "local HTTP server is up (port \(port))")
 
 if port > 0 {
-    func harnessModel(sha: String) -> BooModelInfo {
+    func harnessModel(sha: String, size: UInt64 = UInt64(payload.count)) -> BooModelInfo {
         BooModelInfo(
             filename: strdup("boo-harness-test.bin"),
             url: strdup("http://127.0.0.1:\(port)/boo-harness-test.bin"),
             sha256: strdup(sha), label: strdup("harness"), note: strdup("harness"),
-            size: UInt64(payload.count))
+            size: size)
     }
 
     var donePath: String?
@@ -237,6 +237,23 @@ if port > 0 {
         pump(seconds: 30, until: { donePath != nil || failWhy != nil }) && donePath == nil,
         "a wrong pin refuses the download")
     check(failWhy?.contains("checksum") == true, "the failure names the checksum")
+
+    // The transfer is capped at the pinned size: a body that overruns it (here
+    // the real 19-byte payload against a declared size of 1) is cancelled before
+    // the checksum, so a misbehaving server can't fill the disk. The SHA is
+    // correct, so without the cap this would verify and install.
+    donePath = nil
+    failWhy = nil
+    ModelDownloader(
+        onProgress: { _ in },
+        onDone: { donePath = $0 },
+        onFail: { failWhy = $0 }
+    ).start(model: harnessModel(sha: payloadSha, size: 1))
+    check(
+        pump(seconds: 30, until: { donePath != nil || failWhy != nil }) && donePath == nil,
+        "an over-size download is refused")
+    check(failWhy?.contains("larger") == true, "the failure names the size overrun")
+    if let done = donePath { try? FileManager.default.removeItem(atPath: done) }
 }
 server.terminate()
 try? FileManager.default.removeItem(at: serveDir)

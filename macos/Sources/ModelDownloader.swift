@@ -21,6 +21,9 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     private let onFail: (String) -> Void
     private var session: URLSession?
     private var model: BooModelInfo?
+    // A download reaches exactly one terminal outcome; guards a second fail (the
+    // size-cap cancel below surfaces again through didCompleteWithError).
+    private var finished = false
 
     init(
         onProgress: @escaping (Double) -> Void, onDone: @escaping (String) -> Void,
@@ -53,11 +56,20 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(
-        _: URLSession, downloadTask _: URLSessionDownloadTask, didWriteData _: Int64,
+        _: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
         totalBytesWritten: Int64, totalBytesExpectedToWrite _: Int64
     ) {
-        let total = Double(model?.size ?? 0)
-        if total > 0 { onProgress(Double(totalBytesWritten) / total * 100) }
+        guard let model = model else { return }
+        // Cap the transfer at the pinned size so a misbehaving server can't fill
+        // the disk before the checksum ever runs; the Linux and Windows
+        // downloaders enforce the same bound. A correct file reaches exactly
+        // model.size, so only an overrun trips this.
+        if UInt64(totalBytesWritten) > model.size {
+            downloadTask.cancel()
+            fail("The download is larger than the model. Try again.")
+            return
+        }
+        if model.size > 0 { onProgress(Double(totalBytesWritten) / Double(model.size) * 100) }
     }
 
     func urlSession(
@@ -120,6 +132,8 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     }
 
     private func fail(_ why: String) {
+        if finished { return }
+        finished = true
         boo_log(Int32(BOO_LOG_ERROR), "model download failed")
         retire()
         onFail(why)
