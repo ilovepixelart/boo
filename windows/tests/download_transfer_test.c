@@ -3,8 +3,8 @@
 // window, the same BOO_MSG_DL_PROGRESS/DL_DONE contract the onboarding and
 // settings dialogs receive. Includes the source under test so its statics are
 // reachable. What this covers beyond download_test.c: the worker's path
-// building, CNG hash setup, .part creation and its teardown, boo_download_start
-// itself, and fetch's connect/open/send handling with the failure cleanup.
+// building, .part creation and its teardown, boo_download_start itself, and
+// fetch's connect/open/send handling with the failure cleanup.
 //
 // fetch pins WINHTTP_FLAG_SECURE, so the 200-status stream loop (stream_body)
 // needs a trusted-TLS endpoint, and the protected-root store refuses trust
@@ -102,8 +102,8 @@ int main(void) {
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
     // A well-formed https URL whose port has no listener: the worker builds its
-    // paths, opens the CNG hash and the .part, then fetch fails at
-    // WinHttpSendRequest and the worker reports the network reason. Port 47921
+    // paths, opens the .part, then fetch fails at WinHttpSendRequest and the
+    // worker reports the network reason. Port 47921
     // is unused; a stray listener still fails the forced-TLS handshake, so the
     // covered path is the same either way.
     static const BooModelInfo unreachable = {
@@ -131,10 +131,10 @@ int main(void) {
     check(run_download(sink, &malformed), "malformed URL reports back (no hang)");
     check(dl_ok == 0, "malformed URL is a failure");
 
-    // consume_chunk is the transfer loop's per-chunk accounting, split out so
-    // it runs without a live connection: it writes, hashes, bounds the total,
-    // and posts progress. Feed it bytes directly against a temp file and a real
-    // CNG hash, then confirm the digest of what it wrote matches the input.
+    // consume_chunk is the transfer loop's per-chunk accounting, split out so it
+    // runs without a live connection: it writes, bounds the total, and posts
+    // progress. Feed it bytes directly against a temp file. The digest check
+    // itself now lives in the tested core (boo_model_verify_sha256).
     WCHAR chunk_dir[MAX_PATH];
     WCHAR chunk_tmp[MAX_PATH];
     const DWORD tn = GetEnvironmentVariableW(L"TEMP", chunk_dir, MAX_PATH);
@@ -145,8 +145,6 @@ int main(void) {
         cf = _wfopen(chunk_tmp, L"wb");
     check(cf != NULL, "chunk-test temp file opens");
     if (cf) {
-        BCRYPT_ALG_HANDLE calg = NULL;
-        BCryptOpenAlgorithmProvider(&calg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
         const BooModelInfo chunk_model = {.filename = "c.bin",
                                           .url = "https://x.invalid/c",
                                           .sha256 = abc_sha,
@@ -155,40 +153,29 @@ int main(void) {
                                           .size = 3};
         const DownloadJob chunk_job = {.notify = sink, .model = &chunk_model};
 
-        // The two good chunks fill exactly the manifest size: each is written
-        // and counted, progress posts, and what was written hashes to the FIPS
-        // "abc" vector. digest_matches finalizes this hash, so the size-bound
-        // case below uses a fresh one.
-        BCRYPT_HASH_HANDLE chash = NULL;
-        BCryptCreateHash(calg, &chash, NULL, 0, NULL, 0, 0);
+        // Two good chunks fill exactly the manifest size: each is written and
+        // counted, and progress posts.
         unsigned long long received = 0;
         int last_pct = -1;
         dl_progress_count = 0;
-        const bool c1 = consume_chunk(&chunk_job, (const BYTE *)"ab", 2, cf, chash,
-                                      &received, &last_pct);
-        const bool c2 = consume_chunk(&chunk_job, (const BYTE *)"c", 1, cf, chash,
-                                      &received, &last_pct);
+        const bool c1 =
+            consume_chunk(&chunk_job, (const BYTE *)"ab", 2, cf, &received, &last_pct);
+        const bool c2 =
+            consume_chunk(&chunk_job, (const BYTE *)"c", 1, cf, &received, &last_pct);
         check(c1 && c2 && received == 3, "consume_chunk writes and counts the bytes");
         MSG m;
         while (PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
         check(dl_progress_count > 0, "consume_chunk posts progress");
-        check(digest_matches(chash, abc_sha), "the streamed bytes hash to their digest");
-        BCryptDestroyHash(chash);
 
         // A chunk that overruns the manifest size of 3 is rejected (the guard
-        // that stops a misbehaving server filling the disk). A fresh hash: the
-        // rejected bytes never reach the digest check in a real download.
-        BCRYPT_HASH_HANDLE chash2 = NULL;
-        BCryptCreateHash(calg, &chash2, NULL, 0, NULL, 0, 0);
+        // that stops a misbehaving server filling the disk).
         unsigned long long over_received = 0;
         int over_pct = -1;
-        const bool over = consume_chunk(&chunk_job, (const BYTE *)"abcd", 4, cf, chash2,
+        const bool over = consume_chunk(&chunk_job, (const BYTE *)"abcd", 4, cf,
                                         &over_received, &over_pct);
         check(!over, "consume_chunk trips the size bound past the manifest size");
-        BCryptDestroyHash(chash2);
 
         fclose(cf);
-        BCryptCloseAlgorithmProvider(calg, 0);
         _wremove(chunk_tmp);
     }
 

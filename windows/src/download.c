@@ -1,14 +1,13 @@
 // Manifest model download (see download.h). WinHTTP does the transfer (it
-// follows the HuggingFace resolve -> CDN redirects on its own), CNG hashes the
-// stream as it lands, and the .part file only takes the real name after the
-// digest matches the manifest's pinned SHA-256, so a crash or a lie leaves
-// nothing loadable behind.
+// follows the HuggingFace resolve -> CDN redirects on its own), and the .part
+// file only takes the real name after the tested core (boo_model_verify_sha256)
+// confirms the finished file against the manifest's pinned SHA-256, so a crash
+// or a lie leaves nothing loadable behind.
 
 #include "download.h"
 
 #include "strconv.h"
 
-#include <bcrypt.h>
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,17 +38,15 @@ static void post_done(HWND notify, bool ok, const char *text) {
         free(copy);
 }
 
-// Fold one received chunk into the download: write it, hash it, advance the
-// running total, and post progress on a percentage change. Returns false when
-// the total exceeds the manifest size (a longer body is the wrong file, and
-// the bound stops a misbehaving server filling the disk before the digest
-// check runs). Split from the WinHTTP read loop so the per-byte accounting is
-// testable without a live connection.
+// Fold one received chunk into the download: write it, advance the running
+// total, and post progress on a percentage change. Returns false when the total
+// exceeds the manifest size (a longer body is the wrong file, and the bound
+// stops a misbehaving server filling the disk before the digest check runs).
+// Split from the WinHTTP read loop so the per-byte accounting is testable
+// without a live connection.
 static bool consume_chunk(const DownloadJob *job, const BYTE *buf, DWORD n, FILE *out,
-                          BCRYPT_HASH_HANDLE hash, unsigned long long *received,
-                          int *last_pct) {
+                          unsigned long long *received, int *last_pct) {
     if (fwrite(buf, 1, n, out) != n) return false;
-    BCryptHashData(hash, (PUCHAR)buf, n, 0);
     *received += n;
     if (*received > job->model->size) return false;
     const int pct = (int)(*received * 100 / job->model->size);
@@ -61,10 +58,9 @@ static bool consume_chunk(const DownloadJob *job, const BYTE *buf, DWORD n, FILE
     return true;
 }
 
-// One HTTP GET streamed to `out` with progress posts; the SHA-256 of every
-// byte written lands in `hash`. Returns false on any transport failure.
-static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
-                        BCRYPT_HASH_HANDLE hash) {
+// One HTTP GET streamed to `out` with progress posts. Returns false on any
+// transport failure; the finished file's digest is checked in finish_part.
+static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out) {
     unsigned long long received = 0;
     int last_pct = -1;
     for (;;) {
@@ -72,13 +68,13 @@ static bool stream_body(const DownloadJob *job, HINTERNET request, FILE *out,
         DWORD n = 0;
         if (!WinHttpReadData(request, buf, sizeof(buf), &n)) return false;
         if (n == 0) return true; // end of body
-        if (!consume_chunk(job, buf, n, out, hash, &received, &last_pct)) return false;
+        if (!consume_chunk(job, buf, n, out, &received, &last_pct)) return false;
     }
 }
 
-// The transfer proper: connect, GET, stream, hash. Splits out so the worker
-// owns setup/teardown and this owns the WinHTTP handles.
-static bool fetch(const DownloadJob *job, FILE *out, BCRYPT_HASH_HANDLE hash) {
+// The transfer proper: connect, GET, stream. Splits out so the worker owns
+// setup/teardown and this owns the WinHTTP handles.
+static bool fetch(const DownloadJob *job, FILE *out) {
     WCHAR *url = boo_to_wide(job->model->url);
     if (!url) return false;
 
@@ -110,7 +106,7 @@ static bool fetch(const DownloadJob *job, FILE *out, BCRYPT_HASH_HANDLE hash) {
         WinHttpQueryHeaders(
             request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
-        if (status == 200) ok = stream_body(job, request, out, hash);
+        if (status == 200) ok = stream_body(job, request, out);
     }
     if (request) WinHttpCloseHandle(request);
     if (connect) WinHttpCloseHandle(connect);
@@ -118,21 +114,19 @@ static bool fetch(const DownloadJob *job, FILE *out, BCRYPT_HASH_HANDLE hash) {
     return ok;
 }
 
-static bool digest_matches(BCRYPT_HASH_HANDLE hash, const char *expected) {
-    BYTE digest[32];
-    if (BCryptFinishHash(hash, digest, sizeof(digest), 0) != 0) return false;
-    char hex[65];
-    for (size_t i = 0; i < sizeof(digest); i++) sprintf(hex + i * 2, "%02x", digest[i]);
-    return _stricmp(hex, expected) == 0;
-}
-
-// Verify the finished .part against the manifest digest and rename it into
-// place. On failure points `why` at a user-facing reason.
-static bool finish_part(BCRYPT_HASH_HANDLE hash, const DownloadJob *job,
-                        const WCHAR *part_path, const WCHAR *final_path,
-                        const char **why) {
-    if (!digest_matches(hash, job->model->sha256)) {
-        *why = "Downloaded file failed its checksum. Try again.";
+// Verify the finished .part against the manifest digest (in the tested core) and
+// rename it into place. On failure points `why` at a user-facing reason. The
+// core takes a UTF-8 path; the app's UTF-8 code page makes libc fopen honor it.
+static bool finish_part(const DownloadJob *job, const WCHAR *part_path,
+                        const WCHAR *final_path, const char **why) {
+    char *part_utf8 = boo_to_utf8(part_path);
+    const int verdict = part_utf8 ? boo_model_verify_sha256(part_utf8, job->model->sha256)
+                                  : BOO_MODEL_SHA_UNREADABLE;
+    free(part_utf8);
+    if (verdict != BOO_MODEL_SHA_OK) {
+        *why = verdict == BOO_MODEL_SHA_MISMATCH
+                   ? "Downloaded file failed its checksum. Try again."
+                   : "Could not read the download.";
         return false;
     }
     _wremove(final_path);
@@ -160,31 +154,20 @@ static DWORD WINAPI download_worker(LPVOID param) {
         return 0;
     }
 
-    BCRYPT_ALG_HANDLE alg = NULL;
-    BCRYPT_HASH_HANDLE hash = NULL;
-    FILE *out = NULL;
+    FILE *out = _wfopen(part_path, L"wb");
     bool ok = false;
     const char *why = "Download failed. Check your network and try again.";
+    if (!out) why = "Could not create the model file.";
 
-    // One step per statement: each call has side effects (handles, the file),
-    // so none of them belongs on the right of a short-circuit operator.
-    bool ready = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) == 0;
-    if (ready) ready = BCryptCreateHash(alg, &hash, NULL, 0, NULL, 0, 0) == 0;
-    if (ready) {
-        out = _wfopen(part_path, L"wb");
-        if (!out) why = "Could not create the model file.";
-    }
     if (out) {
-        const bool fetched = fetch(job, out, hash);
+        const bool fetched = fetch(job, out);
         fclose(out);
         out = NULL;
-        if (fetched) ok = finish_part(hash, job, part_path, final_path, &why);
+        if (fetched) ok = finish_part(job, part_path, final_path, &why);
     }
 
     if (out) fclose(out);
     if (!ok) _wremove(part_path);
-    if (hash) BCryptDestroyHash(hash);
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
 
     if (ok) {
         boo_log(BOO_LOG_INFO, "model downloaded and verified");
