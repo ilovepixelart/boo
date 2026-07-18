@@ -173,6 +173,109 @@ static void test_paste_chord(void) {
     g_print("  ok  Ctrl+Shift+V, %d events, press/release balanced\n", n);
 }
 
+// boo_text_inject_paste routes on the session state: a ready session schedules
+// exactly one delayed chord (debounced), a failed one is a silent no-op (the
+// clipboard copy already happened), and a session still coming up latches the
+// paste to fire when it turns ready. No main loop runs here, so the scheduled
+// timeout never fires (it would need the live bus); the source id proves it was
+// armed, and it is removed before the stack handle dies.
+static void test_paste_scheduling(void) {
+    g_print("Paste scheduling:\n");
+
+    boo_text_inject_paste(NULL); // the NULL guard must not crash
+
+    BooTextInject ready = {0};
+    ready.state = BOO_INJECT_READY;
+    boo_text_inject_paste(&ready);
+    g_assert_cmpuint(ready.paste_timeout, !=, 0);
+    const guint armed = ready.paste_timeout;
+    boo_text_inject_paste(&ready); // debounce: a second paste reuses the one timer
+    g_assert_cmpuint(ready.paste_timeout, ==, armed);
+    g_source_remove(ready.paste_timeout);
+
+    BooTextInject failed = {0};
+    failed.state = BOO_INJECT_FAILED;
+    boo_text_inject_paste(&failed);
+    g_assert_false(failed.pending_paste);
+    g_assert_cmpuint(failed.paste_timeout, ==, 0);
+
+    BooTextInject coming = {0};
+    coming.state = BOO_INJECT_CREATING_SESSION;
+    boo_text_inject_paste(&coming);
+    g_assert_true(coming.pending_paste); // latched until the session is ready
+    g_assert_cmpuint(coming.paste_timeout, ==, 0);
+
+    g_print("  ok  ready schedules once, failed no-ops, pending latches\n");
+}
+
+// on_response's terminal branches (no request() dispatch, so no live bus): Start
+// success turns the session ready, persists the fresh single-use token, and
+// flushes a queued paste; a Start that did not grant the keyboard fails and
+// drops the stale token; a CreateSession reply with no handle fails.
+static void test_start_response(void) {
+    g_print("Start response:\n");
+
+    clear_restore_token();
+    BooTextInject ok = {0};
+    ok.state = BOO_INJECT_STARTING;
+    ok.pending_paste = TRUE;
+    g_autoptr(GVariant) started = g_variant_ref_sink(
+        g_variant_new_parsed("@a{sv} {'devices': <uint32 1>, 'restore_token': <'fresh'>}"));
+    on_response(0, started, &ok);
+    g_assert_cmpint(ok.state, ==, BOO_INJECT_READY);
+    g_autofree char *persisted = load_restore_token();
+    g_assert_cmpstr(persisted, ==, "fresh");   // the Start token is written back
+    g_assert_false(ok.pending_paste);          // the queued paste fired...
+    g_assert_cmpuint(ok.paste_timeout, !=, 0); // ...arming the chord
+    g_source_remove(ok.paste_timeout);
+    clear_restore_token();
+
+    save_restore_token("stale");
+    BooTextInject denied = {0};
+    denied.state = BOO_INJECT_STARTING;
+    g_autoptr(GVariant) no_kbd =
+        g_variant_ref_sink(g_variant_new_parsed("@a{sv} {'devices': <uint32 0>}"));
+    on_response(0, no_kbd, &denied);
+    g_assert_cmpint(denied.state, ==, BOO_INJECT_FAILED);
+    g_assert_null(load_restore_token()); // a denied keyboard drops the token
+
+    BooTextInject no_handle = {0};
+    no_handle.state = BOO_INJECT_CREATING_SESSION;
+    g_autoptr(GVariant) empty = g_variant_ref_sink(g_variant_new_parsed("@a{sv} {}"));
+    on_response(0, empty, &no_handle);
+    g_assert_cmpint(no_handle.state, ==, BOO_INJECT_FAILED);
+
+    g_print("  ok  ready+token on grant, failed+token-dropped on denial, failed on no handle\n");
+}
+
+// A whitespace-only token file reads back as "no token", not an empty string,
+// and make_payload has nothing to build once the session is past setup.
+static void test_blank_token_and_ready_payload(void) {
+    g_print("Blank token + ready payload:\n");
+
+    save_restore_token("   \n");
+    g_assert_null(load_restore_token());
+    clear_restore_token();
+
+    BooTextInject ready = {0};
+    ready.state = BOO_INJECT_READY;
+    g_assert_null(make_payload(&ready, "x"));
+    g_print("  ok  blank token ignored, no payload once ready\n");
+}
+
+// With no session bus (a null parent application), the client is created inert:
+// state FAILED, paste is a no-op, and free is clean with nothing allocated.
+static void test_inert_without_bus(void) {
+    g_print("Inert without a bus:\n");
+
+    BooTextInject *ti = boo_text_inject_new(NULL);
+    g_assert_nonnull(ti);
+    g_assert_cmpint(ti->state, ==, BOO_INJECT_FAILED);
+    boo_text_inject_paste(ti); // no-op on a failed session
+    boo_text_inject_free(ti);
+    g_print("  ok  no bus -> failed, paste no-ops, free is clean\n");
+}
+
 #else
 
 // Signatures per org.freedesktop.portal.GlobalShortcuts.
@@ -349,6 +452,10 @@ int main(void) {
     test_select_devices_restore_token();
     test_restore_token_kept_on_unrelated_failure();
     test_paste_chord();
+    test_paste_scheduling();
+    test_start_response();
+    test_blank_token_and_ready_payload();
+    test_inert_without_bus();
 #else
     test_global_shortcuts();
     test_already_bound();
