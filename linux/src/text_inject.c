@@ -115,6 +115,29 @@ static void notify_keysym(BooTextInject *ti, guint32 keysym, guint32 state) {
                            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
 }
 
+typedef struct {
+    guint32 keysym;
+    guint32 state;
+} BooChordEvent;
+
+#define BOO_PASTE_CHORD_LEN 6
+
+// The Ctrl+Shift+V paste chord: press Ctrl, Shift, V in order, then release in
+// reverse so the modifiers enclose the key (the target sees exactly
+// Ctrl+Shift+V) and nothing is left held. Pure and connection-free, so
+// portal_payloads.c can pin the sequence without a live portal. Fills `out`
+// (capacity BOO_PASTE_CHORD_LEN); returns the event count.
+static int build_paste_chord(BooChordEvent *out) {
+    int n = 0;
+    out[n++] = (BooChordEvent){XKS_CONTROL_L, KEY_PRESSED};
+    out[n++] = (BooChordEvent){XKS_SHIFT_L, KEY_PRESSED};
+    out[n++] = (BooChordEvent){XKS_V, KEY_PRESSED};
+    out[n++] = (BooChordEvent){XKS_V, KEY_RELEASED};
+    out[n++] = (BooChordEvent){XKS_SHIFT_L, KEY_RELEASED};
+    out[n++] = (BooChordEvent){XKS_CONTROL_L, KEY_RELEASED};
+    return n;
+}
+
 static gboolean send_paste_chord(gpointer user_data) {
     BooTextInject *ti = user_data;
     ti->paste_timeout = 0;
@@ -123,12 +146,9 @@ static gboolean send_paste_chord(gpointer user_data) {
 
     // D-Bus preserves message order on a connection, so the chord arrives
     // press-to-release intact.
-    notify_keysym(ti, XKS_CONTROL_L, KEY_PRESSED);
-    notify_keysym(ti, XKS_SHIFT_L, KEY_PRESSED);
-    notify_keysym(ti, XKS_V, KEY_PRESSED);
-    notify_keysym(ti, XKS_V, KEY_RELEASED);
-    notify_keysym(ti, XKS_SHIFT_L, KEY_RELEASED);
-    notify_keysym(ti, XKS_CONTROL_L, KEY_RELEASED);
+    BooChordEvent chord[BOO_PASTE_CHORD_LEN];
+    const int n = build_paste_chord(chord);
+    for (int i = 0; i < n; i++) notify_keysym(ti, chord[i].keysym, chord[i].state);
     return G_SOURCE_REMOVE;
 }
 

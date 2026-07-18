@@ -98,6 +98,28 @@ static void test_restore_token_roundtrip(void) {
     g_print("  ok  save -> load -> clear\n");
 }
 
+// The paste chord must be a well-formed Ctrl+Shift+V: the modifiers enclose the
+// key so the target sees exactly that shortcut, and every press is mirrored by a
+// release in reverse order so nothing stays held (a stuck Shift or Ctrl would
+// corrupt the user's next keystrokes).
+static void test_paste_chord(void) {
+    g_print("Paste chord:\n");
+
+    BooChordEvent chord[BOO_PASTE_CHORD_LEN];
+    const int n = build_paste_chord(chord);
+
+    const BooChordEvent want[] = {
+        {XKS_CONTROL_L, KEY_PRESSED}, {XKS_SHIFT_L, KEY_PRESSED},  {XKS_V, KEY_PRESSED},
+        {XKS_V, KEY_RELEASED},        {XKS_SHIFT_L, KEY_RELEASED}, {XKS_CONTROL_L, KEY_RELEASED},
+    };
+    g_assert_cmpint(n, ==, (int)G_N_ELEMENTS(want));
+    for (int i = 0; i < n; i++) {
+        g_assert_cmpuint(chord[i].keysym, ==, want[i].keysym);
+        g_assert_cmpuint(chord[i].state, ==, want[i].state);
+    }
+    g_print("  ok  Ctrl+Shift+V, %d events, press/release balanced\n", n);
+}
+
 #else
 
 // Signatures per org.freedesktop.portal.GlobalShortcuts.
@@ -162,6 +184,7 @@ int main(void) {
     test_remote_desktop();
     test_select_devices_options();
     test_restore_token_roundtrip();
+    test_paste_chord();
 #else
     test_global_shortcuts();
     test_already_bound();
