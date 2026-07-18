@@ -182,7 +182,6 @@ typedef struct {
     gpointer user_data;
     SoupSession *session;
     GCancellable *cancel;
-    GChecksum *sum;
     GFileOutputStream *out;
     char *tmp_path;   // models/<name>.part while downloading
     char *final_path; // models/<name>
@@ -192,7 +191,6 @@ typedef struct {
 
 static void download_free(DownloadCtx *dc) {
     g_clear_object(&dc->out);
-    if (dc->sum) g_checksum_free(dc->sum);
     g_clear_object(&dc->cancel);
     g_clear_object(&dc->session);
     g_clear_object(&dc->progress);
@@ -236,9 +234,16 @@ static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_d
     if (n == 0) { // end of stream: verify, move into place, report
         g_object_unref(stream);
         g_output_stream_close(G_OUTPUT_STREAM(dc->out), NULL, NULL);
-        const char *got = g_checksum_get_string(dc->sum);
-        if (g_ascii_strcasecmp(got, dc->model->sha256) != 0) {
+        // The pinned-digest check lives in the tested core, one streaming
+        // implementation for all three frontends.
+        switch (boo_model_verify_sha256(dc->tmp_path, dc->model->sha256)) {
+        case BOO_MODEL_SHA_OK:
+            break;
+        case BOO_MODEL_SHA_MISMATCH:
             download_fail(dc, "Downloaded file failed its checksum. Try again.");
+            return;
+        default: // UNREADABLE
+            download_fail(dc, "Could not read the download.");
             return;
         }
         if (g_rename(dc->tmp_path, dc->final_path) != 0) {
@@ -257,7 +262,6 @@ static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_d
         download_fail(dc, "Could not write the model file (disk full?).");
         return;
     }
-    g_checksum_update(dc->sum, dc->buf, n);
     dc->received += n;
     // The manifest size is exact; a longer body is the wrong file, and the
     // bound keeps a misbehaving server from filling the disk before the
@@ -328,7 +332,6 @@ GCancellable *boo_model_download(const BooModelInfo *model, GtkProgressBar *prog
     g_autofree char *dir = boo_models_write_dir();
     dc->final_path = g_build_filename(dir, model->filename, NULL);
     dc->tmp_path = g_strconcat(dc->final_path, ".part", NULL);
-    dc->sum = g_checksum_new(G_CHECKSUM_SHA256);
     dc->cancel = g_cancellable_new();
     dc->session = soup_session_new();
 
