@@ -115,7 +115,13 @@ static void window_state_free(gpointer data) {
     g_mutex_clear(&state->workers.idle_lock);
     if (state->shortcut) boo_global_shortcut_free(state->shortcut);
     if (state->inject) boo_text_inject_free(state->inject);
-    if (state->settings.css) g_object_unref(state->settings.css);
+    if (state->settings.css) {
+        // add_provider_for_display kept a ref on the display; drop the local ref
+        // alone and the provider stays registered for the process lifetime.
+        gtk_style_context_remove_provider_for_display(
+            gdk_display_get_default(), GTK_STYLE_PROVIDER(state->settings.css));
+        g_object_unref(state->settings.css);
+    }
     // Destroy the settings dialog while this state is still valid: it is not
     // auto-destroyed with its transient parent, and its destroy handler writes
     // through this state and its rows borrow the theme names freed just below.
