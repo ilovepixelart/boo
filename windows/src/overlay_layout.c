@@ -23,12 +23,15 @@ int boo_cards_layout(const int *heights, int total, int gap, int area_top, int a
         used += need;
         first = i;
     }
-    // Place the survivors top-down from area_top.
-    int n = 0;
+    // Place the survivors top-down from area_top. Cap the count up front so the
+    // loop runs on a single counter, rather than a write index that also gates it.
+    int count = total - first;
+    if (count > cap) count = cap;
     int y = area_top;
-    for (int i = first; i < total && n < cap; i++) {
-        slots[n++] = (BooCardSlot){i, y, heights[i]};
+    for (int k = 0; k < count; k++) {
+        const int i = first + k;
+        slots[k] = (BooCardSlot){i, y, heights[i]};
         y += heights[i] + gap;
     }
-    return n;
+    return count;
 }
