@@ -103,9 +103,30 @@ int main(void) {
     if (ui) {
         on_onboarding_fail("harness failure", ui);
         check(gtk_widget_get_sensitive(ui->button), "a failed download re-enables Download");
+        // on_onboarding_done dups the path, destroys the window (which frees ui
+        // via its destroy-notify), then boots start_with_model; a bad path lands
+        // in the load-error branch. Last use of ui: it is freed here.
+        on_onboarding_done("/nonexistent/ggml-onboard.bin", ui);
+        pump_ms(200);
+        check(state.ctx == NULL, "on_onboarding_done routes a bad model to the error path");
     } else {
         check(FALSE, "the download dialog exposes its UI");
     }
+
+    // onboarding_ui_free (the window's destroy-notify) cancels an in-flight
+    // download before freeing the UI, so a forced close mid-transfer cannot free
+    // the struct under the async chain. Drive it on synthetic UIs.
+    {
+        OnboardingUI *ofree = g_new0(OnboardingUI, 1);
+        ofree->download_cancel = g_cancellable_new();
+        GCancellable *watch = g_object_ref(ofree->download_cancel);
+        onboarding_ui_free(ofree);
+        check(g_cancellable_is_cancelled(watch),
+              "onboarding_ui_free cancels an in-flight download");
+        g_object_unref(watch);
+    }
+    onboarding_ui_free(g_new0(OnboardingUI, 1));
+    check(TRUE, "onboarding_ui_free tolerates no in-flight download");
 
     // VAD callbacks: on_vad_fail logs, on_vad_done with a NULL ctx is a no-op.
     on_vad_fail("harness reason", &state);
