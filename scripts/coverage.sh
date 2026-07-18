@@ -29,20 +29,21 @@ empty_report() {
     printf '<coverage version="1"/>\n' >"$1"
 }
 
-# The pure-C frontend logic that carries no windows.h: the paste-chord planner
-# and the transcript-history policy, each a <name>.c under test plus its
-# <name>_test.c, gcov-instrumented. Every suite builds in its own subdir so its
-# .gcno/.gcda cannot collide, and only the source under test is gcov'd (not the
-# test TU). Runs on any host, so it lands in windows.xml on the Linux/macOS CI.
+# The pure-C frontend logic that carries no windows.h: the paste-chord planner,
+# the transcript-history policy, and the theme-to-color mapping, each a <name>.c
+# under test plus its <name>_test.c, gcov-instrumented. Every suite builds in its
+# own subdir so its .gcno/.gcda cannot collide, and only the source under test is
+# gcov'd (not the test TU). Runs on any host, so it lands in windows.xml on the
+# Linux/macOS CI.
 gen_windows() {
     local work
     work=$(mktemp -d)
     (
         cd "$work"
         local all_covs=()
-        local cflags=(--coverage -O0 -I "$root/windows/src")
+        local cflags=(--coverage -O0 -I "$root/windows/src" -I "$root/include")
         local suite
-        for suite in inject_plan history; do
+        for suite in inject_plan history palette; do
             mkdir -p "$suite"
             (
                 cd "$suite"

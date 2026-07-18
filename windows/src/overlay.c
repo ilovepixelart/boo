@@ -21,6 +21,7 @@
 #include "history.h"
 #include "hotkey.h"
 #include "inject.h"
+#include "palette.h"
 #include "settings.h"
 #include "tray.h"
 #include "waveform.h"
@@ -66,18 +67,6 @@
 // < 0xF000 and a multiple of 16 (Windows masks the low nibble).
 #define BOO_SC_SETTINGS 0x0010
 
-typedef struct {
-    COLORREF bg;
-    COLORREF text;
-    COLORREF subtext;
-    COLORREF record;
-    COLORREF wave_idle;
-    COLORREF wave_rec;
-    COLORREF wave_think;
-    COLORREF card;
-    COLORREF card_live;
-} Palette;
-
 // GDI/interaction state. One overlay per process (single-instance mutex), so
 // module statics are the whole story.
 static HFONT font_text;
@@ -105,68 +94,14 @@ static ULONGLONG flash_until;
 static HWND last_external_fg;
 static HWINEVENTHOOK fg_hook;
 
-static COLORREF mix(COLORREF fg, COLORREF bg, float alpha) {
-    const int r = (int)(GetRValue(fg) * alpha + GetRValue(bg) * (1.0f - alpha));
-    const int g = (int)(GetGValue(fg) * alpha + GetGValue(bg) * (1.0f - alpha));
-    const int b = (int)(GetBValue(fg) * alpha + GetBValue(bg) * (1.0f - alpha));
-    return RGB(r, g, b);
-}
-
-static COLORREF pcolor(uint32_t rgb) {
-    return RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-}
-
-// The overlay's colours. A theme picked in Settings wins; with none picked the
-// fallback below follows the system light/dark toggle. The dark fallback is the
-// macOS reference's default theme, "Ghostty Default Style Dark" (docs/ui-spec.md),
-// so a default Windows build is pixel-equivalent to a default-themed macOS one.
-// The record disc's #FF3B30 is the one colour hardcoded on every platform. Card
-// fills are the reference's white@6%/white@3% (black on light) pre-blended,
-// since GDI has no alpha.
-
+// The overlay's colours: a picked theme's tokens, else the system light/dark
+// fallback. The mapping itself (slots, luminance-based card fills, the
+// #FF3B30 disc, the reference default) is the pure, host-tested boo_palette.
 static Palette palette(const BooApp *app) {
-    const COLORREF record = RGB(0xFF, 0x3B, 0x30);
-    // A picked theme wins over the system light/dark follow, matching macOS and
-    // Linux. Its tokens map to the same slots the hardcoded default uses.
-    if (app->settings.current_theme >= 0) {
-        const BooThemeColors *c =
-            &app->settings.themes[app->settings.current_theme].colors;
-        const COLORREF bg = pcolor(c->bg);
-        // Card fills are white@6%/3% over a dark surface, black over a light one.
-        const int lum = ((c->bg >> 16) & 0xFF) + ((c->bg >> 8) & 0xFF) + (c->bg & 0xFF);
-        const COLORREF over = lum < 3 * 128 ? RGB(255, 255, 255) : RGB(0, 0, 0);
-        return (Palette){bg,
-                         pcolor(c->fg),
-                         pcolor(c->palette[8]), // dim
-                         record,
-                         pcolor(c->palette[14]), // idle
-                         pcolor(c->palette[9]),  // recording
-                         pcolor(c->palette[11]), // thinking
-                         mix(over, bg, 0.06f),
-                         mix(over, bg, 0.03f)};
-    }
-    if (app->dark) {
-        const COLORREF bg = RGB(0x28, 0x2C, 0x34); // theme background
-        return (Palette){bg,
-                         RGB(0xFF, 0xFF, 0xFF), // theme foreground
-                         RGB(0x66, 0x66, 0x66), // palette[8], dim
-                         record,
-                         RGB(0x70, 0xC0, 0xB1), // palette[14], idle
-                         RGB(0xD5, 0x4E, 0x53), // palette[9], recording
-                         RGB(0xE7, 0xC5, 0x47), // palette[11], thinking
-                         mix(RGB(255, 255, 255), bg, 0.06f),
-                         mix(RGB(255, 255, 255), bg, 0.03f)};
-    }
-    const COLORREF bg = RGB(0xF6, 0xF6, 0xF6);
-    return (Palette){bg,
-                     RGB(0x14, 0x14, 0x14),
-                     RGB(0x6E, 0x6E, 0x6E),
-                     record,
-                     RGB(0x4E, 0x8F, 0x83),
-                     RGB(0xC2, 0x3B, 0x40),
-                     RGB(0xB4, 0x8A, 0x00),
-                     mix(RGB(0, 0, 0), bg, 0.06f),
-                     mix(RGB(0, 0, 0), bg, 0.03f)};
+    const BooThemeColors *theme = app->settings.current_theme >= 0
+                                      ? &app->settings.themes[app->settings.current_theme].colors
+                                      : NULL;
+    return boo_palette(theme, app->dark);
 }
 
 // Follows the system Apps theme. The documented WinRT route (UISettings) is
@@ -531,7 +466,7 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
         // Hairline separator under the header.
         RECT sep = {left + inset, top + header_h + boo_px(2, dpi), right - inset,
                     top + header_h + boo_px(3, dpi)};
-        HBRUSH sep_brush = CreateSolidBrush(mix(pal->subtext, pal->card, 0.35f));
+        HBRUSH sep_brush = CreateSolidBrush(boo_color_mix(pal->subtext, pal->card, 0.35f));
         FillRect(dc, &sep, sep_brush);
         DeleteObject(sep_brush);
     }
