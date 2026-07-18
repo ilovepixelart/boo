@@ -607,6 +607,7 @@ pub fn build(b: *std.Build) void {
         // Add all Swift source files
         swift_compile.addFileArg(b.path("macos/Sources/AppDelegate.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/GhosttyInjector.swift"));
+        swift_compile.addFileArg(b.path("macos/Sources/PasteResolution.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/TextDelivery.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/OverlayWindow.swift"));
         swift_compile.addFileArg(b.path("macos/Sources/WaveformView.swift"));
