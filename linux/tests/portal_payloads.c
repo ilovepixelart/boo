@@ -265,7 +265,17 @@ static void test_start_response(void) {
     on_response(0, empty, &no_handle);
     g_assert_cmpint(no_handle.state, ==, BOO_INJECT_FAILED);
 
-    g_print("  ok  ready+token on grant, failed+token-dropped on denial, failed on no handle\n");
+    // A non-object-path handle is rejected before it reaches make_payload's
+    // g_variant_new("(o…)"), which would abort on a bad path. Without the guard
+    // this advances to SELECTING_DEVICES and calls into a NULL bus.
+    BooTextInject bad_handle = {0};
+    bad_handle.state = BOO_INJECT_CREATING_SESSION;
+    g_autoptr(GVariant) not_a_path =
+        g_variant_ref_sink(g_variant_new_parsed("@a{sv} {'session_handle': <'not a path'>}"));
+    on_response(0, not_a_path, &bad_handle);
+    g_assert_cmpint(bad_handle.state, ==, BOO_INJECT_FAILED);
+
+    g_print("  ok  ready/token/denial/no-handle, and a bad object path is rejected\n");
 }
 
 // A whitespace-only token file reads back as "no token", not an empty string,
@@ -448,6 +458,17 @@ static void test_shortcut_response(void) {
     // CreateSession succeeded (response 0) but returned no handle: reported.
     on_response(0, empty, &no_handle);
     g_assert_nonnull(g_strstr_len(r3.reason, -1, "no session handle"));
+
+    // A non-object-path handle is rejected the same way, rather than reaching
+    // make_payload's %o builder (which aborts on a bad path).
+    UnavailRec r5 = {0};
+    BooGlobalShortcut bad = {
+        .on_unavailable = record_unavailable, .user_data = &r5, .step = BOO_GS_CREATE_SESSION};
+    g_autoptr(GVariant) not_a_path =
+        g_variant_ref_sink(g_variant_new_parsed("@a{sv} {'session_handle': <'not a path'>}"));
+    on_response(0, not_a_path, &bad);
+    g_assert_nonnull(g_strstr_len(r5.reason, -1, "session handle"));
+    g_free(r5.reason);
 
     // ListShortcuts finds our shortcut already bound: skip the dialog, report
     // nothing (this is the whole reason we call ListShortcuts first).

@@ -228,7 +228,11 @@ static void on_response(guint32 response, GVariant *results, gpointer user_data)
     switch (ti->state) {
     case BOO_INJECT_CREATING_SESSION: {
         const char *handle = NULL;
-        if (!g_variant_lookup(results, "session_handle", "&s", &handle) || !handle) {
+        // Validate the object path before storing it: the portal is a separate
+        // process, and a non-path string would later abort g_variant_new("(o…)")
+        // in make_payload rather than fail gracefully.
+        if (!g_variant_lookup(results, "session_handle", "&s", &handle) || !handle ||
+            !g_variant_is_object_path(handle)) {
             fail(ti, "CreateSession returned no session handle");
             return;
         }

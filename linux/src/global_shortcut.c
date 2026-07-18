@@ -138,7 +138,11 @@ static GVariant *make_payload(gpointer user_data, const char *handle_token) {
 
 static void on_session_created(BooGlobalShortcut *gs, GVariant *results) {
     const char *handle = NULL;
-    if (!g_variant_lookup(results, "session_handle", "&s", &handle) || !handle) {
+    // Validate the object path before storing it: a non-path string from the
+    // portal process would later abort g_variant_new_parsed("(%o…)") in
+    // make_payload rather than fail gracefully.
+    if (!g_variant_lookup(results, "session_handle", "&s", &handle) || !handle ||
+        !g_variant_is_object_path(handle)) {
         report_unavailable(gs, "CreateSession returned no session handle");
         return;
     }
