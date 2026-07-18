@@ -116,8 +116,10 @@ enum TextDelivery {
     // The virtual key that types "v" on the active keyboard layout. Hardcoding
     // 0x09 (QWERTY) meant ⌘V on Dvorak/AZERTY/Colemak pasted the wrong key or
     // nothing, and the transcript was then lost when the clipboard was restored.
-    // Resolved once, lazily; QWERTY's 0x09 is the fallback.
-    static let pasteKeyCode: CGKeyCode = resolveKeyCode(for: "v") ?? 0x09
+    // Resolved per paste, not cached: the layout can change mid-session, and a
+    // cached first-layout keycode would then paste the wrong key. The TIS scan is
+    // cheap and pastes are user-paced. QWERTY's 0x09 is the fallback.
+    static var pasteKeyCode: CGKeyCode { resolveKeyCode(for: "v") ?? 0x09 }
 
     static func resolveKeyCode(for character: Character) -> CGKeyCode? {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
