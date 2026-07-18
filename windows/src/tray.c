@@ -5,6 +5,7 @@
 #include "tray.h"
 
 #include "resource.h"
+#include "tray_fmt.h"
 
 #include <shellapi.h>
 #include <stdio.h>
@@ -49,12 +50,7 @@ void boo_tray_set_recording(HWND hwnd, bool recording) {
 void boo_tray_set_elapsed(HWND hwnd, int seconds) {
     NOTIFYICONDATAW nid = tray_data(hwnd);
     nid.uFlags = NIF_TIP | NIF_SHOWTIP;
-    if (seconds < 60) {
-        swprintf(nid.szTip, ARRAYSIZE(nid.szTip), L"Boo, recording %ds", seconds);
-    } else {
-        swprintf(nid.szTip, ARRAYSIZE(nid.szTip), L"Boo, recording %d:%02d", seconds / 60,
-                 seconds % 60);
-    }
+    boo_tray_elapsed_tip(nid.szTip, ARRAYSIZE(nid.szTip), seconds);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 

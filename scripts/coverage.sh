@@ -43,7 +43,7 @@ gen_windows() {
         local all_covs=()
         local cflags=(--coverage -O0 -I "$root/windows/src" -I "$root/include")
         local suite
-        for suite in inject_plan history palette utf8 modelsel opacity overlay_layout; do
+        for suite in inject_plan history palette utf8 modelsel opacity overlay_layout tray_fmt; do
             mkdir -p "$suite"
             (
                 cd "$suite"

@@ -435,6 +435,7 @@ pub fn build(b: *std.Build) void {
                 "modelsel.c",
                 "opacity.c",
                 "overlay_layout.c",
+                "tray_fmt.c",
             },
             // Same warning set as the Linux frontend; this C is clean under it.
             .flags = &.{
@@ -456,7 +457,7 @@ pub fn build(b: *std.Build) void {
         // test so its statics are reachable; two exes because model.c and
         // download.c each define their own static string helpers.
         const win_tests_step = b.step("win-tests", "Run Windows frontend logic tests");
-        for ([_][]const u8{ "model_test", "download_test", "download_transfer_test", "inject_test", "crash_test", "waveform_test", "history_test", "palette_test", "utf8_test", "modelsel_test", "opacity_test", "overlay_layout_test", "settings_test" }) |test_name| {
+        for ([_][]const u8{ "model_test", "download_test", "download_transfer_test", "inject_test", "crash_test", "waveform_test", "history_test", "palette_test", "utf8_test", "modelsel_test", "opacity_test", "overlay_layout_test", "settings_test", "tray_fmt_test" }) |test_name| {
             const t = b.addExecutable(.{
                 .name = test_name,
                 .root_module = b.createModule(.{
@@ -487,7 +488,7 @@ pub fn build(b: *std.Build) void {
             // transcript-history policy.
             t.root_module.addCSourceFiles(.{
                 .root = b.path("windows/src"),
-                .files = &.{ "strconv.c", "inject_plan.c", "history.c", "palette.c", "utf8.c", "modelsel.c", "opacity.c", "overlay_layout.c" },
+                .files = &.{ "strconv.c", "inject_plan.c", "history.c", "palette.c", "utf8.c", "modelsel.c", "opacity.c", "overlay_layout.c", "tray_fmt.c" },
                 .flags = &.{ "-O0", "-std=c11", "-Wall", "-Wextra" },
             });
             // Cross-compiling hosts only build the tests (compile check);
