@@ -91,6 +91,12 @@ bool boo_theme_parse_file(const char *path, BooThemeColors *out);
 // preference order lives in one place. Directory listing stays per-OS.
 uint32_t boo_model_rank(const char *name);
 
+// The most capable usable speech model among `paths` (count entries): keeps the
+// speech models that are not truncated, then the lowest boo_model_rank, breaking
+// ties by basename. Returns the index into `paths`, or -1 when none qualifies.
+// The per-OS directory walk stays in each frontend; this is the shared pick.
+int boo_best_model(const char *const *paths, int count);
+
 // What kind of model a filename names, judged on its basename (a full path
 // works too): a ggml-*.bin speech model, the Silero VAD (ggml-silero*), or
 // neither. The three frontends share this so the "silero is the VAD, not a

@@ -383,15 +383,52 @@ const recommended_models = [_][]const u8{
     "ggml-tiny.en-q5_1.bin",
 };
 
+// The basename after either separator: std.fs.path.basename only splits the
+// target's own, but a frontend may hand us a foreign-looking path (same reason
+// boo_model_classify does this).
+fn modelBasename(name: [*:0]const u8) []const u8 {
+    const full = std.mem.span(name);
+    if (std.mem.lastIndexOfAny(u8, full, "/\\")) |i| return full[i + 1 ..];
+    return full;
+}
+
 // Rank of a model filename in the recommended order (best == 0); the list length
 // for anything unrecognized, so a caller can take "lowest rank wins, alphabetical
 // breaks ties among the rest" and always prefer a recognized model.
-export fn boo_model_rank(name: [*:0]const u8) u32 {
-    const n = std.mem.span(name);
+fn rankSlice(n: []const u8) u32 {
     for (recommended_models, 0..) |m, i| {
         if (std.mem.eql(u8, n, m)) return @intCast(i);
     }
     return recommended_models.len;
+}
+
+export fn boo_model_rank(name: [*:0]const u8) u32 {
+    return rankSlice(std.mem.span(name));
+}
+
+// The most capable usable speech model among `paths`: keeps the speech models
+// (boo_model_classify) that are not truncated (boo_model_verify), then takes the
+// lowest boo_model_rank, breaking ties by basename so the pick is deterministic.
+// Returns the index into `paths`, or -1 when none qualifies. The per-OS directory
+// walk stays in each frontend; this is the shared selection policy the three used
+// to each reimplement.
+export fn boo_best_model(paths: [*]const [*:0]const u8, count: c_int) c_int {
+    var best: c_int = -1;
+    var best_rank: u32 = 0;
+    var i: c_int = 0;
+    while (i < count) : (i += 1) {
+        const path = paths[@intCast(i)];
+        if (boo_model_classify(path) != BOO_MODEL_SPEECH) continue;
+        if (boo_model_verify(path) == BOO_MODEL_FILE_TRUNCATED) continue;
+        const r = rankSlice(modelBasename(path));
+        if (best < 0 or r < best_rank or
+            (r == best_rank and std.mem.order(u8, modelBasename(path), modelBasename(paths[@intCast(best)])) == .lt))
+        {
+            best = i;
+            best_rank = r;
+        }
+    }
+    return best;
 }
 
 // What kind of model a filename names, so the "ggml-*.bin is a speech model,
@@ -696,6 +733,55 @@ test "boo_model_verify_sha256 streams the file and checks the pinned digest" {
         BOO_MODEL_SHA_UNREADABLE,
         boo_model_verify_sha256("/nonexistent/model.bin", abc_sha),
     );
+}
+
+test "boo_best_model applies the shared selection policy" {
+    const tmp = std.mem.span(std.c.getenv("TMPDIR") orelse "/tmp");
+
+    // A sparse file of `size` bytes: boo_model_verify checks the on-disk size, so
+    // a sparse file of the pinned size passes as non-truncated without the real
+    // hundreds of MB.
+    const Sized = struct {
+        fn make(buf: []u8, dir: []const u8, name: []const u8, size: i64) ![:0]u8 {
+            const path = try std.fmt.bufPrintSentinel(buf, "{s}/{s}", .{ dir, name }, 0);
+            const f = libc.fopen(path, "wb") orelse return error.SkipZigTest;
+            defer _ = libc.fclose(f);
+            if (size > 0) {
+                if (libc.fseek(f, @intCast(size - 1), libc.SEEK_SET) != 0) return error.SkipZigTest;
+                _ = libc.fwrite("\x00", 1, 1, f);
+            }
+            return path;
+        }
+    };
+
+    var bb: [256]u8 = undefined;
+    var bs: [256]u8 = undefined;
+    var bt: [256]u8 = undefined;
+    const base_en = try Sized.make(&bb, tmp, "ggml-base.en.bin", 147964211);
+    defer _ = libc.remove(base_en);
+    const small_en = try Sized.make(&bs, tmp, "ggml-small.en.bin", 487614201);
+    defer _ = libc.remove(small_en);
+    const truncated = try Sized.make(&bt, tmp, "ggml-tiny.en-q5_1.bin", 5); // wrong size
+    defer _ = libc.remove(truncated);
+
+    // small.en outranks base.en, so it wins even when base is listed first.
+    const ranked = [_][*:0]const u8{ base_en, small_en };
+    try testing.expectEqual(@as(c_int, 1), boo_best_model(&ranked, 2));
+
+    // The VAD (a non-speech name, no file needed) and the truncated model are both
+    // filtered out; the best of what remains is small.en.
+    const mixed = [_][*:0]const u8{ "/x/ggml-silero-v6.2.0.bin", truncated, base_en, small_en };
+    try testing.expectEqual(@as(c_int, 3), boo_best_model(&mixed, 4));
+
+    // Unrecognized speech models all rank the same (verify returns UNKNOWN without
+    // opening, so no file is needed); the alphabetically-first name breaks the tie.
+    const unrecognized = [_][*:0]const u8{ "/x/ggml-zzz.bin", "/x/ggml-aaa.bin", "/x/ggml-mmm.bin" };
+    try testing.expectEqual(@as(c_int, 1), boo_best_model(&unrecognized, 3));
+
+    // Nothing usable, or an empty list, is -1.
+    const none = [_][*:0]const u8{ "/x/ggml-silero-v6.2.0.bin", "/x/notes.txt" };
+    try testing.expectEqual(@as(c_int, -1), boo_best_model(&none, 2));
+    try testing.expectEqual(@as(c_int, -1), boo_best_model(&none, 0));
 }
 
 test "a failed init frees everything it had already allocated" {
