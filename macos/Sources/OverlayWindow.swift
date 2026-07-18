@@ -260,6 +260,11 @@ class OverlayWindow: NSWindow {
     /// blocks for one utterance's inference, so it must never run on main.
     private let streamQueue = DispatchQueue(label: "com.boo.stream", qos: .userInitiated)
     private var streamTimer: DispatchSourceTimer?
+    /// Tracks the off-main stop+transcribe task so teardown can wait for it: a
+    /// quit mid-transcription would otherwise free the context under a live
+    /// boo_transcribe (stream ticks are drained by streamQueue, swaps by the
+    /// AppDelegate's group, but this task had neither).
+    private let transcribeGroup = DispatchGroup()
     private var liveBubbleContainer: NSView?
     private var liveBubbleLabel: NSTextField?
 
@@ -295,6 +300,9 @@ class OverlayWindow: NSWindow {
             // barrier that returns only once any in-flight tick has finished.
         }
         boo_stop_recording(booCtx)
+        // A quit landing mid-transcription (stop pressed, then Cmd+Q during the
+        // multi-second decode) must not free the context under boo_transcribe.
+        transcribeGroup.wait()
     }
 
     /// Show the committed-so-far text in a dimmed, button-less bubble while
@@ -393,8 +401,15 @@ class OverlayWindow: NSWindow {
             recordButton.layer?.cornerRadius = 20
         })
 
-        // Move EVERYTHING off the main thread, stop audio + transcribe
+        // Move EVERYTHING off the main thread, stop audio + transcribe. The task
+        // is tracked in transcribeGroup (entered before the dispatch, left when
+        // it exits) so a quit waits it out before boo_deinit. `group` is captured
+        // strongly so leave() fires even if self is gone, or the group would
+        // never empty and teardown would hang.
+        let group = transcribeGroup
+        group.enter()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { group.leave() }
             guard let self = self else { return }
 
             // Stop audio on background thread (AudioQueueStop can block)
@@ -404,26 +419,25 @@ class OverlayWindow: NSWindow {
             let result: UnsafePointer<CChar>? = autoreleasepool {
                 return boo_transcribe(self.booCtx)
             }
+            // Copy the transcript off the core's buffer while the context is
+            // alive: the returned pointer is freed by boo_deinit, and the
+            // main-queue delivery below may run after teardown.
+            let text = result.map { String(cString: $0) }
 
             DispatchQueue.main.async {
                 // The provisional live bubble is superseded by the final
                 // transcript (or by "no speech") either way.
                 self.removeLiveBubble()
-                if let cStr = result {
-                    let text = String(cString: cStr)
-                    if !text.isEmpty {
-                        self.addTranscript(text)
-                        if self.autoType {
-                            self.typeTextIntoFocusedApp(text)
-                        } else {
-                            // Auto-type off means clipboard-only, never silent:
-                            // the transcript must still land somewhere pasteable.
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
-                            self.flashStatus("copied")
-                        }
+                if let text = text, !text.isEmpty {
+                    self.addTranscript(text)
+                    if self.autoType {
+                        self.typeTextIntoFocusedApp(text)
                     } else {
-                        self.statusLabel.stringValue = "no speech detected"
+                        // Auto-type off means clipboard-only, never silent:
+                        // the transcript must still land somewhere pasteable.
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        self.flashStatus("copied")
                     }
                 } else {
                     self.statusLabel.stringValue = "no speech detected"
