@@ -3,7 +3,6 @@
 // and the test harness compiles this file standalone (keep app state out).
 
 import Cocoa
-import CryptoKit
 
 /// UTF-8 C string to Swift String; "" for NULL. The C API hands out static
 /// manifest strings, so no ownership transfer happens here.
@@ -86,13 +85,16 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     /// Outcomes hop back to the main queue, where the UI closures live.
     private func verifyAndInstall(model: BooModelInfo, staging: URL) {
         defer { try? FileManager.default.removeItem(at: staging) }
-        guard let data = try? Data(contentsOf: staging, options: .mappedIfSafe) else {
-            DispatchQueue.main.async { self.fail("Could not read the download.") }
-            return
-        }
-        let hex = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        guard hex == booCString(model.sha256) else {
+        // The pinned-digest check lives in the tested core (boo_model_verify_sha256),
+        // one streaming implementation for all three frontends.
+        switch boo_model_verify_sha256(staging.path, model.sha256) {
+        case Int32(BOO_MODEL_SHA_OK):
+            break
+        case Int32(BOO_MODEL_SHA_MISMATCH):
             DispatchQueue.main.async { self.fail("Downloaded file failed its checksum. Try again.") }
+            return
+        default:  // UNREADABLE
+            DispatchQueue.main.async { self.fail("Could not read the download.") }
             return
         }
         let dir = FileManager.default.homeDirectoryForCurrentUser
