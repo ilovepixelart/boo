@@ -458,6 +458,37 @@ if !PermissionsManager.hasAccessibility {
         "auto-type without Accessibility copies the transcript and explains")
 }
 
+// ── TextDelivery (extracted from OverlayWindow) ──
+// snapshotPasteboard must deep-copy every type so a non-text clipboard survives
+// the transient transcript paste that clears it. Uses a private named pasteboard
+// so the real system clipboard is never touched.
+let deliveryPb = NSPasteboard(name: NSPasteboard.Name("boo-delivery-test"))
+deliveryPb.clearContents()
+let priorItem = NSPasteboardItem()
+priorItem.setData(Data("prior clipboard".utf8), forType: .string)
+deliveryPb.writeObjects([priorItem])
+let snapshot = TextDelivery.snapshotPasteboard(deliveryPb)
+check(snapshot.count == 1, "snapshotPasteboard copies each pasteboard item")
+deliveryPb.clearContents()
+deliveryPb.setString("transient transcript", forType: .string)  // the paste clobbers it
+deliveryPb.clearContents()
+deliveryPb.writeObjects(snapshot)  // restore from the snapshot
+check(
+    deliveryPb.string(forType: .string) == "prior clipboard",
+    "the snapshot restores the prior clipboard after a clobber")
+deliveryPb.releaseGlobally()
+
+// resolveKeyCode finds the virtual key that types a character on the active
+// layout, so ⌘V pastes on Dvorak/AZERTY, not just QWERTY. "v" exists on every
+// Latin layout, so it must resolve to an in-range key; the paste key falls back
+// to QWERTY's 0x09 only when resolution fails.
+if let vKey = TextDelivery.resolveKeyCode(for: "v") {
+    check(vKey < 128, "resolveKeyCode maps 'v' to an in-range virtual key")
+} else {
+    check(false, "resolveKeyCode should map 'v' on a Latin layout")
+}
+check(TextDelivery.pasteKeyCode < 128, "the paste key is a valid virtual key")
+
 overlay.startDisplayLink()
 overlay.stopDisplayLink()
 check(overlay.waveformLink?.isPaused == true, "the waveform display link pauses on stop")
