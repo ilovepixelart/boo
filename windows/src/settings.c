@@ -8,6 +8,7 @@
 #include "download.h"
 #include "model.h"
 #include "modelsel.h"
+#include "opacity.h"
 #include "strconv.h"
 
 #include <commctrl.h>
@@ -110,7 +111,7 @@ static void load_prefs(BooApp *app) {
     DWORD size = sizeof(val);
     if (RegQueryValueExW(key, L"Opacity", NULL, NULL, (BYTE *)&val, &size) ==
             ERROR_SUCCESS &&
-        val >= 10 && val <= 100)
+        boo_opacity_valid((int)val))
         app->settings.opacity_pct = (int)val;
     size = sizeof(val);
     if (RegQueryValueExW(key, L"AutoType", NULL, NULL, (BYTE *)&val, &size) ==
@@ -178,13 +179,13 @@ void boo_settings_init(BooApp *app) {
 void boo_settings_apply(BooApp *app) {
     if (!app->overlay) return;
     const LONG_PTR ex = GetWindowLongPtrW(app->overlay, GWL_EXSTYLE);
-    if (app->settings.opacity_pct >= 100) {
+    uint8_t alpha;
+    if (!boo_opacity_alpha(app->settings.opacity_pct, &alpha)) {
         // Fully opaque: drop WS_EX_LAYERED entirely so it can never interfere
         // with the DWM rounded corners in the common (default) case.
         SetWindowLongPtrW(app->overlay, GWL_EXSTYLE, ex & ~(LONG_PTR)WS_EX_LAYERED);
     } else {
         SetWindowLongPtrW(app->overlay, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-        const BYTE alpha = (BYTE)(app->settings.opacity_pct * 255 / 100);
         SetLayeredWindowAttributes(app->overlay, 0, alpha, LWA_ALPHA);
     }
     InvalidateRect(app->overlay, NULL, FALSE);
@@ -429,7 +430,7 @@ static void settings_on_create(BooApp *app, HWND hwnd, const CREATESTRUCTW *cs) 
         CreateWindowW(TRACKBAR_CLASSW, NULL,
                       WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, m, boo_px(38, dpi),
                       w, boo_px(30, dpi), hwnd, (HMENU)IDC_OPACITY, cs->hInstance, NULL);
-    SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(10, 100));
+    SendMessageW(bar, TBM_SETRANGE, TRUE, MAKELPARAM(BOO_OPACITY_MIN, BOO_OPACITY_MAX));
     SendMessageW(bar, TBM_SETPOS, TRUE, app->settings.opacity_pct);
     set_opacity_label(hwnd, app->settings.opacity_pct);
 
