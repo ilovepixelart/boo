@@ -24,6 +24,10 @@
 // 0xF000, like the source.
 #define BOO_SC_SETTINGS 0x0010
 
+// onboarding.c keeps its control ids private; mirror the Download button's so
+// the driver can click it (WM_COMMAND/BN_CLICKED).
+#define IDC_OB_DOWNLOAD 3004
+
 // The app needs seconds to load a model before its windows exist.
 static HWND wait_for(const WCHAR *class_name, int timeout_ms) {
     for (int waited = 0; waited < timeout_ms; waited += 200) {
@@ -41,6 +45,15 @@ static int drive_onboarding(void) {
         return 1;
     }
     Sleep(500);
+
+    // Click Download for real: drives start_download (the combo pick, the freeze,
+    // the "Downloading…" status, and the boo_download_start spawn). The download
+    // worker is detached and never joined at teardown, so it cannot hang the
+    // quit; it is killed at process exit and its .part dies with the temp
+    // profile. The simulated failure below then drives the recovery path without
+    // waiting on the network.
+    PostMessageW(dlg, WM_COMMAND, MAKEWPARAM(IDC_OB_DOWNLOAD, BN_CLICKED), 0);
+    Sleep(300);
 
     // A progress tick then a failed download with no reason: the messages the
     // download worker posts, driving onboarding's progress and failure-recovery
