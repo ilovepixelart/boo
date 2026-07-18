@@ -98,6 +98,35 @@ static void test_restore_token_roundtrip(void) {
     g_print("  ok  save -> load -> clear\n");
 }
 
+// With a saved restore token, SelectDevices replays it so the portal re-grants
+// silently instead of prompting again; and either device state with no session
+// handle yet must yield no payload rather than a malformed request.
+static void test_select_devices_restore_token(void) {
+    g_print("SelectDevices restore token:\n");
+
+    save_restore_token("tok-abc");
+    BooTextInject ti = {0};
+    ti.session_handle = g_strdup(SESSION);
+    ti.state = BOO_INJECT_SELECTING_DEVICES;
+
+    g_autoptr(GVariant) payload = g_variant_ref_sink(make_payload(&ti, "boo_00000002"));
+    g_autoptr(GVariant) options = g_variant_get_child_value(payload, 1);
+    const char *token = NULL;
+    g_assert_true(g_variant_lookup(options, "restore_token", "&s", &token));
+    g_assert_cmpstr(token, ==, "tok-abc");
+    g_print("  ok  a saved token is replayed in SelectDevices\n");
+
+    clear_restore_token();
+    g_free(ti.session_handle);
+
+    BooTextInject no_session = {0};
+    no_session.state = BOO_INJECT_SELECTING_DEVICES;
+    g_assert_null(make_payload(&no_session, "x"));
+    no_session.state = BOO_INJECT_STARTING;
+    g_assert_null(make_payload(&no_session, "x"));
+    g_print("  ok  no session handle yields no payload\n");
+}
+
 // The paste chord must be a well-formed Ctrl+Shift+V: the modifiers enclose the
 // key so the target sees exactly that shortcut, and every press is mirrored by a
 // release in reverse order so nothing stays held (a stuck Shift or Ctrl would
@@ -247,6 +276,45 @@ static void test_shortcut_activated(void) {
     g_print("  ok  fires for our id, ignores others\n");
 }
 
+// on_response routes a portal reply: a non-zero code is a decline or rejection
+// (reported), and on success it dispatches on the step. Only the branches that
+// touch no live bus are exercised here: the reason mapping, the missing-handle
+// failure, and the already-bound path that skips BindShortcuts.
+static void test_shortcut_response(void) {
+    g_print("Shortcut response:\n");
+
+    // A fresh handle + recorder per case, since report_unavailable latches once.
+    UnavailRec r1 = {0}, r2 = {0}, r3 = {0}, r4 = {0};
+    BooGlobalShortcut declined = {.on_unavailable = record_unavailable, .user_data = &r1};
+    BooGlobalShortcut rejected = {.on_unavailable = record_unavailable, .user_data = &r2};
+    BooGlobalShortcut no_handle = {
+        .on_unavailable = record_unavailable, .user_data = &r3, .step = BOO_GS_CREATE_SESSION};
+    BooGlobalShortcut bound = {
+        .on_unavailable = record_unavailable, .user_data = &r4, .step = BOO_GS_LIST_SHORTCUTS};
+
+    g_autoptr(GVariant) empty = g_variant_ref_sink(g_variant_new_parsed("@a{sv} {}"));
+    on_response(1, empty, &declined);
+    g_assert_cmpstr(r1.reason, ==, "the shortcut was declined");
+    on_response(2, empty, &rejected);
+    g_assert_cmpstr(r2.reason, ==, "the desktop rejected the request");
+
+    // CreateSession succeeded (response 0) but returned no handle: reported.
+    on_response(0, empty, &no_handle);
+    g_assert_nonnull(g_strstr_len(r3.reason, -1, "no session handle"));
+
+    // ListShortcuts finds our shortcut already bound: skip the dialog, report
+    // nothing (this is the whole reason we call ListShortcuts first).
+    g_autoptr(GVariant) have = g_variant_ref_sink(g_variant_new_parsed(
+        "{'shortcuts': <[('toggle-record', {'description': <'x'>})]>}"));
+    on_response(0, have, &bound);
+    g_assert_cmpint(r4.count, ==, 0);
+
+    g_print("  ok  reasons mapped, missing handle reported, already-bound skips the dialog\n");
+    g_free(r1.reason);
+    g_free(r2.reason);
+    g_free(r3.reason);
+}
+
 #endif
 
 int main(void) {
@@ -254,6 +322,7 @@ int main(void) {
     test_remote_desktop();
     test_select_devices_options();
     test_restore_token_roundtrip();
+    test_select_devices_restore_token();
     test_paste_chord();
 #else
     test_global_shortcuts();
@@ -261,6 +330,7 @@ int main(void) {
     test_session_handle_lookup();
     test_shortcut_error();
     test_shortcut_activated();
+    test_shortcut_response();
 #endif
 
     g_print("PASS\n");
