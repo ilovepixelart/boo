@@ -56,6 +56,14 @@
   </requires>
 
   <releases>
+    <release version="0.6.2" date="2026-07-18">
+      <description>
+        <p>A teardown fix and internal test-coverage hardening.</p>
+        <ul>
+          <li>Closing the dictation overlay while a recording is in progress now stops it immediately, instead of leaving a background transcription worker running until the app quits.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.1" date="2026-07-18">
       <description>
         <p>Reliability fixes and shared cross-platform model handling.</p>
