@@ -32,6 +32,15 @@ for suite in global_shortcut text_inject; do
     "$OUT/$suite" || fail=1
 done
 
+# The Request/Response state machine: portal.c is #included (not linked) here so
+# its static on_response and two-completion free accounting are reachable.
+echo "── portal_core ──"
+# shellcheck disable=SC2086  # $CFLAGS/$LIBS are multi-flag; splitting is the point.
+cc -o "$OUT/portal_core" "$PROJ/linux/tests/portal_core.c" \
+    -I"$PROJ/linux/src" -I"$PROJ/include" \
+    $CFLAGS $LIBS -std=c11 -Wall -Wextra
+"$OUT/portal_core" || fail=1
+
 if [[ "$fail" -ne 0 ]]; then
     echo "FAILED"
     exit 1

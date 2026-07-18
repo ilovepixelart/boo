@@ -243,6 +243,23 @@ gen_linux() {
             for g in *.gcov; do all_covs+=("$suite/$g"); done
             cd ..
         done
+        # portal.c's Request/Response state machine, reached by #including
+        # portal.c directly (the payload suites link it as a separate TU, so its
+        # static on_response is invisible to them); gcov_to_sonar unions the
+        # portal.c.gcov it emits with the payload suites' copy.
+        mkdir -p portal_core
+        (
+            cd portal_core
+            # shellcheck disable=SC2046
+            cc --coverage -O0 -I "$root/linux/src" -I "$root/include" \
+                $(pkg-config --cflags gtk4) \
+                -c "$root/linux/tests/portal_core.c" -o portal_core.o
+            # shellcheck disable=SC2046
+            cc --coverage portal_core.o $(pkg-config --libs gtk4) -o suite
+            ./suite >/dev/null
+            gcov portal_core.gcda >/dev/null 2>&1 || true
+        )
+        for g in portal_core/*.gcov; do all_covs+=("$g"); done
         # The app itself, instrumented and driven by the pixel smoke: honest
         # end-to-end coverage for the UI glue (overlay_window, main, models,
         # waveform) that no unit harness reaches. Skipped quietly when a piece
