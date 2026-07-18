@@ -136,6 +136,16 @@ static void poke_overlay(HWND overlay) {
     // cross-process post cannot carry, so that branch stays for the live app.
     PostMessageW(overlay, WM_SETTINGCHANGE, 0, 0);
     Sleep(50);
+
+    // The transcription and streaming-result handlers with a NULL payload. A
+    // real transcript pointer cannot cross the process boundary, so this drives
+    // their dispatch and empty-result branches (on_transcribed's worker cleanup
+    // and "no speech detected"; on_live_text's post-stop straggler drop). The
+    // card push and paste delivery stay for the live app, which posts these
+    // in-process with real text after an actual transcription.
+    PostMessageW(overlay, BOO_MSG_TRANSCRIBED, 0, 0);
+    PostMessageW(overlay, BOO_MSG_LIVE, 0, 0);
+    Sleep(50);
 }
 
 static int drive_main(void) {
