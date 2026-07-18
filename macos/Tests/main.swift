@@ -307,6 +307,43 @@ check(
         (boo_model_rank($0.name), $0.name) <= (boo_model_rank($1.name), $1.name)
     }, "installed models come ranked, most capable first")
 
+// resolveModelPath precedence: an existing BOO_MODEL wins; else the saved
+// Settings choice (present and not truncated); else the best installed speech
+// model. A BOO_MODEL that is set but missing yields nil, never a fall-through.
+do {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("boo-resolve-\(ProcessInfo.processInfo.processIdentifier)")
+    let scanDir = root.appendingPathComponent("scan")
+    try? FileManager.default.createDirectory(at: scanDir, withIntermediateDirectories: true)
+    func touch(_ url: URL) {
+        FileManager.default.createFile(atPath: url.path, contents: Data("x".utf8))
+    }
+    let envFile = root.appendingPathComponent("ggml-envpick.bin")
+    let savedFile = root.appendingPathComponent("ggml-savedpick.bin")
+    let scanModel = scanDir.appendingPathComponent("ggml-zzztest.bin")
+    touch(envFile)
+    touch(savedFile)
+    touch(scanModel)
+
+    check(
+        AppDelegate.resolveModelPath(env: envFile.path, saved: nil, searchDirs: []) == envFile.path,
+        "an existing BOO_MODEL wins")
+    check(
+        AppDelegate.resolveModelPath(env: "/no/such.bin", saved: savedFile.path, searchDirs: []) == nil,
+        "a BOO_MODEL set but missing yields nil, not the saved model")
+    check(
+        AppDelegate.resolveModelPath(env: "", saved: savedFile.path, searchDirs: []) == savedFile.path,
+        "an empty BOO_MODEL is ignored, the saved model wins")
+    check(
+        AppDelegate.resolveModelPath(env: nil, saved: nil, searchDirs: [scanDir.path])?
+            .hasSuffix("ggml-zzztest.bin") == true,
+        "with no env or saved, the installed speech model is picked")
+    check(
+        AppDelegate.resolveModelPath(env: nil, saved: nil, searchDirs: []) == nil,
+        "no env, no saved, no dir yields nil")
+    try? FileManager.default.removeItem(at: root)
+}
+
 var switched: Bool?
 appDelegate.switchModel(path: "/nonexistent") { switched = $0 }
 check(switched == false, "a swap without a context reports failure")

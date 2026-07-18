@@ -378,32 +378,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// $BOO_MODEL wins outright, matching the Linux frontend.
     private func findModelPath() -> String? {
-        if let env = ProcessInfo.processInfo.environment["BOO_MODEL"], !env.isEmpty {
-            guard FileManager.default.fileExists(atPath: env) else {
-                NSLog("Boo: BOO_MODEL points at %@, which does not exist", env)
-                return nil
-            }
-            return env
+        let env = ProcessInfo.processInfo.environment["BOO_MODEL"]
+        // BOO_MODEL set but pointing at a missing file means "no model", don't
+        // silently fall through to discovery. Logged here (a UI concern); the
+        // pure resolver just returns nil for it.
+        if let env = env, !env.isEmpty, !FileManager.default.fileExists(atPath: env) {
+            NSLog("Boo: BOO_MODEL points at %@, which does not exist", env)
+            return nil
         }
+        return AppDelegate.resolveModelPath(
+            env: env,
+            saved: UserDefaults.standard.string(forKey: AppDelegate.modelDefaultsKey),
+            searchDirs: modelSearchDirs)
+    }
 
-        // A model the user explicitly picked in Settings wins over the
-        // capability ranking below; a stale choice (file deleted or truncated
-        // since) just falls through to auto-discovery.
-        if let saved = UserDefaults.standard.string(forKey: AppDelegate.modelDefaultsKey),
-            FileManager.default.fileExists(atPath: saved),
+    /// The model to load, by precedence: an existing `$BOO_MODEL` wins; else the
+    /// user's saved Settings choice when it exists and is not a truncated partial
+    /// download; else the most capable installed speech model (`boo_best_model`)
+    /// in the first search dir that holds one. `nil` for none. The environment
+    /// value is injected rather than read here (Darwin caches the process
+    /// environment, so `setenv` mid-run is invisible) which also makes the
+    /// precedence testable.
+    static func resolveModelPath(env: String?, saved: String?, searchDirs: [String]) -> String? {
+        if let env = env, !env.isEmpty {
+            return FileManager.default.fileExists(atPath: env) ? env : nil
+        }
+        if let saved = saved, FileManager.default.fileExists(atPath: saved),
             boo_model_verify(saved) != Int32(BOO_MODEL_FILE_TRUNCATED)
         {
             return saved
         }
-
         let fm = FileManager.default
-        for dir in modelSearchDirs {
+        for dir in searchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-
-            // The core applies the shared selection policy across all three
-            // frontends (boo_best_model: keep the non-truncated speech models,
-            // lowest rank wins, basename breaks ties); this only enumerates the
-            // directory and maps the winning index back to its full path.
+            // boo_best_model is the shared selection policy across the three
+            // frontends; this only enumerates the directory and maps the winning
+            // index back to its full path.
             let paths = entries.map { (dir as NSString).appendingPathComponent($0) }
             let best = withCStringArray(paths) { boo_best_model($0, Int32(paths.count)) }
             if best >= 0 { return paths[Int(best)] }
@@ -414,7 +424,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Calls `body` with a C `char *const[]` view of `strings`, valid only for
     /// the duration of the call. Each string is duplicated so its pointer stays
     /// alive across the call, then freed after.
-    private func withCStringArray<R>(
+    private static func withCStringArray<R>(
         _ strings: [String], _ body: (UnsafePointer<UnsafePointer<CChar>?>?) -> R
     ) -> R {
         let dups = strings.map { strdup($0) }
