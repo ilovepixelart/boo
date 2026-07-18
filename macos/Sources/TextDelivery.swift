@@ -51,6 +51,9 @@ enum TextDelivery {
         let oldItems = snapshotPasteboard(pasteboard)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        // The change count right after our write; if anything else writes the
+        // clipboard before the restore fires, we must not clobber it.
+        let stamp = pasteboard.changeCount
 
         // Step 2: If started via button click, re-activate the target app. If
         // started via hotkey, it is ALREADY focused, don't switch.
@@ -65,14 +68,19 @@ enum TextDelivery {
         // stop-to-pasted-text latency. Button path: 0.5s covers the re-activation.
         let delay = viaHotkey ? 0.05 : 0.5
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            performPaste()
-            onOutcome(.pasted)  // the explicit per-action outcome the spec asks for (§4.5)
+            let pasted = performPaste()
+            // A synthesized paste can be silently dropped (CGEvent creation
+            // failed); report copied-not-pasted rather than a false "pasted", so
+            // the transcript isn't reported delivered when it is only on the
+            // clipboard.
+            onOutcome(pasted ? .pasted : .copiedNeedsAccessibility)
 
-            // Restore clipboard quickly, 200ms is enough for paste to complete.
-            // Only when there was prior content, else the transcript stays put (a
-            // deliberate re-paste convenience), matching the old behavior.
+            // Restore the prior clipboard 200ms later, but only if the paste
+            // actually fired and nothing else has written the clipboard since:
+            // a failed paste leaves the transcript for a manual ⌘V, and a fresh
+            // copy the user made in the meantime must not be clobbered.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if !oldItems.isEmpty {
+                if pasted, !oldItems.isEmpty, pasteboard.changeCount == stamp {
                     pasteboard.clearContents()
                     pasteboard.writeObjects(oldItems)
                 }
@@ -95,14 +103,16 @@ enum TextDelivery {
         }
     }
 
-    private static func performPaste() {
+    /// Synthesize ⌘V. Returns false if the key events could not be created, so
+    /// the caller can report copied-not-pasted instead of a false success.
+    private static func performPaste() -> Bool {
         // CGEvent only, no AppleScript, no extra permission dialogs.
         let source = CGEventSource(stateID: .combinedSessionState)
         let vKey = pasteKeyCode
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
             let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
         else {
-            return
+            return false
         }
         down.flags = .maskCommand
         down.post(tap: .cghidEventTap)
@@ -111,6 +121,7 @@ enum TextDelivery {
         usleep(20000)
         up.flags = .maskCommand
         up.post(tap: .cghidEventTap)
+        return true
     }
 
     // The virtual key that types "v" on the active keyboard layout. Hardcoding

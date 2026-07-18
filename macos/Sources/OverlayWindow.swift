@@ -690,11 +690,15 @@ class OverlayWindow: NSWindow {
         waveformLink = nil
         trafficLightTimer?.invalidate()
         trafficLightTimer = nil
+        // The workspace observer is unsafe-unretained; drop it so a later
+        // activation can't fire the selector on a deallocated window.
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         super.close()
     }
 
     deinit {
         // Belt and suspenders for a teardown path that skips close().
         waveformLink?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }
