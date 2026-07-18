@@ -56,6 +56,16 @@
   </requires>
 
   <releases>
+    <release version="0.6.1" date="2026-07-18">
+      <description>
+        <p>Reliability fixes and shared cross-platform model handling.</p>
+        <ul>
+          <li>Fixes crashes and use-after-free hazards when quitting or closing dialogs mid-operation: in-flight downloads and desktop-portal requests are cancelled cleanly and worker threads are joined at exit.</li>
+          <li>Model download verification (SHA-256) and best-model auto-selection now share one implementation across macOS, Linux, and Windows, so the three behave identically.</li>
+          <li>Corrects the release version stamping so every platform's artifacts report the same version.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-07-17">
       <description>
         <p>In-app model management, better transcription, and local crash capture.</p>
