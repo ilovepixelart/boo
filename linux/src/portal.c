@@ -2,8 +2,10 @@
 
 #include <sys/random.h>
 
-// One in-flight request. Freed when the Response arrives, or when the call
-// itself fails, exactly one of those happens.
+// One in-flight request. The Response signal and the method-call reply each
+// complete once, in either order; the request is freed only once BOTH have.
+// Freeing on the first (the old model) left the other handler holding a dangling
+// request when a portal delivered the Response before the method reply.
 typedef struct {
     GDBusConnection *dbus; // borrowed; outlives the request
     guint *subscription;   // caller's slot, so it can tear down on free
@@ -11,6 +13,8 @@ typedef struct {
     BooPortalErrorFn on_error;
     gpointer user_data;
     GCancellable *cancellable; // own ref (may be NULL); cancelled == client gone
+    gboolean signal_pending;   // the Response signal has not completed yet
+    gboolean call_pending;     // the method-call reply has not completed yet
 } PortalRequest;
 
 // A valid D-Bus object-path component ([A-Za-z0-9_] only), unpredictable.
@@ -54,11 +58,19 @@ static char *portal_request_path(GDBusConnection *dbus, const char *token) {
     return path;
 }
 
-static void portal_request_free(PortalRequest *req) {
+// Drop the Response subscription: the signal fired, or the call failed so none
+// is coming. Safe to call once; clears the caller's slot.
+static void portal_request_drop_subscription(PortalRequest *req) {
     if (req->subscription && *req->subscription != 0) {
         g_dbus_connection_signal_unsubscribe(req->dbus, *req->subscription);
         *req->subscription = 0;
     }
+}
+
+// Free the request once both the Response signal and the method-call reply have
+// completed; whichever handler runs last frees it.
+static void portal_request_release(PortalRequest *req) {
+    if (req->signal_pending || req->call_pending) return;
     if (req->cancellable) g_object_unref(req->cancellable);
     g_free(req);
 }
@@ -78,11 +90,14 @@ static void on_response(GDBusConnection *dbus, const char *sender,
     GVariant *results = NULL;
     g_variant_get(params, "(u@a{sv})", &response, &results);
 
-    // Response fires once. Drop the subscription before the callback, so a
-    // callback that issues the next request finds the slot free.
+    // Response fires once. Drop the subscription before the callback so a
+    // callback that issues the next request finds the slot free. The request
+    // struct outlives this handler if the method-call reply has not landed yet.
+    req->signal_pending = FALSE;
+    portal_request_drop_subscription(req);
     BooPortalResponseFn cb = req->on_response;
     gpointer data = req->user_data;
-    portal_request_free(req);
+    portal_request_release(req);
 
     if (cb) cb(response, results, data);
     if (results) g_variant_unref(results);
@@ -97,21 +112,26 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     GVariant *reply =
         g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), res, &error);
 
-    // The client was torn down while this call was in flight: its user_data and
-    // its *subscription slot are freed, so invoke no callback and do not touch
-    // the subscription. The client already unsubscribed the Response signal, so
-    // just drop req (releasing its own cancellable ref).
+    req->call_pending = FALSE;
+
+    // The client was torn down while this call was in flight: it already
+    // unsubscribed the Response, so no signal is coming. Invoke no callback,
+    // account for the (never-arriving) signal, and drop the request.
     if (req->cancellable && g_cancellable_is_cancelled(req->cancellable)) {
         if (reply) g_variant_unref(reply);
         g_clear_error(&error);
-        g_object_unref(req->cancellable);
-        g_free(req);
+        req->signal_pending = FALSE;
+        portal_request_release(req);
         return;
     }
 
     if (reply) {
+        // Success: the Response signal carries the payload and completes the
+        // request. Account only for this reply; it frees req only if the signal
+        // has already fired (a portal that reordered signal-before-reply).
         g_variant_unref(reply);
-        return; // the Response signal will arrive and free the request
+        portal_request_release(req);
+        return;
     }
 
     // The call failed, so no Response is coming. Tear down the subscription we
@@ -122,6 +142,9 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     // UnknownMethod/UnknownInterface/ServiceUnknown mean the desktop has no such
     // portal at all, GNOME, for instance, only gained GlobalShortcuts in 48 ,
     // which is worth reporting differently from a call the user declined.
+    portal_request_drop_subscription(req);
+    req->signal_pending = FALSE;
+
     const gboolean unsupported =
         error && (g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD) ||
                   g_error_matches(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_INTERFACE) ||
@@ -132,7 +155,7 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     const char *reason = error && error->message ? error->message : "portal call failed";
 
     if (cb) cb(reason, unsupported, data);
-    portal_request_free(req);
+    portal_request_release(req);
     g_clear_error(&error);
 }
 
@@ -171,6 +194,10 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
     // Own ref, so the object survives the client's teardown until this request's
     // own completion drops it (the client cancels then unrefs its ref at free).
     req->cancellable = handlers->cancellable ? g_object_ref(handlers->cancellable) : NULL;
+    // Both completions are outstanding; whichever of on_response/on_call_done
+    // runs last frees req.
+    req->signal_pending = TRUE;
+    req->call_pending = TRUE;
 
     // Subscribe BEFORE calling, see the header. Skipping this is the classic
     // portal bug: it passes against a slow portal and hangs against a fast one.
