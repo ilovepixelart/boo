@@ -87,6 +87,31 @@ int main(void) {
         check(false, "fixture directory");
     }
 
+    // The missing-model hint composes the install instructions around the
+    // primary model dir; with USERPROFILE unset it falls back to the literal
+    // %USERPROFILE% placeholder rather than a bogus path.
+    {
+        WCHAR hint[1024];
+        boo_model_missing_hint(hint, ARRAYSIZE(hint));
+        check(wcsstr(hint, L".boo\\models") != NULL, "hint names the models dir");
+        check(wcsstr(hint, L"ggml-parakeet-tdt-0.6b-v3-q8_0.bin") != NULL,
+              "hint names the recommended model");
+        check(wcsstr(hint, L"ggml-base.en.bin") != NULL, "hint offers the lighter model");
+        check(wcsstr(hint, L"curl.exe -L -o") != NULL,
+              "hint gives a runnable curl command");
+        check(wcsstr(hint, L"huggingface.co") != NULL,
+              "hint points at the download host");
+
+        WCHAR saved[MAX_PATH];
+        const DWORD sn = GetEnvironmentVariableW(L"USERPROFILE", saved, MAX_PATH);
+        SetEnvironmentVariableW(L"USERPROFILE", NULL);
+        WCHAR fallback[1024];
+        boo_model_missing_hint(fallback, ARRAYSIZE(fallback));
+        check(wcsstr(fallback, L"%USERPROFILE%") != NULL,
+              "no home dir falls back to the literal placeholder");
+        if (sn > 0 && sn < MAX_PATH) SetEnvironmentVariableW(L"USERPROFILE", saved);
+    }
+
     printf("model_test: %s\n", failures ? "FAIL" : "all checks passed");
     return failures ? 1 : 0;
 }
