@@ -715,7 +715,11 @@ class OverlayWindow: NSWindow {
                     keyLayout, UInt16(code), UInt16(kUCKeyActionDown), 0,
                     UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
                     &deadKeyState, chars.count, &length, &chars)
-                if status == noErr, length == 1, Character(UnicodeScalar(chars[0])!) == character {
+                // UnicodeScalar is failable: a lone surrogate (0xD800-0xDFFF)
+                // yields nil, so bind rather than force-unwrap and crash.
+                if status == noErr, length == 1, let scalar = UnicodeScalar(chars[0]),
+                    Character(scalar) == character
+                {
                     return code
                 }
             }
