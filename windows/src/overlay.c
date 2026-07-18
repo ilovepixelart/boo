@@ -446,17 +446,21 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
     if (!live && hit >= 0 && drawn_count < BOO_HISTORY_MAX) {
         const int inset = boo_px(8, dpi);
         // The glyph + hit geometry is the pure, host-tested boo_card_icon_rects.
-        BooRect cg, xg, ch, xh;
-        boo_card_icon_rects(left, top, right, dpi, &cg, &xg, &ch, &xh);
-        RECT copy_rc = {cg.left, cg.top, cg.right, cg.bottom};
-        RECT close_rc = {xg.left, xg.top, xg.right, xg.bottom};
+        BooCardIcons icons;
+        boo_card_icon_rects(left, top, right, dpi, &icons);
+        RECT copy_rc = {icons.copy_glyph.left, icons.copy_glyph.top,
+                        icons.copy_glyph.right, icons.copy_glyph.bottom};
+        RECT close_rc = {icons.close_glyph.left, icons.close_glyph.top,
+                         icons.close_glyph.right, icons.close_glyph.bottom};
         const bool flashing = hit == flash_card && GetTickCount64() < flash_until;
         // accent.confirm is the theme's palette[14], the same token the idle
         // waveform uses; a hardcoded color would ignore the picked theme.
         paint_icon_copy(dc, copy_rc, flashing ? pal->wave_idle : pal->subtext);
         paint_icon_close(dc, close_rc, pal->subtext, true);
-        copy_hit[drawn_count] = (RECT){ch.left, ch.top, ch.right, ch.bottom};
-        close_hit[drawn_count] = (RECT){xh.left, xh.top, xh.right, xh.bottom};
+        copy_hit[drawn_count] = (RECT){icons.copy_hit.left, icons.copy_hit.top,
+                                       icons.copy_hit.right, icons.copy_hit.bottom};
+        close_hit[drawn_count] = (RECT){icons.close_hit.left, icons.close_hit.top,
+                                        icons.close_hit.right, icons.close_hit.bottom};
         drawn_card[drawn_count] = hit;
         drawn_count++;
 

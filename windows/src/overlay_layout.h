@@ -26,6 +26,15 @@ typedef struct {
     int bottom;
 } BooRect;
 
+// A transcript card's clickable icons: the copy and close glyph draw rects and
+// their inflated hit rects. Grouped so boo_card_icon_rects returns one out-param.
+typedef struct {
+    BooRect copy_glyph;
+    BooRect close_glyph;
+    BooRect copy_hit;
+    BooRect close_hit;
+} BooCardIcons;
+
 // Height of one transcript card whose wrapped text measured `text_h` device px
 // tall. A live (provisional) card drops the header row and uses a tighter top
 // pad. `dpi` scales the paddings (96 == identity), matching app.h's boo_px.
@@ -41,7 +50,6 @@ int boo_cards_layout(const int *heights, int total, int gap, int area_top, int a
 // card spanning [card_left, card_right] with top edge card_top, at `dpi`. Mirrors
 // overlay.c's paint_card so drawing and click routing agree on the geometry.
 void boo_card_icon_rects(int card_left, int card_top, int card_right, unsigned dpi,
-                         BooRect *copy_glyph, BooRect *close_glyph, BooRect *copy_hit,
-                         BooRect *close_hit);
+                         BooCardIcons *out);
 
 #endif

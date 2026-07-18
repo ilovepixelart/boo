@@ -89,8 +89,10 @@ int main(void) {
 
     // ── card glyph + hit geometry: anchoring, dpi scaling, non-overlap ──
     {
-        BooRect cg, xg, ch, xh;
-        boo_card_icon_rects(100, 200, 400, 96, &cg, &xg, &ch, &xh);
+        BooCardIcons ic;
+        boo_card_icon_rects(100, 200, 400, 96, &ic);
+        const BooRect cg = ic.copy_glyph, xg = ic.close_glyph;
+        const BooRect ch = ic.copy_hit, xh = ic.close_hit;
         check(cg.right - cg.left == 12 && cg.bottom - cg.top == 12,
               "the copy glyph is 12px square");
         check(xg.right - xg.left == 12 && xg.bottom - xg.top == 12,
@@ -106,12 +108,11 @@ int main(void) {
 
     // ── the glyph geometry scales with dpi (2x doubles the sizes) ──
     {
-        BooRect cg, xg, ch, xh;
-        boo_card_icon_rects(0, 0, 400, 192, &cg, &xg, &ch, &xh);
-        check(cg.right - cg.left == 24, "the glyph is 24px square at 2x dpi");
-        check(cg.left == 16, "the inset doubles at 2x dpi (8 -> 16)");
-        (void)ch;
-        (void)xh;
+        BooCardIcons ic;
+        boo_card_icon_rects(0, 0, 400, 192, &ic);
+        check(ic.copy_glyph.right - ic.copy_glyph.left == 24,
+              "the glyph is 24px square at 2x dpi");
+        check(ic.copy_glyph.left == 16, "the inset doubles at 2x dpi (8 -> 16)");
     }
 
     printf(failures ? "overlay_layout_test: FAIL\n" : "overlay_layout_test: ok\n");
