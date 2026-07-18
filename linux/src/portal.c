@@ -86,6 +86,16 @@ static void on_response(GDBusConnection *dbus, const char *sender,
     (void)signal;
     PortalRequest *req = user_data;
 
+    // A wrong-signature Response is dropped rather than fed to g_variant_get
+    // (which would emit a GLib-CRITICAL, fatal under G_DEBUG=fatal-criticals);
+    // completing the request keeps the state machine from stalling.
+    if (!g_variant_is_of_type(params, G_VARIANT_TYPE("(ua{sv})"))) {
+        req->signal_pending = FALSE;
+        portal_request_drop_subscription(req);
+        portal_request_release(req);
+        return;
+    }
+
     guint32 response = 0;
     GVariant *results = NULL;
     g_variant_get(params, "(u@a{sv})", &response, &results);
@@ -201,8 +211,11 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
 
     // Subscribe BEFORE calling, see the header. Skipping this is the classic
     // portal bug: it passes against a slow portal and hangs against a fast one.
+    // Filter to the portal's bus name (not any sender): the CSPRNG token in the
+    // path already stops a co-resident process racing for the reply, this is
+    // belt-and-suspenders so only the portal can drive on_response at all.
     *subscription = g_dbus_connection_signal_subscribe(
-        dbus, NULL, PORTAL_IFACE_REQUEST, "Response", request_path, NULL,
+        dbus, PORTAL_BUS_NAME, PORTAL_IFACE_REQUEST, "Response", request_path, NULL,
         G_DBUS_SIGNAL_FLAGS_NONE, on_response, req, NULL);
 
     g_dbus_connection_call(dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, iface, method,

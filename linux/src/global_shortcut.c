@@ -72,7 +72,10 @@ static void on_activated(GDBusConnection *dbus, const char *sender,
     (void)signal;
     BooGlobalShortcut *gs = user_data;
 
-    // (osa{sv}), child 1 is the ID of the shortcut that fired.
+    // (osa{sv}), child 1 is the ID of the shortcut that fired. Guard the shape
+    // first: g_variant_get_child aborts on a wrong-typed or short tuple, so a
+    // malformed Activated signal must be dropped, not dereferenced.
+    if (!g_variant_is_of_type(params, G_VARIANT_TYPE("(osa{sv})"))) return;
     const char *shortcut_id = NULL;
     g_variant_get_child(params, 1, "&s", &shortcut_id);
     if (!shortcut_id || !g_str_equal(shortcut_id, BOO_SHORTCUT_ID)) return;
@@ -151,9 +154,11 @@ static void on_session_created(BooGlobalShortcut *gs, GVariant *results) {
     g_debug("Boo: global shortcuts session=%s", gs->session_handle);
 
     // Subscribe to activations before binding, so an early one can't be missed.
+    // Filter to the portal's bus name so only it can drive on_activated.
     gs->activate_subscription = g_dbus_connection_signal_subscribe(
-        gs->dbus, NULL, PORTAL_IFACE_GLOBAL_SHORTCUTS, "Activated", PORTAL_OBJECT_PATH,
-        gs->session_handle, G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH, on_activated, gs, NULL);
+        gs->dbus, PORTAL_BUS_NAME, PORTAL_IFACE_GLOBAL_SHORTCUTS, "Activated",
+        PORTAL_OBJECT_PATH, gs->session_handle, G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_PATH,
+        on_activated, gs, NULL);
 
     // Ask what we already have before asking for anything new.
     request(gs, BOO_GS_LIST_SHORTCUTS);
