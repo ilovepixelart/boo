@@ -457,7 +457,7 @@ pub fn build(b: *std.Build) void {
         // test so its statics are reachable; two exes because model.c and
         // download.c each define their own static string helpers.
         const win_tests_step = b.step("win-tests", "Run Windows frontend logic tests");
-        for ([_][]const u8{ "model_test", "download_test", "download_transfer_test", "inject_test", "crash_test", "waveform_test", "history_test", "palette_test", "utf8_test", "modelsel_test", "opacity_test", "overlay_layout_test", "settings_test", "tray_fmt_test" }) |test_name| {
+        for ([_][]const u8{ "model_test", "download_test", "download_transfer_test", "inject_test", "inject_plan_test", "crash_test", "waveform_test", "history_test", "palette_test", "utf8_test", "modelsel_test", "opacity_test", "overlay_layout_test", "settings_test", "tray_fmt_test" }) |test_name| {
             const t = b.addExecutable(.{
                 .name = test_name,
                 .root_module = b.createModule(.{
