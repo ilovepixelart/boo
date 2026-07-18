@@ -764,6 +764,12 @@ test "boo_best_model applies the shared selection policy" {
     const truncated = try Sized.make(&bt, tmp, "ggml-tiny.en-q5_1.bin", 5); // wrong size
     defer _ = libc.remove(truncated);
 
+    // base.en on its own is a valid pick: this pins that its sparse fixture
+    // verifies as non-truncated, so the ranking case below genuinely tests that
+    // small.en OUTRANKS a usable base.en rather than base.en being filtered out.
+    const base_only = [_][*:0]const u8{base_en};
+    try testing.expectEqual(@as(c_int, 0), boo_best_model(&base_only, 1));
+
     // small.en outranks base.en, so it wins even when base is listed first.
     const ranked = [_][*:0]const u8{ base_en, small_en };
     try testing.expectEqual(@as(c_int, 1), boo_best_model(&ranked, 2));
