@@ -21,6 +21,7 @@
 #include "history.h"
 #include "hotkey.h"
 #include "inject.h"
+#include "overlay_layout.h"
 #include "palette.h"
 #include "settings.h"
 #include "tray.h"
@@ -59,7 +60,6 @@
 #define CARD_RADIUS       10
 #define CARD_GAP          8
 #define CARD_PAD_X        12
-#define HEADER_H          20
 #define ICON_SIZE         12
 // Per-card display cap; the clipboard always carries the full text.
 #define CARD_MAX_UNITS 4096
@@ -429,14 +429,13 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
     const int left = cc->left;
     const int right = cc->right;
     const int pad_x = boo_px(CARD_PAD_X, dpi);
-    const int header_h = live ? 0 : boo_px(HEADER_H, dpi);
+    const int header_h = live ? 0 : boo_px(BOO_CARD_HEADER_H, dpi);
     RECT text_rc = {left + pad_x, 0, right - pad_x, 0};
     RECT measure = text_rc;
     HGDIOBJ old_font = SelectObject(dc, font_text);
     DrawTextW(dc, text, -1, &measure, DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
     const int text_h = measure.bottom - measure.top;
-    const int card_h =
-        header_h + (live ? boo_px(8, dpi) : boo_px(11, dpi)) + text_h + boo_px(10, dpi);
+    const int card_h = boo_card_height(text_h, live, dpi);
     if (measure_only) {
         SelectObject(dc, old_font);
         return card_h;
@@ -502,21 +501,15 @@ static void paint_cards(HDC dc, BooApp *app, const Palette *pal, UINT dpi, RECT 
         heights[idx++] = paint_card(&cc, 0, app->live_text, true, -1, true);
     const int total = idx;
 
-    // Find the first card that still fits when stacking up from the bottom.
-    int first = total;
-    int used = 0;
-    for (int i = total - 1; i >= 0; i--) {
-        const int need = heights[i] + (used > 0 ? gap : 0);
-        if (used + need > area.bottom - area.top) break;
-        used += need;
-        first = i;
-    }
-
-    int y = area.top;
-    for (int i = first; i < total; i++) {
+    // The core picks which newest cards fit and where they sit; this only draws.
+    BooCardSlot slots[BOO_HISTORY_MAX + 1];
+    const int n = boo_cards_layout(heights, total, gap, area.top, area.bottom - area.top,
+                                   slots, cap);
+    for (int s = 0; s < n; s++) {
+        const int i = slots[s].index;
         const bool live = app->live_text && i == total - 1;
         const WCHAR *text = live ? app->live_text : app->cards[i];
-        y += paint_card(&cc, y, text, live, live ? -1 : i, false) + gap;
+        paint_card(&cc, slots[s].top, text, live, live ? -1 : i, false);
     }
 }
 
