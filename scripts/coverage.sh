@@ -150,6 +150,13 @@ windows_native_slice() {
         "$gcc_bin" -O2 -std=c11 -I "$rootw/include" -I "$rootw/windows/src" \
             "$rootw/windows/tests/drive_app.c" -luser32 -o drive_app.exe
 
+        # Seed a themes dir beside the app so load_themes enumerates and parses
+        # real Ghostty theme files, and drive_app's Settings theme-select fires
+        # against a populated list. themes_dir checks exe_dir\themes first and the
+        # app runs from here; two files exercise the grow-then-sort path.
+        mkdir -p themes
+        cp "$rootw/themes/0x96f" "$rootw/themes/Abernathy" themes/ 2>/dev/null || true
+
         # Bound the app's lifetime: a hung quit must not hang the CI job.
         local wrap=()
         command -v timeout >/dev/null && wrap=(timeout 180)
