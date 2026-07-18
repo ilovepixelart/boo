@@ -80,12 +80,26 @@ enum TextDelivery {
             // a failed paste leaves the transcript for a manual ⌘V, and a fresh
             // copy the user made in the meantime must not be clobbered.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if pasted, !oldItems.isEmpty, pasteboard.changeCount == stamp {
+                if shouldRestoreClipboard(
+                    pasted: pasted, hadPriorItems: !oldItems.isEmpty,
+                    currentChangeCount: pasteboard.changeCount, stamp: stamp)
+                {
                     pasteboard.clearContents()
                     pasteboard.writeObjects(oldItems)
                 }
             }
         }
+    }
+
+    /// Whether to restore the prior clipboard after a paste: only when the paste
+    /// actually fired, there was prior content to restore, and nothing else has
+    /// written the clipboard since our own write (comparing the change count to
+    /// the stamp taken right after we wrote), so a fresh user copy is not
+    /// clobbered and a failed paste leaves the transcript for a manual ⌘V.
+    static func shouldRestoreClipboard(
+        pasted: Bool, hadPriorItems: Bool, currentChangeCount: Int, stamp: Int
+    ) -> Bool {
+        pasted && hadPriorItems && currentChangeCount == stamp
     }
 
     /// Deep-copy every pasteboard item across all its types, so the snapshot

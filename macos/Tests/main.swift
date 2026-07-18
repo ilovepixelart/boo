@@ -634,6 +634,39 @@ if let vKey = TextDelivery.resolveKeyCode(for: "v") {
 }
 check(TextDelivery.pasteKeyCode < 128, "the paste key is a valid virtual key")
 
+// shouldRestoreClipboard: restore only when the paste fired, there was prior
+// content, and nothing else has written the clipboard since our stamp.
+check(
+    TextDelivery.shouldRestoreClipboard(
+        pasted: true, hadPriorItems: true, currentChangeCount: 5, stamp: 5),
+    "restore when pasted, had prior content, and unchanged")
+check(
+    !TextDelivery.shouldRestoreClipboard(
+        pasted: false, hadPriorItems: true, currentChangeCount: 5, stamp: 5),
+    "a failed paste keeps the transcript, no restore")
+check(
+    !TextDelivery.shouldRestoreClipboard(
+        pasted: true, hadPriorItems: false, currentChangeCount: 5, stamp: 5),
+    "nothing to restore means no restore")
+check(
+    !TextDelivery.shouldRestoreClipboard(
+        pasted: true, hadPriorItems: true, currentChangeCount: 6, stamp: 5),
+    "a user copy since our write is not clobbered")
+
+// Without Accessibility (the CI runner), deliver falls back to copy-only: the
+// transcript lands on the clipboard and the outcome says copied-not-pasted.
+if !PermissionsManager.hasAccessibility {
+    NSPasteboard.general.clearContents()
+    var copiedOutcome = false
+    TextDelivery.deliver("copy fallback", to: nil, viaHotkey: false) {
+        if case .copiedNeedsAccessibility = $0 { copiedOutcome = true }
+    }
+    check(copiedOutcome, "no Accessibility yields the copied-needs-accessibility outcome")
+    check(
+        NSPasteboard.general.string(forType: .string) == "copy fallback",
+        "the transcript is placed on the clipboard")
+}
+
 overlay.startDisplayLink()
 overlay.stopDisplayLink()
 check(overlay.waveformLink?.isPaused == true, "the waveform display link pauses on stop")
