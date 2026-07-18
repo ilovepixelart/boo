@@ -346,6 +346,19 @@ class OverlayWindow: NSWindow {
         liveBubbleLabel = nil
     }
 
+    /// The app a finished dictation should land in: whatever held focus before
+    /// Boo. When Boo itself is frontmost (always so for the Record button, and
+    /// for the hotkey once Boo's window has been clicked) the real target is the
+    /// previously-active app; otherwise it is the current frontmost app. Pinned
+    /// at record start, never at transcription time: by then focus has moved to
+    /// Boo and the answer would always be Boo.
+    static func dictationTarget(
+        frontmost: NSRunningApplication?, previous: NSRunningApplication?,
+        selfBundleID: String?
+    ) -> NSRunningApplication? {
+        (frontmost?.bundleIdentifier == selfBundleID) ? previous : (frontmost ?? previous)
+    }
+
     func startRecording(viaHotkey: Bool = false) {
         // One take at a time. The hotkey can fire during the multi-second
         // transcription that follows a stop; the core ignores the start then,
@@ -363,11 +376,9 @@ class OverlayWindow: NSWindow {
         // activate, so it's the right answer whenever Boo itself holds focus ,
         // which is always true for the Record button, and true for the hotkey
         // too once Boo's window has been clicked.
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        targetApp =
-            (frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier)
-            ? previousApp
-            : (frontmost ?? previousApp)
+        targetApp = OverlayWindow.dictationTarget(
+            frontmost: NSWorkspace.shared.frontmostApplication, previous: previousApp,
+            selfBundleID: Bundle.main.bundleIdentifier)
 
         // Instant UI feedback
         isRecording = true
@@ -429,23 +440,31 @@ class OverlayWindow: NSWindow {
                 // The provisional live bubble is superseded by the final
                 // transcript (or by "no speech") either way.
                 self.removeLiveBubble()
-                if let text = text, !text.isEmpty {
-                    self.addTranscript(text)
-                    if self.autoType {
-                        self.typeTextIntoFocusedApp(text)
-                    } else {
-                        // Auto-type off means clipboard-only, never silent:
-                        // the transcript must still land somewhere pasteable.
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                        self.flashStatus("copied")
-                    }
-                } else {
-                    self.statusLabel.stringValue = "no speech detected"
-                }
+                self.deliverTranscript(text)
                 // Stop display link, no animation needed when idle
                 self.stopDisplayLink()
             }
+        }
+    }
+
+    /// Route a finished transcript to its destination. Empty or nil (no speech)
+    /// only updates the status line; otherwise the transcript joins the history
+    /// and is either typed into the focused app (auto-type on) or left on the
+    /// clipboard with a "copied" flash (auto-type off: clipboard-only, never
+    /// silent). Split from stopAndTranscribe's background-completion closure so
+    /// the routing is testable without a live recording.
+    func deliverTranscript(_ text: String?) {
+        guard let text = text, !text.isEmpty else {
+            statusLabel.stringValue = "no speech detected"
+            return
+        }
+        addTranscript(text)
+        if autoType {
+            typeTextIntoFocusedApp(text)
+        } else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            flashStatus("copied")
         }
     }
 

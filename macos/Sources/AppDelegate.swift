@@ -195,34 +195,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateStatusBar() {
         guard let ctx = booCtx, let button = statusItem?.button else { return }
 
-        let recording = boo_is_recording(ctx)
-        let transcribing = boo_is_transcribing(ctx)
-
-        if recording {
-            // Red waveform plus a live timer.
-            button.image = NSImage(
-                systemSymbolName: "waveform",
-                accessibilityDescription: "Boo, recording")
-            button.contentTintColor = .systemRed
-            button.title = AppDelegate.recordingTimeLabel(samples: boo_get_audio_samples(ctx))
-        } else if transcribing {
-            // Transcription blocks for seconds on a big model; without this the
-            // menu bar snapped straight back to idle and looked like nothing
-            // happened.
-            button.image = NSImage(
-                systemSymbolName: "waveform.badge.magnifyingglass",
-                accessibilityDescription: "Boo, transcribing")
-            button.contentTintColor = .secondaryLabelColor
-            button.title = ""
-        } else {
-            button.image = NSImage(
-                systemSymbolName: "waveform",
-                accessibilityDescription: "Boo")
-            button.contentTintColor = nil  // system default
-            button.title = ""
-        }
-
+        let look = AppDelegate.statusBarAppearance(
+            recording: boo_is_recording(ctx), transcribing: boo_is_transcribing(ctx),
+            samples: boo_get_audio_samples(ctx))
+        button.image = NSImage(
+            systemSymbolName: look.symbol, accessibilityDescription: look.accessibility)
+        button.contentTintColor = look.tint
+        button.title = look.title
         button.image?.size = NSSize(width: 18, height: 18)
+    }
+
+    /// The status-bar button's look for the current core state: a red waveform
+    /// with a live timer while recording, a dimmed "magnifying" waveform while
+    /// transcribing (the transcribe call blocks for seconds on a big model, so
+    /// the menu bar must not snap back to idle), and the plain waveform when
+    /// idle. Pure so the state-to-look mapping is testable without a live
+    /// recording; updateStatusBar applies the tuple to the NSButton.
+    static func statusBarAppearance(recording: Bool, transcribing: Bool, samples: Int32)
+        -> (symbol: String, accessibility: String, tint: NSColor?, title: String)
+    {
+        if recording {
+            return ("waveform", "Boo, recording", .systemRed, recordingTimeLabel(samples: samples))
+        }
+        if transcribing {
+            return ("waveform.badge.magnifyingglass", "Boo, transcribing", .secondaryLabelColor, "")
+        }
+        return ("waveform", "Boo", nil, "")
     }
 
     @objc func recordingStateChanged(_ notification: Notification) {

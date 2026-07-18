@@ -415,6 +415,26 @@ check(
     AppDelegate.recordingTimeLabel(samples: 16000 * 125) == " 2:05",
     "125s is 2:05 with a zero-padded seconds field")
 
+// statusBarAppearance maps the core state to the button's look: a red waveform
+// with the live timer while recording, the dimmed magnifier while transcribing,
+// and the plain untinted waveform when idle. Recording wins over transcribing.
+let recLook = AppDelegate.statusBarAppearance(recording: true, transcribing: false, samples: 16000 * 5)
+check(
+    recLook.symbol == "waveform" && recLook.tint == .systemRed && recLook.title == " 5s",
+    "recording shows a red waveform with the live timer")
+let txLook = AppDelegate.statusBarAppearance(recording: false, transcribing: true, samples: 0)
+check(
+    txLook.symbol == "waveform.badge.magnifyingglass" && txLook.tint == .secondaryLabelColor
+        && txLook.title.isEmpty,
+    "transcribing shows the dimmed magnifier waveform with no timer")
+let idleLook = AppDelegate.statusBarAppearance(recording: false, transcribing: false, samples: 0)
+check(
+    idleLook.symbol == "waveform" && idleLook.tint == nil && idleLook.title.isEmpty,
+    "idle shows the plain untinted waveform with no timer")
+check(
+    AppDelegate.statusBarAppearance(recording: true, transcribing: true, samples: 0).tint == .systemRed,
+    "recording takes precedence over transcribing")
+
 var switched: Bool?
 appDelegate.switchModel(path: "/nonexistent") { switched = $0 }
 check(switched == false, "a swap without a context reports failure")
@@ -548,6 +568,24 @@ if let other = NSWorkspace.shared.runningApplications.first(where: {
             name: NSWorkspace.didActivateApplicationNotification, object: nil,
             userInfo: [NSWorkspace.applicationUserInfoKey: other]))
     check(overlay.previousApp === other, "the overlay tracks the last non-Boo app")
+
+    // dictationTarget pins the paste destination at record-start: when Boo is
+    // frontmost (its bundle id matches self) the target is the previously-active
+    // app; when another app is frontmost that app is the target; a nil frontmost
+    // falls back to the previously-active app.
+    let current = NSRunningApplication.current
+    check(
+        OverlayWindow.dictationTarget(
+            frontmost: other, previous: current, selfBundleID: other.bundleIdentifier) === current,
+        "when Boo is frontmost the target is the previously-active app")
+    check(
+        OverlayWindow.dictationTarget(
+            frontmost: other, previous: current, selfBundleID: "com.boo.not-the-frontmost") === other,
+        "when another app is frontmost it is the dictation target")
+    check(
+        OverlayWindow.dictationTarget(
+            frontmost: nil, previous: other, selfBundleID: Bundle.main.bundleIdentifier) === other,
+        "a nil frontmost app falls back to the previously-active app")
 }
 
 overlay.addTranscript("harness bubble one")
@@ -610,6 +648,44 @@ if !PermissionsManager.hasAccessibility {
             && NSPasteboard.general.string(forType: .string) == "delivery fallback",
         "auto-type without Accessibility copies the transcript and explains")
 }
+
+// ── deliverTranscript routing (extracted from stopAndTranscribe) ──
+// Nil or empty text (no speech) only updates the status line and adds nothing;
+// real text joins the history and, with auto-type off, is left on the clipboard
+// with a "copied" flash. Sentinel context, so no core call.
+let beforeNoSpeech = overlay.transcripts.count
+overlay.deliverTranscript(nil)
+check(
+    overlay.statusLabel.stringValue == "no speech detected"
+        && overlay.transcripts.count == beforeNoSpeech,
+    "a nil transcript reports no speech and adds no bubble")
+overlay.deliverTranscript("")
+check(
+    overlay.statusLabel.stringValue == "no speech detected",
+    "an empty transcript also reports no speech")
+
+overlay.autoType = false
+let beforeCopy = overlay.transcripts.count
+NSPasteboard.general.clearContents()
+overlay.deliverTranscript("copy me")
+check(
+    overlay.transcripts.count == beforeCopy + 1
+        && NSPasteboard.general.string(forType: .string) == "copy me"
+        && overlay.statusLabel.stringValue == "copied",
+    "auto-type off records the transcript and leaves it on the clipboard")
+
+// Auto-type on routes through typeTextIntoFocusedApp; only run where it will not
+// synthesize a real keystroke (the headless CI runner has no Accessibility), and
+// assert the safe, layout-independent effect: the transcript still reaches history.
+if !PermissionsManager.hasAccessibility {
+    overlay.autoType = true
+    let beforeType = overlay.transcripts.count
+    overlay.deliverTranscript("type me")
+    check(
+        overlay.transcripts.count == beforeType + 1,
+        "auto-type on records the transcript before delivering it")
+}
+overlay.autoType = true
 
 // ── TextDelivery (extracted from OverlayWindow) ──
 // snapshotPasteboard must deep-copy every type so a non-text clipboard survives
