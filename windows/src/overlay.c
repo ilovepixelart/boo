@@ -60,7 +60,6 @@
 #define CARD_RADIUS       10
 #define CARD_GAP          8
 #define CARD_PAD_X        12
-#define ICON_SIZE         12
 // Per-card display cap; the clipboard always carries the full text.
 #define CARD_MAX_UNITS 4096
 
@@ -445,22 +444,19 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
     fill_round(dc, card, boo_px(CARD_RADIUS, dpi), live ? pal->card_live : pal->card);
 
     if (!live && hit >= 0 && drawn_count < BOO_HISTORY_MAX) {
-        const int icon = boo_px(ICON_SIZE, dpi);
         const int inset = boo_px(8, dpi);
-        RECT copy_rc = {left + inset, top + boo_px(5, dpi), left + inset + icon,
-                        top + boo_px(5, dpi) + icon};
-        RECT close_rc = {right - inset - icon, top + boo_px(5, dpi), right - inset,
-                         top + boo_px(5, dpi) + icon};
+        // The glyph + hit geometry is the pure, host-tested boo_card_icon_rects.
+        BooRect cg, xg, ch, xh;
+        boo_card_icon_rects(left, top, right, dpi, &cg, &xg, &ch, &xh);
+        RECT copy_rc = {cg.left, cg.top, cg.right, cg.bottom};
+        RECT close_rc = {xg.left, xg.top, xg.right, xg.bottom};
         const bool flashing = hit == flash_card && GetTickCount64() < flash_until;
         // accent.confirm is the theme's palette[14], the same token the idle
         // waveform uses; a hardcoded color would ignore the picked theme.
         paint_icon_copy(dc, copy_rc, flashing ? pal->wave_idle : pal->subtext);
         paint_icon_close(dc, close_rc, pal->subtext, true);
-        // Generous hit areas around the small glyphs.
-        InflateRect(&copy_rc, boo_px(6, dpi), boo_px(6, dpi));
-        InflateRect(&close_rc, boo_px(6, dpi), boo_px(6, dpi));
-        copy_hit[drawn_count] = copy_rc;
-        close_hit[drawn_count] = close_rc;
+        copy_hit[drawn_count] = (RECT){ch.left, ch.top, ch.right, ch.bottom};
+        close_hit[drawn_count] = (RECT){xh.left, xh.top, xh.right, xh.bottom};
         drawn_card[drawn_count] = hit;
         drawn_count++;
 

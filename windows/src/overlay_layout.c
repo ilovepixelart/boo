@@ -6,6 +6,28 @@ static int scale(int base, unsigned dpi) {
     return (int)(((long long)base * (long long)dpi + 48) / 96);
 }
 
+// Card glyph edge length in 96-dpi logical px (mirrors overlay.c's ICON_SIZE).
+#define BOO_CARD_ICON_SIZE 12
+
+static BooRect inflate(BooRect r, int by) {
+    return (BooRect){r.left - by, r.top - by, r.right + by, r.bottom + by};
+}
+
+void boo_card_icon_rects(int card_left, int card_top, int card_right, unsigned dpi,
+                         BooRect *copy_glyph, BooRect *close_glyph, BooRect *copy_hit,
+                         BooRect *close_hit) {
+    const int icon = scale(BOO_CARD_ICON_SIZE, dpi);
+    const int inset = scale(8, dpi);
+    const int top = card_top + scale(5, dpi);
+    *copy_glyph = (BooRect){card_left + inset, top, card_left + inset + icon, top + icon};
+    *close_glyph =
+        (BooRect){card_right - inset - icon, top, card_right - inset, top + icon};
+    // Generous hit areas around the small glyphs.
+    const int by = scale(6, dpi);
+    *copy_hit = inflate(*copy_glyph, by);
+    *close_hit = inflate(*close_glyph, by);
+}
+
 int boo_card_height(int text_h, bool live, unsigned dpi) {
     const int header = live ? 0 : scale(BOO_CARD_HEADER_H, dpi);
     const int top_pad = live ? scale(8, dpi) : scale(11, dpi);

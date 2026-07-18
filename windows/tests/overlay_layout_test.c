@@ -87,6 +87,33 @@ int main(void) {
               "no cards yields count 0");
     }
 
+    // ── card glyph + hit geometry: anchoring, dpi scaling, non-overlap ──
+    {
+        BooRect cg, xg, ch, xh;
+        boo_card_icon_rects(100, 200, 400, 96, &cg, &xg, &ch, &xh);
+        check(cg.right - cg.left == 12 && cg.bottom - cg.top == 12,
+              "the copy glyph is 12px square");
+        check(xg.right - xg.left == 12 && xg.bottom - xg.top == 12,
+              "the close glyph is 12px square");
+        check(cg.left == 108, "the copy glyph is inset 8 from the card's left edge");
+        check(xg.right == 392, "the close glyph is inset 8 from the card's right edge");
+        check(cg.top == 205 && xg.top == 205, "both glyphs sit 5px below the card top");
+        check(ch.left == cg.left - 6 && ch.right == cg.right + 6 &&
+                  ch.top == cg.top - 6 && ch.bottom == cg.bottom + 6,
+              "the copy hit rect is the glyph inflated by 6 on every side");
+        check(ch.right < xh.left, "the copy and close hit areas do not overlap");
+    }
+
+    // ── the glyph geometry scales with dpi (2x doubles the sizes) ──
+    {
+        BooRect cg, xg, ch, xh;
+        boo_card_icon_rects(0, 0, 400, 192, &cg, &xg, &ch, &xh);
+        check(cg.right - cg.left == 24, "the glyph is 24px square at 2x dpi");
+        check(cg.left == 16, "the inset doubles at 2x dpi (8 -> 16)");
+        (void)ch;
+        (void)xh;
+    }
+
     printf(failures ? "overlay_layout_test: FAIL\n" : "overlay_layout_test: ok\n");
     return failures ? 1 : 0;
 }
