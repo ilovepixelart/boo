@@ -511,6 +511,26 @@ check(overlay.canBecomeKey && overlay.canBecomeMain, "the overlay can become the
 // while Settings keeps the app alive would otherwise over-release it).
 check(!overlay.isReleasedWhenClosed, "the overlay is not auto-released on close")
 
+// updateLiveTranscript builds ONE provisional bubble and replaces its text in
+// place (not one bubble per stream tick); removeLiveBubble clears it. Pure UI
+// on the sentinel context, so no core call. Runs on the empty stack, before the
+// permanent-transcript tests below.
+overlay.isRecording = true
+func liveBubbleText() -> String? {
+    (overlay.transcriptStack.arrangedSubviews.last?.subviews.first as? NSTextField)?.stringValue
+}
+overlay.updateLiveTranscript("live one")
+check(overlay.transcriptStack.arrangedSubviews.count == 1, "a live bubble is added while recording")
+check(liveBubbleText() == "live one", "the live bubble shows the committed text")
+overlay.updateLiveTranscript("live two")
+check(overlay.transcriptStack.arrangedSubviews.count == 1, "a second tick replaces the bubble in place")
+check(liveBubbleText() == "live two", "the live bubble text updates in place")
+overlay.updateLiveTranscript("")
+check(liveBubbleText() == "live two", "an empty live update is a no-op")
+overlay.removeLiveBubble()
+check(overlay.transcriptStack.arrangedSubviews.isEmpty, "removeLiveBubble clears the live bubble")
+overlay.isRecording = false
+
 overlay.appDidActivate(Notification(name: NSWorkspace.didActivateApplicationNotification))  // no app: ignored
 if let other = NSWorkspace.shared.runningApplications.first(where: {
     $0.bundleIdentifier != nil && $0.bundleIdentifier != Bundle.main.bundleIdentifier

@@ -306,8 +306,9 @@ class OverlayWindow: NSWindow {
     }
 
     /// Show the committed-so-far text in a dimmed, button-less bubble while
-    /// still recording. Replaced by the real transcript bubble on stop.
-    private func updateLiveTranscript(_ text: String) {
+    /// still recording. Replaced by the real transcript bubble on stop. Internal
+    /// (not private) so the headless harness can pin the in-place replacement.
+    func updateLiveTranscript(_ text: String) {
         guard isRecording, !text.isEmpty else { return }
 
         if liveBubbleContainer == nil {
@@ -339,7 +340,7 @@ class OverlayWindow: NSWindow {
         layoutTranscriptStack()
     }
 
-    private func removeLiveBubble() {
+    func removeLiveBubble() {
         liveBubbleContainer?.removeFromSuperview()
         liveBubbleContainer = nil
         liveBubbleLabel = nil
