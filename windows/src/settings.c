@@ -86,7 +86,10 @@ static void load_themes(BooApp *app) {
             app->settings.themes = grown;
             cap = ncap;
         }
-        app->settings.themes[app->settings.theme_count].name = _wcsdup(e.cFileName);
+        // OOM: skip rather than store a NULL name that later crashes wcscmp/wcslen.
+        WCHAR *name = _wcsdup(e.cFileName);
+        if (!name) continue;
+        app->settings.themes[app->settings.theme_count].name = name;
         app->settings.themes[app->settings.theme_count].colors = colors;
         app->settings.theme_count++;
     } while (FindNextFileW(it, &e));
@@ -228,7 +231,12 @@ typedef struct {
 static DWORD WINAPI model_swap_worker(LPVOID param) {
     ModelSwap *job = param;
     const bool ok = boo_reload_model(job->app->ctx, job->path);
-    PostMessageW(job->dlg, BOO_MSG_MODEL_SWAPPED, ok, (LPARAM)job);
+    // model_swapped frees the job on receipt; if the dialog is gone (app quit
+    // mid-swap) the post fails and the job would leak, so free it here instead.
+    if (!PostMessageW(job->dlg, BOO_MSG_MODEL_SWAPPED, ok, (LPARAM)job)) {
+        free(job->path);
+        free(job);
+    }
     return 0;
 }
 

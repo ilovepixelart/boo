@@ -808,6 +808,16 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         boo_hotkey_unregister(hwnd);
         boo_tray_remove(hwnd);
         boo_settings_free(app);
+        // The DPI-scaled fonts are otherwise only replaced on the next DPI
+        // change, so they leak at teardown; release them here.
+        if (font_text) {
+            DeleteObject(font_text);
+            font_text = NULL;
+        }
+        if (font_mono) {
+            DeleteObject(font_mono);
+            font_mono = NULL;
+        }
         PostQuitMessage(0);
         return 0;
     default:
