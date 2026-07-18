@@ -177,6 +177,76 @@ static void test_session_handle_lookup(void) {
     g_print("  ok  session_handle extracted\n");
 }
 
+// Recorders for the two client callbacks, so the reason string, the report-once
+// latch, and which shortcut id fires can be asserted without a live portal.
+typedef struct {
+    char *reason;
+    int count;
+} UnavailRec;
+
+static void record_unavailable(const char *reason, gpointer user_data) {
+    UnavailRec *r = user_data;
+    g_free(r->reason);
+    r->reason = g_strdup(reason);
+    r->count++;
+}
+
+static void record_activated(gpointer user_data) { (*(int *)user_data)++; }
+
+// on_error maps a portal failure to a user message and reports it at most once:
+// the "unsupported" case substitutes the canned GNOME-48 explanation, otherwise
+// the raw reason passes through, and the latch swallows a repeat.
+static void test_shortcut_error(void) {
+    g_print("Shortcut error:\n");
+
+    UnavailRec rec = {0};
+    BooGlobalShortcut gs = {0};
+    gs.on_unavailable = record_unavailable;
+    gs.user_data = &rec;
+
+    on_error("the request failed", FALSE, &gs);
+    g_assert_cmpstr(rec.reason, ==, "the request failed");
+    g_assert_cmpint(rec.count, ==, 1);
+
+    on_error("again", FALSE, &gs); // the latch: reported once per handle
+    g_assert_cmpint(rec.count, ==, 1);
+    g_print("  ok  reason passed through, reported once\n");
+
+    UnavailRec rec2 = {0};
+    BooGlobalShortcut gs2 = {0};
+    gs2.on_unavailable = record_unavailable;
+    gs2.user_data = &rec2;
+    on_error(NULL, TRUE, &gs2); // unsupported: canned explanation replaces reason
+    g_assert_cmpint(rec2.count, ==, 1);
+    g_assert_nonnull(g_strstr_len(rec2.reason, -1, "GNOME 48"));
+    g_print("  ok  unsupported desktop gets the canned explanation\n");
+
+    g_free(rec.reason);
+    g_free(rec2.reason);
+}
+
+// on_activated fires the toggle only for Boo's own shortcut id, ignoring any
+// other shortcut delivered on the same session.
+static void test_shortcut_activated(void) {
+    g_print("Shortcut activated:\n");
+
+    int fired = 0;
+    BooGlobalShortcut gs = {0};
+    gs.on_activated = record_activated;
+    gs.user_data = &fired;
+
+    g_autoptr(GVariant) ours = g_variant_ref_sink(
+        g_variant_new_parsed("(%o, %s, @a{sv} {})", SESSION, "toggle-record"));
+    on_activated(NULL, NULL, NULL, NULL, NULL, ours, &gs);
+    g_assert_cmpint(fired, ==, 1);
+
+    g_autoptr(GVariant) theirs = g_variant_ref_sink(
+        g_variant_new_parsed("(%o, %s, @a{sv} {})", SESSION, "someone-elses"));
+    on_activated(NULL, NULL, NULL, NULL, NULL, theirs, &gs);
+    g_assert_cmpint(fired, ==, 1);
+    g_print("  ok  fires for our id, ignores others\n");
+}
+
 #endif
 
 int main(void) {
@@ -189,6 +259,8 @@ int main(void) {
     test_global_shortcuts();
     test_already_bound();
     test_session_handle_lookup();
+    test_shortcut_error();
+    test_shortcut_activated();
 #endif
 
     g_print("PASS\n");
