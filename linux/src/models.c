@@ -208,6 +208,13 @@ static void download_fail(DownloadCtx *dc, const char *why) {
     download_free(dc);
 }
 
+// The caller (user_data) was torn down mid-transfer: drop the .part and free,
+// running neither callback so nothing touches the freed user_data.
+static void download_abort(DownloadCtx *dc) {
+    if (dc->tmp_path) g_unlink(dc->tmp_path);
+    download_free(dc);
+}
+
 static void read_chunk(DownloadCtx *dc, GInputStream *stream);
 
 static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_data) {
@@ -216,6 +223,11 @@ static void on_chunk_read(GObject *source, GAsyncResult *result, gpointer user_d
     g_autoptr(GError) error = NULL;
     gssize n = g_input_stream_read_finish(stream, result, &error);
 
+    if (g_cancellable_is_cancelled(dc->cancel)) { // caller torn down; report nothing
+        g_object_unref(stream);
+        download_abort(dc);
+        return;
+    }
     if (n < 0) {
         g_object_unref(stream);
         download_fail(dc, "Download interrupted.");
@@ -270,6 +282,11 @@ static void on_send_ready(GObject *source, GAsyncResult *result, gpointer user_d
     DownloadCtx *dc = user_data;
     g_autoptr(GError) error = NULL;
     GInputStream *stream = soup_session_send_finish(SOUP_SESSION(source), result, &error);
+    if (g_cancellable_is_cancelled(dc->cancel)) { // caller torn down; report nothing
+        if (stream) g_object_unref(stream);
+        download_abort(dc);
+        return;
+    }
     if (!stream) {
         download_fail(dc, "Could not connect. Check your network and try again.");
         return;
@@ -298,9 +315,9 @@ static void on_send_ready(GObject *source, GAsyncResult *result, gpointer user_d
     read_chunk(dc, stream);
 }
 
-void boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
-                        BooDownloadDone on_done, BooDownloadFail on_fail,
-                        gpointer user_data) {
+GCancellable *boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
+                                 BooDownloadDone on_done, BooDownloadFail on_fail,
+                                 gpointer user_data) {
     DownloadCtx *dc = g_new0(DownloadCtx, 1);
     dc->model = model;
     dc->progress = progress ? g_object_ref(progress) : NULL;
@@ -319,4 +336,6 @@ void boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
     soup_session_send_async(dc->session, msg, G_PRIORITY_DEFAULT, dc->cancel,
                             on_send_ready, dc);
     g_object_unref(msg);
+    // The caller's own ref; dc keeps its own until the transfer ends.
+    return g_object_ref(dc->cancel);
 }

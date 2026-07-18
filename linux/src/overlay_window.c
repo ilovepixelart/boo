@@ -686,6 +686,7 @@ typedef struct {
     // close-request is refused, because deletable is only a hint and a
     // WM-initiated close (Alt+F4) would free this UI under the worker.
     gboolean busy;
+    GCancellable *download_cancel; // in-flight model download, cancelled at free
 } SettingsUI;
 
 // One model-dropdown entry: a model on disk (`path` set) or a curated
@@ -703,6 +704,12 @@ static void model_entry_free(gpointer data) {
 
 static void settings_ui_free(gpointer data) {
     SettingsUI *ui = data;
+    // Cancel any in-flight download before freeing: its stream callbacks then
+    // run download_abort instead of touching this freed UI.
+    if (ui->download_cancel) {
+        g_cancellable_cancel(ui->download_cancel);
+        g_object_unref(ui->download_cancel);
+    }
     if (ui->model_entries) g_ptr_array_unref(ui->model_entries);
     g_free(ui);
 }
@@ -913,8 +920,9 @@ static void model_download_start(SettingsUI *ui, const BooModelInfo *model) {
     gtk_widget_set_visible(GTK_WIDGET(ui->model_progress), TRUE);
     g_autofree const char *msg = g_strdup_printf("Downloading %s…", model->filename);
     gtk_label_set_text(ui->model_status, msg);
-    boo_model_download(model, ui->model_progress, on_model_download_done,
-                       on_model_download_fail, ui);
+    g_clear_object(&ui->download_cancel);
+    ui->download_cancel = boo_model_download(
+        model, ui->model_progress, on_model_download_done, on_model_download_fail, ui);
 }
 
 static void on_model_selected(GObject *dd, GParamSpec *spec, gpointer data) {

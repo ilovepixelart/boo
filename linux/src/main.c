@@ -78,7 +78,10 @@ static void on_vad_fail(const char *why, gpointer user_data) {
 
 static void download_vad_model(AppState *state) {
     g_print("Fetching the VAD model to enable streaming transcription\n");
-    boo_model_download(boo_vad_model(), NULL, on_vad_done, on_vad_fail, state);
+    // Fire-and-forget: `state` lives on main's stack for the whole run and
+    // on_vad_done guards ctx, so there is nothing to cancel; drop the handle.
+    g_object_unref(
+        boo_model_download(boo_vad_model(), NULL, on_vad_done, on_vad_fail, state));
 }
 
 // Open the diagnostic log file at $XDG_STATE_HOME/boo/boo.log (else
@@ -180,7 +183,19 @@ typedef struct {
     GtkProgressBar *progress;
     GtkLabel *status;
     GtkWidget *button;
+    GCancellable *download_cancel; // in-flight model download, cancelled at free
 } OnboardingUI;
+
+// The window owns the OnboardingUI; a forced close (Alt+F4) during a download
+// would otherwise free it under the transfer, so cancel it first.
+static void onboarding_ui_free(gpointer data) {
+    OnboardingUI *ui = data;
+    if (ui->download_cancel) {
+        g_cancellable_cancel(ui->download_cancel);
+        g_object_unref(ui->download_cancel);
+    }
+    g_free(ui);
+}
 
 static void on_onboarding_done(const char *path, gpointer user_data) {
     OnboardingUI *ui = user_data;
@@ -208,8 +223,9 @@ static void on_download_clicked(GtkButton *button, gpointer user_data) {
     gtk_label_set_text(ui->status, "Downloading…");
     // No mid-download close: the async chain updates this dialog's widgets.
     gtk_window_set_deletable(GTK_WINDOW(ui->win), FALSE);
-    boo_model_download(&models[idx], ui->progress, on_onboarding_done, on_onboarding_fail,
-                       ui);
+    g_clear_object(&ui->download_cancel);
+    ui->download_cancel = boo_model_download(&models[idx], ui->progress,
+                                             on_onboarding_done, on_onboarding_fail, ui);
 }
 
 // The download dialog: a curated model dropdown, a progress bar, and Download.
@@ -261,7 +277,7 @@ static void show_download_dialog(AppState *state) {
     ui->progress = GTK_PROGRESS_BAR(progress);
     ui->status = GTK_LABEL(status);
     ui->button = button;
-    g_object_set_data_full(G_OBJECT(win), "boo-onboarding-ui", ui, g_free);
+    g_object_set_data_full(G_OBJECT(win), "boo-onboarding-ui", ui, onboarding_ui_free);
     g_signal_connect(button, "clicked", G_CALLBACK(on_download_clicked), ui);
 
     gtk_window_present(GTK_WINDOW(win));

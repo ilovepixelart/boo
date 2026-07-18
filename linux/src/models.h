@@ -36,6 +36,12 @@ GPtrArray *boo_installed_models(void);
 // other UI (status, buttons, window deletability) itself.
 typedef void (*BooDownloadDone)(const char *path, gpointer user_data);
 typedef void (*BooDownloadFail)(const char *why, gpointer user_data);
-void boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
-                        BooDownloadDone on_done, BooDownloadFail on_fail,
-                        gpointer user_data);
+
+// Returns a new ref on the transfer's GCancellable (transfer full). A caller
+// whose user_data can be freed while the transfer is in flight must cancel it
+// (then unref) at teardown: a cancelled transfer runs neither callback, so it
+// cannot touch the freed user_data. A caller with a process-lived user_data can
+// just unref the handle.
+GCancellable *boo_model_download(const BooModelInfo *model, GtkProgressBar *progress,
+                                 BooDownloadDone on_done, BooDownloadFail on_fail,
+                                 gpointer user_data);
