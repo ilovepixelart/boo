@@ -344,6 +344,77 @@ do {
     try? FileManager.default.removeItem(at: root)
 }
 
+// resolveVadPath: an existing BOO_VAD_MODEL wins, else the first silero VAD in
+// the dirs (a speech model is never chosen). vadModelEntry keeps the pinned
+// SHA-256 even when a mirror URL is substituted.
+do {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("boo-vad-\(ProcessInfo.processInfo.processIdentifier)")
+    let dir = root.appendingPathComponent("m")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    func touch(_ url: URL) {
+        FileManager.default.createFile(atPath: url.path, contents: Data("x".utf8))
+    }
+    let vadEnv = root.appendingPathComponent("ggml-silero-env.bin")
+    touch(vadEnv)
+    touch(dir.appendingPathComponent("ggml-silero-v6.2.0.bin"))
+    touch(dir.appendingPathComponent("ggml-base.bin"))  // a speech model, must be ignored
+
+    check(
+        AppDelegate.resolveVadPath(env: vadEnv.path, searchDirs: []) == vadEnv.path,
+        "an existing BOO_VAD_MODEL wins")
+    check(
+        AppDelegate.resolveVadPath(env: "/no/such.bin", searchDirs: []) == nil,
+        "a BOO_VAD_MODEL set but missing yields nil")
+    check(
+        AppDelegate.resolveVadPath(env: nil, searchDirs: [dir.path])?
+            .hasSuffix("ggml-silero-v6.2.0.bin") == true,
+        "the silero VAD is chosen over a speech model")
+    let onlySpeech = root.appendingPathComponent("s")
+    try? FileManager.default.createDirectory(at: onlySpeech, withIntermediateDirectories: true)
+    touch(onlySpeech.appendingPathComponent("ggml-base.bin"))
+    check(
+        AppDelegate.resolveVadPath(env: nil, searchDirs: [onlySpeech.path]) == nil,
+        "no VAD model means nil, not a speech model")
+
+    let pinned = boo_vad_model().pointee
+    check(
+        String(cString: AppDelegate.vadModelEntry(urlOverride: nil).url)
+            == String(cString: pinned.url),
+        "vadModelEntry uses the pinned URL with no override")
+    let mirrored = AppDelegate.vadModelEntry(urlOverride: "http://127.0.0.1:1/x")
+    check(String(cString: mirrored.url) == "http://127.0.0.1:1/x", "a mirror URL is substituted")
+    check(
+        String(cString: mirrored.sha256) == String(cString: pinned.sha256),
+        "the SHA-256 pin survives a mirror URL")
+    try? FileManager.default.removeItem(at: root)
+}
+
+// rotatePendingCrashReport renames a pending report aside (quiet next launch),
+// keeps its bytes, and returns nil when none is pending or already rotated.
+do {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("boo-crash-\(ProcessInfo.processInfo.processIdentifier)")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    check(AppDelegate.rotatePendingCrashReport(in: dir) == nil, "no report pending yields nil")
+    let report = dir.appendingPathComponent("boo-crash.txt")
+    FileManager.default.createFile(atPath: report.path, contents: Data("boom".utf8))
+    let rotated = AppDelegate.rotatePendingCrashReport(in: dir)
+    check(rotated?.lastPathComponent == "boo-crash-prev.txt", "a pending report rotates to -prev")
+    check(!FileManager.default.fileExists(atPath: report.path), "the original report is moved")
+    check(rotated.flatMap { try? Data(contentsOf: $0) } == Data("boom".utf8), "the report keeps its bytes")
+    check(AppDelegate.rotatePendingCrashReport(in: dir) == nil, "a second launch does not re-nag")
+    try? FileManager.default.removeItem(at: dir)
+}
+
+// recordingTimeLabel: seconds under a minute, M:SS at/past it, zero-padded.
+check(AppDelegate.recordingTimeLabel(samples: 0) == " 0s", "zero samples is 0s")
+check(AppDelegate.recordingTimeLabel(samples: 16000 * 59) == " 59s", "under a minute is Ns")
+check(AppDelegate.recordingTimeLabel(samples: 16000 * 60) == " 1:00", "a minute crosses to M:SS")
+check(
+    AppDelegate.recordingTimeLabel(samples: 16000 * 125) == " 2:05",
+    "125s is 2:05 with a zero-padded seconds field")
+
 var switched: Bool?
 appDelegate.switchModel(path: "/nonexistent") { switched = $0 }
 check(switched == false, "a swap without a context reports failure")

@@ -53,14 +53,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// shown, so the next launch stays quiet unless a new crash happened.
     /// Nothing is sent anywhere; Reveal opens Finder for the user to inspect
     /// or attach it themselves.
-    private func surfacePreviousCrash() {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Boo", isDirectory: true)
+    /// If a crash report is pending in `dir` (`boo-crash.txt`), rename it aside
+    /// to `boo-crash-prev.txt` so the next launch stays quiet, and return the
+    /// renamed URL; `nil` when none is pending. The alert/Reveal stays with the
+    /// caller. A stale `boo-crash-prev.txt` is overwritten.
+    static func rotatePendingCrashReport(in dir: URL) -> URL? {
         let report = dir.appendingPathComponent("boo-crash.txt")
-        guard FileManager.default.fileExists(atPath: report.path) else { return }
+        guard FileManager.default.fileExists(atPath: report.path) else { return nil }
         let seen = dir.appendingPathComponent("boo-crash-prev.txt")
         try? FileManager.default.removeItem(at: seen)
         try? FileManager.default.moveItem(at: report, to: seen)
+        return seen
+    }
+
+    private func surfacePreviousCrash() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Boo", isDirectory: true)
+        guard let seen = AppDelegate.rotatePendingCrashReport(in: dir) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Boo crashed last time"
@@ -174,6 +183,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(recordingStateChanged), name: .booRecordingStopped, object: nil)
     }
 
+    /// The menu-bar recording-timer label for a capture length in samples (the
+    /// core records at 16 kHz): " 5s" under a minute, " 1:05" at or past it.
+    static func recordingTimeLabel(samples: Int32) -> String {
+        let totalSecs = Int(Float(samples) / 16000.0)
+        return totalSecs < 60
+            ? String(format: " %ds", totalSecs)
+            : String(format: " %d:%02d", totalSecs / 60, totalSecs % 60)
+    }
+
     func updateStatusBar() {
         guard let ctx = booCtx, let button = statusItem?.button else { return }
 
@@ -186,12 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 systemSymbolName: "waveform",
                 accessibilityDescription: "Boo, recording")
             button.contentTintColor = .systemRed
-
-            let totalSecs = Int(Float(boo_get_audio_samples(ctx)) / 16000.0)
-            button.title =
-                totalSecs < 60
-                ? String(format: " %ds", totalSecs)
-                : String(format: " %d:%02d", totalSecs / 60, totalSecs % 60)
+            button.title = AppDelegate.recordingTimeLabel(samples: boo_get_audio_samples(ctx))
         } else if transcribing {
             // Transcription blocks for seconds on a big model; without this the
             // menu bar snapped straight back to idle and looked like nothing
@@ -497,26 +510,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Find a Silero VAD model (ggml-silero-*.bin) in the same places as the
     /// whisper model. $BOO_VAD_MODEL wins outright, matching $BOO_MODEL.
     private func findVadModelPath() -> String? {
-        if let env = ProcessInfo.processInfo.environment["BOO_VAD_MODEL"], !env.isEmpty {
-            guard FileManager.default.fileExists(atPath: env) else {
-                NSLog("Boo: BOO_VAD_MODEL points at %@, which does not exist", env)
-                return nil
-            }
-            return env
+        let env = ProcessInfo.processInfo.environment["BOO_VAD_MODEL"]
+        if let env = env, !env.isEmpty, !FileManager.default.fileExists(atPath: env) {
+            NSLog("Boo: BOO_VAD_MODEL points at %@, which does not exist", env)
+            return nil
         }
+        return AppDelegate.resolveVadPath(env: env, searchDirs: modelSearchDirs)
+    }
 
+    /// The Silero VAD model (ggml-silero-*.bin) to load: an existing
+    /// `$BOO_VAD_MODEL` wins, else the first VAD model found across the search
+    /// dirs (name-sorted, so a newer silero version wins). `nil` for none. Env
+    /// injected for testability, like `resolveModelPath`.
+    static func resolveVadPath(env: String?, searchDirs: [String]) -> String? {
+        if let env = env, !env.isEmpty {
+            return FileManager.default.fileExists(atPath: env) ? env : nil
+        }
         let fm = FileManager.default
-        for dir in modelSearchDirs {
+        for dir in searchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-            let models =
-                entries
-                .filter { boo_model_classify($0) == Int32(BOO_MODEL_VAD) }
-                .sorted()
+            let models = entries.filter { boo_model_classify($0) == Int32(BOO_MODEL_VAD) }.sorted()
             if let chosen = models.first {
                 return (dir as NSString).appendingPathComponent(chosen)
             }
         }
         return nil
+    }
+
+    /// The pinned VAD download entry (name, URL, SHA-256) from the core, with an
+    /// optional `$BOO_VAD_MODEL_URL` mirror substituted for the URL only; the
+    /// SHA-256 pin still applies to whatever it serves, so a mirror cannot weaken
+    /// integrity. The override string is strdup'd (leaked once, process-lifetime)
+    /// so the struct holds a stable C pointer.
+    static func vadModelEntry(urlOverride: String?) -> BooModelInfo {
+        var model = boo_vad_model().pointee
+        if let override = urlOverride {
+            model.url = UnsafePointer(strdup(override))
+        }
+        return model
     }
 
     /// Fetch the Silero VAD model in the background on first run, through
@@ -526,12 +557,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Face; the SHA-256 pin applies to whatever the URL serves, so pointing
     /// elsewhere cannot weaken it. Any failure just leaves batch mode on.
     private func downloadVadModel() {
-        var model = boo_vad_model().pointee
-        if let override = ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"] {
-            // strdup leaks one small string for the process lifetime; the
-            // struct wants a stable C pointer and this runs at most once.
-            model.url = UnsafePointer(strdup(override))
-        }
+        let model = AppDelegate.vadModelEntry(
+            urlOverride: ProcessInfo.processInfo.environment["BOO_VAD_MODEL_URL"])
         NSLog("Boo: fetching the VAD model to enable streaming transcription")
         vadDownloader = ModelDownloader(
             onProgress: { _ in
