@@ -379,6 +379,8 @@ const recommended_models = [_][]const u8{
     "ggml-large-v3-turbo.bin",
     "ggml-small.en.bin",
     "ggml-base.en.bin",
+    "ggml-base.en-q5_1.bin",
+    "ggml-tiny.en-q5_1.bin",
 };
 
 // Rank of a model filename in the recommended order (best == 0); the list length
@@ -413,9 +415,10 @@ export fn boo_model_classify(name: [*:0]const u8) c_int {
 }
 
 // The curated download manifest: what the model-onboarding dialog offers, one
-// source for every frontend. Recommended first. SHA-256s are pinned (the HF LFS
-// oids); a download must verify against them. Keep in step with docs/models.md
-// and the recommended_models order above.
+// source for every frontend. This is display order (best pick first), not rank
+// order; the capability ranking is boo_model_rank's job. SHA-256s are pinned
+// (the HF LFS oids); a download must verify against them. Keep in step with
+// docs/models.md, and every speech entry must be rankable (asserted below).
 const BooModelInfo = extern struct {
     filename: [*:0]const u8,
     url: [*:0]const u8,
@@ -611,6 +614,12 @@ test "the download manifest is well-formed" {
         try testing.expectEqual(@as(usize, 64), std.mem.span(m.sha256).len);
         try testing.expect(m.size > 0);
         try testing.expect(std.mem.startsWith(u8, std.mem.span(m.url), "https://"));
+        // Every speech model offered for download must be rankable, or it ranks
+        // as "unknown" (recommended_models.len) and an arbitrary ggml-*.bin can
+        // beat this app-offered model in the frontends' auto-selection. The
+        // reverse is allowed: a rankable model need not be downloadable.
+        if (boo_model_classify(m.filename) == BOO_MODEL_SPEECH)
+            try testing.expect(boo_model_rank(m.filename) < recommended_models.len);
     }
     // Recommended first: Parakeet also tops boo_model_rank.
     try testing.expectEqual(@as(u32, 0), boo_model_rank(list[0].filename));
