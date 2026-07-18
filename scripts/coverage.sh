@@ -29,26 +29,36 @@ empty_report() {
     printf '<coverage version="1"/>\n' >"$1"
 }
 
-# The paste-chord planner: same pure-C target the lint job builds (no
-# windows.h), with gcov counters. Sources compile separately so the
-# .gcno/.gcda land in the cwd with predictable names.
+# The pure-C frontend logic that carries no windows.h: the paste-chord planner
+# and the transcript-history policy, each a <name>.c under test plus its
+# <name>_test.c, gcov-instrumented. Every suite builds in its own subdir so its
+# .gcno/.gcda cannot collide, and only the source under test is gcov'd (not the
+# test TU). Runs on any host, so it lands in windows.xml on the Linux/macOS CI.
 gen_windows() {
     local work
     work=$(mktemp -d)
     (
         cd "$work"
-        cflags=(--coverage -O0 -I "$root/windows/src")
-        cc "${cflags[@]}" -c "$root/windows/src/inject_plan.c" -o inject_plan.o
-        cc "${cflags[@]}" -c "$root/windows/tests/inject_plan_test.c" -o test.o
-        cc --coverage inject_plan.o test.o -o inject_plan_test
-        ./inject_plan_test
-        gcov inject_plan.c >/dev/null 2>&1 || true
-        covs=(*.gcov)
-        if [[ ${#covs[@]} -eq 0 ]]; then
+        local all_covs=()
+        local cflags=(--coverage -O0 -I "$root/windows/src")
+        local suite
+        for suite in inject_plan history; do
+            mkdir -p "$suite"
+            (
+                cd "$suite"
+                cc "${cflags[@]}" -c "$root/windows/src/$suite.c" -o "$suite.o"
+                cc "${cflags[@]}" -c "$root/windows/tests/${suite}_test.c" -o test.o
+                cc --coverage "$suite.o" test.o -o "${suite}_test"
+                "./${suite}_test" >/dev/null
+                gcov "$suite.o" >/dev/null 2>&1 || true
+            ) || echo "coverage: windows: $suite suite failed" >&2
+            for g in "$suite"/*.gcov; do all_covs+=("$g"); done
+        done
+        if [[ ${#all_covs[@]} -eq 0 ]]; then
             echo "coverage: windows: gcov produced no reports" >&2
             empty_report "$out/windows.xml"
         else
-            python3 "$root/scripts/gcov_to_sonar.py" "$out/windows.xml" "$root" "${covs[@]}"
+            python3 "$root/scripts/gcov_to_sonar.py" "$out/windows.xml" "$root" "${all_covs[@]}"
         fi
     )
     rm -rf "$work"

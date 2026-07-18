@@ -112,10 +112,11 @@ typedef struct BooApp {
         int model_absent_count;
     } settings;
 
-    // Transcript history, chronological; cards[0] is the oldest. Each entry is
-    // malloc'd. live_text is the provisional streaming card, dimmer than the
-    // history cards and replaced by the final transcript on stop.
-    WCHAR *cards[BOO_HISTORY_MAX];
+    // Transcript history, chronological; cards[0] is the oldest. Each entry is a
+    // malloc'd WCHAR string, held as void* so the bounded-FIFO policy lives in
+    // the pure, host-testable history.c (boo_history_push/remove). live_text is
+    // the provisional streaming card, replaced by the final transcript on stop.
+    void *cards[BOO_HISTORY_MAX];
     int card_count;
     WCHAR *live_text; // malloc'd, NULL when absent
 } BooApp;

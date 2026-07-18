@@ -18,6 +18,7 @@
 
 #include "overlay.h"
 
+#include "history.h"
 #include "hotkey.h"
 #include "inject.h"
 #include "settings.h"
@@ -231,8 +232,7 @@ static WCHAR *card_dup(const char *utf8) {
     if (!out) return NULL;
     if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, out, CARD_MAX_UNITS) > 0) return out;
 
-    size_t len = CARD_MAX_UNITS - 2;
-    while (len > 0 && (utf8[len] & 0xC0) == 0x80) len--;
+    const size_t len = boo_utf8_trunc_len(utf8, CARD_MAX_UNITS - 2);
     int n = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, out, CARD_MAX_UNITS - 2);
     if (n < 0) n = 0;
     out[n] = L'…';
@@ -243,21 +243,11 @@ static WCHAR *card_dup(const char *utf8) {
 static void history_push(BooApp *app, const char *utf8) {
     WCHAR *w = card_dup(utf8);
     if (!w) return;
-    if (app->card_count == BOO_HISTORY_MAX) {
-        free(app->cards[0]);
-        memmove(&app->cards[0], &app->cards[1],
-                (BOO_HISTORY_MAX - 1) * sizeof(app->cards[0]));
-        app->card_count--;
-    }
-    app->cards[app->card_count++] = w;
+    boo_history_push(app->cards, &app->card_count, BOO_HISTORY_MAX, w);
 }
 
 static void history_remove(BooApp *app, int index) {
-    if (index < 0 || index >= app->card_count) return;
-    free(app->cards[index]);
-    memmove(&app->cards[index], &app->cards[index + 1],
-            (size_t)(app->card_count - index - 1) * sizeof(app->cards[0]));
-    app->card_count--;
+    boo_history_remove(app->cards, &app->card_count, index);
 }
 
 static void live_set(BooApp *app, WCHAR *owned) {
