@@ -26,7 +26,8 @@ static GPtrArray *model_dirs(void) {
 
 // Whether `name` in `dir` is a usable speech model: the core says it is a
 // speech model (ggml-*.bin, not the VAD), and it is not a truncated partial
-// download.
+// download. Used by boo_installed_models to list every usable model; the
+// single-best pick below defers the same policy to boo_best_model.
 static gboolean is_speech_model(const char *dir, const char *name) {
     if (boo_model_classify(name) != BOO_MODEL_SPEECH) return FALSE;
     g_autofree const char *path = g_build_filename(dir, name, NULL);
@@ -38,33 +39,21 @@ static gboolean is_speech_model(const char *dir, const char *name) {
 // Any GGML speech model works, so this accepts any ggml-*.bin rather than only
 // the models we happen to recommend; pinning filenames meant a user who
 // followed our own advice and fetched, say, large-v3-turbo would be told no
-// model was installed.
+// model was installed. The core applies the shared selection policy across all
+// three frontends (boo_best_model: keep the non-truncated speech models, lowest
+// rank wins, basename breaks ties); this only enumerates the directory.
 static char *find_model_in(const char *dir) {
     GDir *d = g_dir_open(dir, 0, NULL);
     if (!d) return NULL;
 
-    char *best = NULL;
-    unsigned best_rank = 0;
+    g_autoptr(GPtrArray) paths = g_ptr_array_new_with_free_func(g_free);
     const char *name;
-    while ((name = g_dir_read_name(d))) {
-        if (!is_speech_model(dir, name)) continue;
-
-        // Best rank wins; alphabetical order breaks ties among the
-        // unrecognized, so the choice is at least deterministic.
-        unsigned rank = boo_model_rank(name);
-        if (!best || rank < best_rank ||
-            (rank == best_rank && g_strcmp0(name, best) < 0)) {
-            g_free(best);
-            best = g_strdup(name);
-            best_rank = rank;
-        }
-    }
+    while ((name = g_dir_read_name(d)))
+        g_ptr_array_add(paths, g_build_filename(dir, name, NULL));
     g_dir_close(d);
 
-    if (!best) return NULL;
-    char *path = g_build_filename(dir, best, NULL);
-    g_free(best);
-    return path;
+    const int best = boo_best_model((const char *const *)paths->pdata, (int)paths->len);
+    return best < 0 ? NULL : g_strdup(g_ptr_array_index(paths, best));
 }
 
 // The Silero VAD model that enables streaming transcription. First
