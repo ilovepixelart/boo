@@ -125,16 +125,25 @@ export fn boo_init(model_path: [*:0]const u8) ?*BooContext {
 
 export fn boo_deinit(ctx: ?*BooContext) void {
     const c = ctx orelse return;
-    // Flush any in-flight inference: a straggling boo_stream_tick or a
-    // boo_transcribe the frontend failed to join still holds the mutex and is
-    // reading the state torn down below. Held only across the frees; calls
-    // arriving after deinit returns are use-after-free by contract.
+    // The mutex serializes these frees against a boo_stream_tick or
+    // boo_transcribe still holding it. This is NOT a full flush: audio, engine,
+    // and the context itself are freed after the unlock, so the frontend MUST
+    // join its stream/transcribe workers before deinit (all three do). Nulling
+    // chunker/vad under the lock at least lets a tick that wakes in the narrow
+    // unlock..destroy window short-circuit (boo_stream_tick rechecks c.chunker)
+    // instead of touching a freed chunker.
     c.whisper_mutex.lock();
     c.freeTranscript();
     c.freeLiveTranscripts();
     c.retired_transcripts.deinit(c.allocator);
-    if (c.chunker) |*ch| ch.deinit();
-    if (c.vad) |*v| v.deinit();
+    if (c.chunker) |*ch| {
+        ch.deinit();
+        c.chunker = null;
+    }
+    if (c.vad) |*v| {
+        v.deinit();
+        c.vad = null;
+    }
     c.whisper_mutex.unlock();
     if (c.audio) |a| a.deinit();
     c.engine.deinit();
