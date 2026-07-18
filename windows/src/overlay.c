@@ -24,6 +24,7 @@
 #include "palette.h"
 #include "settings.h"
 #include "tray.h"
+#include "utf8.h"
 #include "waveform.h"
 
 #include <dwmapi.h>

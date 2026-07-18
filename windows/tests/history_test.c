@@ -7,10 +7,8 @@
 //   (one command; a literal backslash here would trip gcc's -Wcomment)
 //
 // What it pins: the bounded FIFO evicts the OLDEST at capacity and keeps the
-// rest in order (a wrong memmove or count would reorder the transcript history);
-// index removal closes the gap without disturbing the survivors; and the UTF-8
-// truncation walks back to a code-point boundary so a long transcript's display
-// copy never splits a multi-byte character.
+// rest in order (a wrong memmove or count would reorder the transcript history),
+// and index removal closes the gap without disturbing the survivors.
 
 #include "history.h"
 
@@ -77,18 +75,6 @@ int main(void) {
         boo_history_remove(items, &count, -1);
         check(count == 3, "an out-of-range removal is a no-op");
         free_all(items, count);
-    }
-
-    // ── UTF-8 truncation never splits a multi-byte code point ──
-    {
-        // "a" + U+00E9 (0xC3 0xA9) + "b": byte 2 is a continuation byte.
-        const char *s = "a\xC3\xA9"
-                        "b";
-        check(boo_utf8_trunc_len(s, 2) == 1,
-              "a boundary inside a 2-byte sequence walks back to its start");
-        check(boo_utf8_trunc_len(s, 3) == 3, "a boundary on an ASCII byte is kept");
-        check(boo_utf8_trunc_len(s, 4) == 4, "a boundary at the end is kept");
-        check(boo_utf8_trunc_len(s, 0) == 0, "a zero start stays zero");
     }
 
     printf(failures ? "history_test: FAIL\n" : "history_test: ok\n");

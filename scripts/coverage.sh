@@ -30,11 +30,11 @@ empty_report() {
 }
 
 # The pure-C frontend logic that carries no windows.h: the paste-chord planner,
-# the transcript-history policy, and the theme-to-color mapping, each a <name>.c
-# under test plus its <name>_test.c, gcov-instrumented. Every suite builds in its
-# own subdir so its .gcno/.gcda cannot collide, and only the source under test is
-# gcov'd (not the test TU). Runs on any host, so it lands in windows.xml on the
-# Linux/macOS CI.
+# the transcript-history policy, the theme-to-color mapping, and the UTF-8
+# helpers, each a <name>.c under test plus its <name>_test.c, gcov-instrumented.
+# Every suite builds in its own subdir so its .gcno/.gcda cannot collide, and
+# only the source under test is gcov'd (not the test TU). Runs on any host, so it
+# lands in windows.xml on the Linux/macOS CI.
 gen_windows() {
     local work
     work=$(mktemp -d)
@@ -43,7 +43,7 @@ gen_windows() {
         local all_covs=()
         local cflags=(--coverage -O0 -I "$root/windows/src" -I "$root/include")
         local suite
-        for suite in inject_plan history palette; do
+        for suite in inject_plan history palette utf8; do
             mkdir -p "$suite"
             (
                 cd "$suite"
