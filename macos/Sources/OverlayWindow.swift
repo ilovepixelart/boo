@@ -290,9 +290,10 @@ class OverlayWindow: NSWindow {
     /// boo_stream_tick. Safe to call repeatedly and off any prior state.
     func stopForTeardown() {
         stopStreamTicks()
-        // Empty on purpose: submitting to the serial queue and waiting is a
-        // barrier that returns only once any in-flight tick has finished.
-        streamQueue.sync {}
+        streamQueue.sync {
+            // Empty on purpose: submitting to the serial queue and waiting is a
+            // barrier that returns only once any in-flight tick has finished.
+        }
         boo_stop_recording(booCtx)
     }
 
