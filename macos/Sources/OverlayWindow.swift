@@ -703,6 +703,18 @@ class OverlayWindow: NSWindow {
     }
 
     override func close() {
+        // A recording in flight must not outlive the window. The overlay
+        // survives close (isReleasedWhenClosed is false) and Boo lives in the
+        // menu bar, so without this the 250ms stream-tick timer keeps calling
+        // boo_stream_tick against the closed overlay until the app terminates.
+        // Stopping here matches Linux (window_state_free) and Windows
+        // (WM_DESTROY), which stop their capture worker at window destroy; full
+        // context teardown still runs in stopForTeardown at termination. Guarded
+        // on isRecording so a non-recording close never calls into the core.
+        if isRecording {
+            isRecording = false
+            stopForTeardown()
+        }
         // The display link retains its target (this window) and the run loop
         // retains the link, so deinit alone can never run; break the cycle
         // here, where closing actually happens.
