@@ -471,6 +471,14 @@ if let vc = settings.window?.contentViewController as? SettingsViewController {
         vc.modelPopup.numberOfItems >= installed.count,
         "the model dropdown merges disk and manifest")
 
+    // beginDownloadUI is the synchronous widget setup a manifest download does
+    // before the (network) fetch; test it without starting a real download.
+    vc.beginDownloadUI(name: "ggml-test.bin")
+    check(vc.modelStatus.stringValue.contains("Downloading"), "beginDownloadUI labels the status")
+    check(!vc.modelProgress.isHidden, "beginDownloadUI shows the progress bar")
+    check(!vc.modelPopup.isEnabled, "beginDownloadUI disables the popup during download")
+    vc.modelPopup.isEnabled = true  // restore for the tests below
+
     vc.searchField.stringValue = "light"
     vc.searchChanged(vc.searchField)
     let lightCount = vc.filteredThemes.count

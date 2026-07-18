@@ -232,12 +232,20 @@ class SettingsViewController: NSViewController {
 
     /// Fetch a not-yet-downloaded manifest model (progress bar under the
     /// dropdown), then swap to it like any installed model.
-    private func downloadAndSwitch(to manifest: BooModelInfo) {
-        let name = String(cString: manifest.filename)
+    /// The synchronous widget setup when a manifest download starts: disable the
+    /// popup, reset and show the progress bar, and label the status. Split out of
+    /// downloadAndSwitch (which then starts a real network fetch) so it is
+    /// testable on its own.
+    func beginDownloadUI(name: String) {
         modelPopup.isEnabled = false
         modelProgress.doubleValue = 0
         modelProgress.isHidden = false
         modelStatus.stringValue = "Downloading \(name)…"
+    }
+
+    private func downloadAndSwitch(to manifest: BooModelInfo) {
+        let name = String(cString: manifest.filename)
+        beginDownloadUI(name: name)
         let downloader = ModelDownloader(
             onProgress: { [weak self] percent in self?.modelProgress.doubleValue = percent },
             onDone: { [weak self] path in
