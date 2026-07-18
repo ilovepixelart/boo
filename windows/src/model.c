@@ -13,17 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Rank of a model filename via the shared core order (boo_model_rank), which
-// takes UTF-8; the names are ASCII so the conversion is cheap. Unknown or
-// unconvertible names rank worst.
-static unsigned rank_of(const WCHAR *name) {
-    char *u = boo_to_utf8(name);
-    if (!u) return (unsigned)-1;
-    const unsigned r = boo_model_rank(u);
-    free(u);
-    return r;
-}
-
 // Model kind (speech / VAD / neither) via the shared core policy
 // (boo_model_classify), which takes UTF-8. The "ggml-silero is the VAD, not a
 // speech model" rule lives in the core so all three frontends agree.
@@ -48,41 +37,30 @@ static bool usable_model(const WCHAR *dir, const WCHAR *name) {
     return ok;
 }
 
-// Pick a model out of `dir`, or NULL. Returned path is malloc'd, wide.
-static WCHAR *find_model_in(const WCHAR *dir) {
-    WCHAR pattern[MAX_PATH];
-    if (swprintf(pattern, MAX_PATH, L"%ls\\ggml-*.bin", dir) < 0) return NULL;
+// Gather a directory's usable ggml-*.bin models as UTF-8 paths; defined below
+// with the installed-models listing that also uses it.
+static void scan_model_dir(const WCHAR *dir, char ***paths, int *count, int *cap);
 
-    WIN32_FIND_DATAW entry;
-    HANDLE it = FindFirstFileW(pattern, &entry);
-    if (it == INVALID_HANDLE_VALUE) return NULL;
+// The best speech model in `dir` as an owned UTF-8 path, or NULL if it holds
+// none. scan_model_dir enumerates the directory; the core then applies the
+// shared selection policy across all three frontends (boo_best_model: lowest
+// rank wins, basename breaks ties). UTF-8 out because every caller wants that,
+// not the wide path.
+static char *find_model_in(const WCHAR *dir) {
+    char **paths = NULL;
+    int count = 0;
+    int cap = 0;
+    scan_model_dir(dir, &paths, &count, &cap);
 
-    WCHAR best[MAX_PATH] = L"";
-    unsigned best_rank = 0;
-    do {
-        if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        // Skips the silero VAD, which the glob's ggml-*.bin also matches.
-        if (kind_of(entry.cFileName) != BOO_MODEL_SPEECH) continue;
-        if (!usable_model(dir, entry.cFileName)) continue;
-
-        const unsigned rank = rank_of(entry.cFileName);
-        if (best[0] == 0 || rank < best_rank ||
-            (rank == best_rank && wcscmp(entry.cFileName, best) < 0)) {
-            wcscpy(best, entry.cFileName);
-            best_rank = rank;
-        }
-    } while (FindNextFileW(it, &entry));
-    FindClose(it);
-
-    if (best[0] == 0) return NULL;
-
-    WCHAR *path = malloc(MAX_PATH * sizeof(WCHAR));
-    if (!path) return NULL;
-    if (swprintf(path, MAX_PATH, L"%ls\\%ls", dir, best) < 0) {
-        free(path);
-        return NULL;
+    char *best = NULL;
+    const int idx = boo_best_model((const char *const *)paths, count);
+    if (idx >= 0) {
+        best = paths[idx];
+        paths[idx] = NULL; // hand the winner to the caller before freeing the rest
     }
-    return path;
+    for (int i = 0; i < count; i++) free(paths[i]);
+    free(paths);
+    return best;
 }
 
 // Best Silero VAD model in `dir`, or NULL. First name wins so a newer silero
@@ -172,12 +150,8 @@ char *boo_model_find(void) {
     WCHAR dirs[BOO_MODEL_DIRS][MAX_PATH];
     const size_t ndirs = model_dirs(dirs);
     for (size_t i = 0; i < ndirs; i++) {
-        WCHAR *found = find_model_in(dirs[i]);
-        if (found) {
-            char *utf8 = boo_to_utf8(found);
-            free(found);
-            return utf8;
-        }
+        char *found = find_model_in(dirs[i]);
+        if (found) return found;
     }
     return NULL;
 }
