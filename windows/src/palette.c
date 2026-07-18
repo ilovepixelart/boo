@@ -2,9 +2,15 @@
 
 // COLORREF is 0x00BBGGRR: R in the low byte, then G, then B. These mirror the
 // windows.h RGB/GetRValue macros without pulling the header in.
-static uint32_t chan_r(uint32_t c) { return c & 0xFF; }
-static uint32_t chan_g(uint32_t c) { return (c >> 8) & 0xFF; }
-static uint32_t chan_b(uint32_t c) { return (c >> 16) & 0xFF; }
+static uint32_t chan_r(uint32_t c) {
+    return c & 0xFF;
+}
+static uint32_t chan_g(uint32_t c) {
+    return (c >> 8) & 0xFF;
+}
+static uint32_t chan_b(uint32_t c) {
+    return (c >> 16) & 0xFF;
+}
 static uint32_t pack(int r, int g, int b) {
     return (uint32_t)((r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16));
 }
@@ -28,12 +34,12 @@ Palette boo_palette(const BooThemeColors *theme, bool dark) {
     if (theme) {
         const uint32_t bg = pcolor(theme->bg);
         // Card fills are white over a dark surface, black over a light one.
-        const int lum =
-            (int)(((theme->bg >> 16) & 0xFF) + ((theme->bg >> 8) & 0xFF) + (theme->bg & 0xFF));
+        const int lum = (int)(((theme->bg >> 16) & 0xFF) + ((theme->bg >> 8) & 0xFF) +
+                              (theme->bg & 0xFF));
         const uint32_t over = lum < 3 * 128 ? pack(255, 255, 255) : pack(0, 0, 0);
         return (Palette){bg,
                          pcolor(theme->fg),
-                         pcolor(theme->palette[8]),  // dim
+                         pcolor(theme->palette[8]), // dim
                          record,
                          pcolor(theme->palette[14]), // idle
                          pcolor(theme->palette[9]),  // recording

@@ -98,9 +98,10 @@ static HWINEVENTHOOK fg_hook;
 // fallback. The mapping itself (slots, luminance-based card fills, the
 // #FF3B30 disc, the reference default) is the pure, host-tested boo_palette.
 static Palette palette(const BooApp *app) {
-    const BooThemeColors *theme = app->settings.current_theme >= 0
-                                      ? &app->settings.themes[app->settings.current_theme].colors
-                                      : NULL;
+    const BooThemeColors *theme =
+        app->settings.current_theme >= 0
+            ? &app->settings.themes[app->settings.current_theme].colors
+            : NULL;
     return boo_palette(theme, app->dark);
 }
 
@@ -466,7 +467,8 @@ static int paint_card(const CardCtx *cc, int top, const WCHAR *text, bool live, 
         // Hairline separator under the header.
         RECT sep = {left + inset, top + header_h + boo_px(2, dpi), right - inset,
                     top + header_h + boo_px(3, dpi)};
-        HBRUSH sep_brush = CreateSolidBrush(boo_color_mix(pal->subtext, pal->card, 0.35f));
+        HBRUSH sep_brush =
+            CreateSolidBrush(boo_color_mix(pal->subtext, pal->card, 0.35f));
         FillRect(dc, &sep, sep_brush);
         DeleteObject(sep_brush);
     }

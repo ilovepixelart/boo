@@ -43,7 +43,7 @@ int main(void) {
         int count = 0;
         for (int i = 0; i < 4; i++) boo_history_push(items, &count, 4, marker(i));
         check(count == 4, "fills to capacity");
-        boo_history_push(items, &count, 4, marker(4));  // evicts marker 0
+        boo_history_push(items, &count, 4, marker(4)); // evicts marker 0
         check(count == 4, "stays at capacity after overflow");
         check(*(int *)items[0] == 1 && *(int *)items[3] == 4,
               "the oldest entry is evicted and the newest appended last");
@@ -69,11 +69,11 @@ int main(void) {
         void *items[4] = {0};
         int count = 0;
         for (int i = 0; i < 4; i++) boo_history_push(items, &count, 4, marker(i));
-        boo_history_remove(items, &count, 1);  // drop marker 1
+        boo_history_remove(items, &count, 1); // drop marker 1
         check(count == 3, "removal shrinks the count");
         check(*(int *)items[0] == 0 && *(int *)items[1] == 2 && *(int *)items[2] == 3,
               "removal closes the gap and keeps the rest in order");
-        boo_history_remove(items, &count, 9);  // out of range
+        boo_history_remove(items, &count, 9); // out of range
         boo_history_remove(items, &count, -1);
         check(count == 3, "an out-of-range removal is a no-op");
         free_all(items, count);
@@ -82,7 +82,8 @@ int main(void) {
     // ── UTF-8 truncation never splits a multi-byte code point ──
     {
         // "a" + U+00E9 (0xC3 0xA9) + "b": byte 2 is a continuation byte.
-        const char *s = "a\xC3\xA9""b";
+        const char *s = "a\xC3\xA9"
+                        "b";
         check(boo_utf8_trunc_len(s, 2) == 1,
               "a boundary inside a 2-byte sequence walks back to its start");
         check(boo_utf8_trunc_len(s, 3) == 3, "a boundary on an ASCII byte is kept");
