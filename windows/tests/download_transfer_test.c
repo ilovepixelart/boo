@@ -131,6 +131,18 @@ int main(void) {
     check(run_download(sink, &malformed), "malformed URL reports back (no hang)");
     check(dl_ok == 0, "malformed URL is a failure");
 
+    // With USERPROFILE unset, ensure_models_dir cannot resolve ~\.boo\models, so
+    // the worker fails at path building and reports it before touching the
+    // network. Restored right after: the worker is done reading env by DL_DONE.
+    WCHAR saved_home[MAX_PATH];
+    const DWORD hn = GetEnvironmentVariableW(L"USERPROFILE", saved_home, MAX_PATH);
+    SetEnvironmentVariableW(L"USERPROFILE", NULL);
+    check(run_download(sink, &unreachable), "path-build failure reports back (no hang)");
+    if (hn > 0 && hn < MAX_PATH) SetEnvironmentVariableW(L"USERPROFILE", saved_home);
+    check(dl_ok == 0, "an unresolvable home dir is a failure");
+    check(strstr(dl_reason, "build the model path") != NULL,
+          "the reason names the path build");
+
     // consume_chunk is the transfer loop's per-chunk accounting, split out so it
     // runs without a live connection: it writes, bounds the total, and posts
     // progress. Feed it bytes directly against a temp file. The digest check

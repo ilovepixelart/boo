@@ -64,6 +64,26 @@ int main(void) {
         check(why && strstr(why, "checksum") != NULL, "the reason names the checksum");
         _wremove(part);
         _wremove(final_path);
+
+        // A valid .part whose destination sits under a directory that does not
+        // exist: the digest passes but _wrename fails, so promotion is refused
+        // with the save-failure reason and the .part is left in place for retry.
+        WCHAR bad_final[MAX_PATH];
+        if (swprintf(bad_final, MAX_PATH, L"%ls\\boo-dl-nodir\\x.bin", tmp) >= 0) {
+            f = _wfopen(part, L"wb");
+            if (f) {
+                fwrite("abc", 1, 3, f);
+                fclose(f);
+            }
+            why = NULL;
+            check(!finish_part(&job, part, bad_final, &why),
+                  "a rename into a missing directory refuses promotion");
+            check(why && strstr(why, "save") != NULL,
+                  "the reason names saving the model file");
+            check(GetFileAttributesW(part) != INVALID_FILE_ATTRIBUTES,
+                  "the .part is left in place on a rename failure");
+            _wremove(part);
+        }
     } else {
         check(false, "TEMP fixture paths");
     }
