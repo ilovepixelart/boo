@@ -43,6 +43,7 @@ struct BooGlobalShortcut {
 
     guint response_subscription; // 0 == no request in flight
     guint activate_subscription; // 0 == not subscribed
+    GCancellable *cancellable;   // cancelled at free so an in-flight reply no-ops
 
     BooGsStep step;                // which request is in flight
     gboolean reported_unavailable; // report at most once
@@ -202,7 +203,8 @@ static void request(BooGlobalShortcut *gs, BooGsStep step) {
     };
 
     gs->step = step; // make_payload and on_response both key off this
-    const BooPortalHandlers handlers = {make_payload, on_response, on_error, gs};
+    const BooPortalHandlers handlers = {make_payload, on_response, on_error, gs,
+                                        gs->cancellable};
     boo_portal_call(gs->dbus, &gs->response_subscription, PORTAL_IFACE_GLOBAL_SHORTCUTS,
                     methods[step], &handlers);
 }
@@ -231,12 +233,21 @@ BooGlobalShortcut *boo_global_shortcut_new(GtkWindow *parent_window,
     }
 
     gs->dbus = g_object_ref(dbus);
+    gs->cancellable = g_cancellable_new();
     request(gs, BOO_GS_CREATE_SESSION);
     return gs;
 }
 
 void boo_global_shortcut_free(BooGlobalShortcut *gs) {
     if (!gs) return;
+
+    // Cancel before tearing down: a portal call still in flight then completes
+    // as cancelled, and on_call_done drops its request without touching this
+    // now-freed handle. The request keeps its own ref, so unref is safe here.
+    if (gs->cancellable) {
+        g_cancellable_cancel(gs->cancellable);
+        g_object_unref(gs->cancellable);
+    }
 
     if (gs->dbus) {
         if (gs->response_subscription != 0) {

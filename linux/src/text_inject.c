@@ -60,6 +60,7 @@ struct BooTextInject {
 
     guint response_subscription; // 0 == no request in flight
     guint paste_timeout;         // 0 == no delayed paste scheduled
+    GCancellable *cancellable;   // cancelled at free so an in-flight reply no-ops
 };
 
 // ---------------------------------------------------------------------------
@@ -282,7 +283,8 @@ static void request(BooTextInject *ti, BooInjectState step) {
     };
 
     ti->state = step; // make_payload and on_response both key off this
-    const BooPortalHandlers handlers = {make_payload, on_response, on_error, ti};
+    const BooPortalHandlers handlers = {make_payload, on_response, on_error, ti,
+                                        ti->cancellable};
     boo_portal_call(ti->dbus, &ti->response_subscription, PORTAL_IFACE_REMOTE_DESKTOP,
                     methods[step], &handlers);
 }
@@ -304,6 +306,7 @@ BooTextInject *boo_text_inject_new(GtkWindow *parent_window) {
     }
 
     ti->dbus = g_object_ref(dbus);
+    ti->cancellable = g_cancellable_new();
     request(ti, BOO_INJECT_CREATING_SESSION);
     return ti;
 }
@@ -329,6 +332,14 @@ void boo_text_inject_paste(BooTextInject *ti) {
 
 void boo_text_inject_free(BooTextInject *ti) {
     if (!ti) return;
+
+    // Cancel before tearing down: a portal call still in flight then completes
+    // as cancelled, and on_call_done drops its request without touching this
+    // now-freed handle. The request keeps its own ref, so unref is safe here.
+    if (ti->cancellable) {
+        g_cancellable_cancel(ti->cancellable);
+        g_object_unref(ti->cancellable);
+    }
 
     if (ti->paste_timeout != 0) g_source_remove(ti->paste_timeout);
 

@@ -10,6 +10,7 @@ typedef struct {
     BooPortalResponseFn on_response;
     BooPortalErrorFn on_error;
     gpointer user_data;
+    GCancellable *cancellable; // own ref (may be NULL); cancelled == client gone
 } PortalRequest;
 
 // A valid D-Bus object-path component ([A-Za-z0-9_] only), unpredictable.
@@ -58,6 +59,7 @@ static void portal_request_free(PortalRequest *req) {
         g_dbus_connection_signal_unsubscribe(req->dbus, *req->subscription);
         *req->subscription = 0;
     }
+    if (req->cancellable) g_object_unref(req->cancellable);
     g_free(req);
 }
 
@@ -94,6 +96,18 @@ static void on_call_done(GObject *source, GAsyncResult *res, gpointer user_data)
     GError *error = NULL;
     GVariant *reply =
         g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), res, &error);
+
+    // The client was torn down while this call was in flight: its user_data and
+    // its *subscription slot are freed, so invoke no callback and do not touch
+    // the subscription. The client already unsubscribed the Response signal, so
+    // just drop req (releasing its own cancellable ref).
+    if (req->cancellable && g_cancellable_is_cancelled(req->cancellable)) {
+        if (reply) g_variant_unref(reply);
+        g_clear_error(&error);
+        g_object_unref(req->cancellable);
+        g_free(req);
+        return;
+    }
 
     if (reply) {
         g_variant_unref(reply);
@@ -154,6 +168,9 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
     req->on_response = handlers->on_response;
     req->on_error = handlers->on_error;
     req->user_data = handlers->user_data;
+    // Own ref, so the object survives the client's teardown until this request's
+    // own completion drops it (the client cancels then unrefs its ref at free).
+    req->cancellable = handlers->cancellable ? g_object_ref(handlers->cancellable) : NULL;
 
     // Subscribe BEFORE calling, see the header. Skipping this is the classic
     // portal bug: it passes against a slow portal and hangs against a fast one.
@@ -162,8 +179,8 @@ void boo_portal_call(GDBusConnection *dbus, guint *subscription, const char *ifa
         G_DBUS_SIGNAL_FLAGS_NONE, on_response, req, NULL);
 
     g_dbus_connection_call(dbus, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, iface, method,
-                           payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_call_done,
-                           req);
+                           payload, NULL, G_DBUS_CALL_FLAGS_NONE, -1, req->cancellable,
+                           on_call_done, req);
 }
 
 void boo_portal_close_session(GDBusConnection *dbus, const char *session_handle) {

@@ -55,6 +55,10 @@ typedef struct {
     BooPortalResponseFn on_response;
     BooPortalErrorFn on_error;
     gpointer user_data;
+    // May be NULL. If set, the call rides it and the request keeps its own ref;
+    // cancelling it at client teardown makes a reply that lands during the final
+    // main-loop drain a no-op instead of touching the freed user_data.
+    GCancellable *cancellable;
 } BooPortalHandlers;
 
 /// Issue a portal request: subscribe to Response on the predicted path, then
