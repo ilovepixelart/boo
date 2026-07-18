@@ -8,6 +8,9 @@ Thanks for helping. Boo is a portable Zig core (`src/`) exposed through a stable
 
 - Core, on any OS: `zig build test`.
 - A native app: `zig build app` (macOS needs one extra archive step).
+- macOS: run `./scripts/make-signing-cert.sh` once so `./bundle.sh` signs with a
+  stable certificate and macOS keeps your Accessibility grant across rebuilds
+  (ad-hoc signing resets it every build). Free, no Apple account.
 - The per-platform build, packaging, release checklist, and project layout are in
   [docs/development.md](docs/development.md); the test and coverage suites in
   [docs/testing.md](docs/testing.md). Full docs index: [docs/](docs/README.md).

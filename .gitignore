@@ -17,3 +17,8 @@ macos/Info.plist
 # Personal Xcode signing overrides (optional, per-user)
 macos/local.xcconfig
 coverage/
+
+# macOS signing material (scripts/make-release-cert.sh output); never commit
+*.p12
+*.p12.base64
+boo-release-cert*

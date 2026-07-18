@@ -90,11 +90,14 @@ prompt, add Boo manually there.
 > Equivalently, from a terminal: `tccutil reset Accessibility com.boo.app`,
 > then relaunch Boo.
 >
-> Building from source? Sign with a stable identity once
-> (`BOO_CODESIGN_IDENTITY="Your Identity" ./bundle.sh`) and the grant survives
-> every rebuild. The real cure for released builds is a Developer ID
-> signature, which would key the grant to a stable identity instead of the
-> per-build one; that needs a paid Apple Developer account.
+> **The free fix.** Building from source, run `./scripts/make-signing-cert.sh`
+> once; `./bundle.sh` then signs every rebuild with one stable self-signed
+> certificate, so macOS keeps the grant across rebuilds. Released builds get the
+> same treatment once the project's stable certificate is configured
+> (`scripts/make-release-cert.sh` plus the `BOO_SIGN_CERT_*` GitHub secrets), and
+> the grant carries across updates from that release on. None of this needs a
+> paid Apple account, that is only required for **notarization**, which removes
+> the Gatekeeper "right-click → Open" step, not the permission reset.
 
 ## Ghostty
 

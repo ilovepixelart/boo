@@ -44,6 +44,32 @@ jobs:
         with:
           version: 0.16.0
 
+      # Sign with the project's stable certificate so end users keep their
+      # Accessibility/Automation grant across updates (ad-hoc re-identifies the
+      # app every release and resets the grants). Free, self-signed: it does not
+      # satisfy Gatekeeper (users still right-click > Open once), only TCC
+      # persistence. Absent the secret (forks), falls through to ad-hoc.
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.BOO_SIGN_CERT_P12 }}
+          CERT_PW: ${{ secrets.BOO_SIGN_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "::notice::No BOO_SIGN_CERT_P12 secret; releasing ad-hoc (grants reset on update)."
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/boo-sign.keychain-db"; KCPW="$(uuidgen)"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/c.p12"
+          security import "$RUNNER_TEMP/c.p12" -k "$KC" -P "$CERT_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/c.p12"
+          echo "BOO_CODESIGN_IDENTITY=Boo Release Signing" >> "$GITHUB_ENV"
+          echo "Imported the release signing certificate."
+
       - name: Build, bundle, package
         run: |
           zig build app -Doptimize=ReleaseFast

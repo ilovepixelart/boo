@@ -65,10 +65,23 @@ EOF
 # be accidentally expanded.
 sed -i '' "s/@@VERSION@@/$VERSION/g" "$CONTENTS/Info.plist"
 
-# Code sign with stable identity so macOS remembers permissions across rebuilds.
-# Defaults to ad-hoc; override with BOO_CODESIGN_IDENTITY env var, e.g.
-#   BOO_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./bundle.sh
-CODESIGN_IDENTITY="${BOO_CODESIGN_IDENTITY:--}"
+# Code sign with a stable identity so macOS remembers permissions (Accessibility,
+# Automation) across rebuilds; ad-hoc signing re-identifies the app on every
+# build and loses them. Identity precedence:
+#   1. BOO_CODESIGN_IDENTITY  (explicit; a Developer ID or Apple Development cert)
+#   2. "Boo Local Signing"    (the free self-signed cert from
+#                              scripts/make-signing-cert.sh, if it exists)
+#   3. "-"                    (ad-hoc fallback: builds, but grants reset each time)
+CODESIGN_IDENTITY="${BOO_CODESIGN_IDENTITY:-}"
+if [ -z "$CODESIGN_IDENTITY" ]; then
+    if security find-certificate -c "Boo Local Signing" >/dev/null 2>&1; then
+        CODESIGN_IDENTITY="Boo Local Signing"
+    else
+        CODESIGN_IDENTITY="-"
+        echo "bundle.sh: ad-hoc signing (grants reset every build)." >&2
+        echo "  Run ./scripts/make-signing-cert.sh once to make them stick." >&2
+    fi
+fi
 codesign -s "$CODESIGN_IDENTITY" --force --deep \
     --entitlements "$PROJ/macos/Boo.entitlements" "$APP"
 
