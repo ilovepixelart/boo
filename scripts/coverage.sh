@@ -112,7 +112,7 @@ windows_native_slice() {
     # Unit tests, one subdir per exe so the shared strconv/inject_plan
     # counters cannot collide across tests.
     local t
-    for t in model_test download_test download_transfer_test inject_test crash_test waveform_test; do
+    for t in model_test download_test download_transfer_test inject_test crash_test waveform_test settings_test; do
         mkdir -p "$t"
         (
             cd "$t"
@@ -120,6 +120,11 @@ windows_native_slice() {
             "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/strconv.c" -o strconv.o
             "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/inject_plan.c" \
                 -o inject_plan.o
+            # settings_test #includes settings.c, which links modelsel + opacity.
+            if [ "$t" = settings_test ]; then
+                "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/modelsel.c" -o modelsel.o
+                "$gcc_bin" "${cflags[@]}" -c "$rootw/windows/src/opacity.c" -o opacity.o
+            fi
             zig c++ -target x86_64-windows-gnu ./*.o "${archives[@]}" "$gcov_lib" \
                 "${libs[@]}" -o "$t.exe"
             "./$t.exe" >/dev/null
