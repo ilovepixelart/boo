@@ -603,7 +603,10 @@ static void copy_card_to_clipboard(BooApp *app, int index) {
     flash_card = index;
     flash_until = GetTickCount64() + 500;
     InvalidateRect(app->overlay, NULL, FALSE);
-    SetTimer(app->overlay, BOO_TIMER_STATUS, 600, NULL); // repaint to unflash
+    // Its own timer id, not BOO_TIMER_STATUS: reusing that one would replace an
+    // in-flight "copied and pasted" settle (SetTimer resets a same-id timer),
+    // clearing the confirmation ~1.9s early.
+    SetTimer(app->overlay, BOO_TIMER_FLASH, 600, NULL); // repaint to unflash
 }
 
 // Returns true when the click landed on an interactive element.
@@ -690,6 +693,12 @@ static void on_timer(BooApp *app, HWND hwnd, WPARAM id) {
     if (id == BOO_TIMER_STATUS) {
         KillTimer(hwnd, BOO_TIMER_STATUS);
         if (!app->ui_recording && !app->transcribing) set_status_idle(app);
+        InvalidateRect(hwnd, NULL, FALSE);
+    }
+    if (id == BOO_TIMER_FLASH) {
+        // The copy flash has expired; repaint so the paint's flash_until gate
+        // drops it. Status settling is BOO_TIMER_STATUS's separate job.
+        KillTimer(hwnd, BOO_TIMER_FLASH);
         InvalidateRect(hwnd, NULL, FALSE);
     }
 }
@@ -801,6 +810,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         KillTimer(hwnd, BOO_TIMER_WAVEFORM);
         KillTimer(hwnd, BOO_TIMER_AUTO_STOP);
         KillTimer(hwnd, BOO_TIMER_STATUS);
+        KillTimer(hwnd, BOO_TIMER_FLASH);
         InterlockedExchange(&app->stream_running, 0);
         boo_hotkey_unregister(hwnd);
         boo_tray_remove(hwnd);

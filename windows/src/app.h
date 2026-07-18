@@ -36,6 +36,7 @@
 #define BOO_TIMER_WAVEFORM  1
 #define BOO_TIMER_AUTO_STOP 2
 #define BOO_TIMER_STATUS    3 // one-shot: settle the status line back to idle
+#define BOO_TIMER_FLASH     4 // one-shot: repaint to clear the copy-icon flash
 
 // Tray menu command ids.
 #define BOO_CMD_TOGGLE_RECORD 100
