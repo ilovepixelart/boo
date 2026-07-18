@@ -400,16 +400,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for dir in modelSearchDirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
 
-            let models = entries.filter { isUsableSpeechModel($0, in: dir) }.sorted()
-            guard !models.isEmpty else { continue }
-
-            // Take the most capable model the user has bothered to download,
-            // ranked by the shared core order (boo_model_rank); `models` is
-            // pre-sorted, so equal ranks (the unrecognized) break alphabetically.
-            let chosen = models.min(by: { boo_model_rank($0) < boo_model_rank($1) }) ?? models[0]
-            return (dir as NSString).appendingPathComponent(chosen)
+            // The core applies the shared selection policy across all three
+            // frontends (boo_best_model: keep the non-truncated speech models,
+            // lowest rank wins, basename breaks ties); this only enumerates the
+            // directory and maps the winning index back to its full path.
+            let paths = entries.map { (dir as NSString).appendingPathComponent($0) }
+            let best = withCStringArray(paths) { boo_best_model($0, Int32(paths.count)) }
+            if best >= 0 { return paths[Int(best)] }
         }
         return nil
+    }
+
+    /// Calls `body` with a C `char *const[]` view of `strings`, valid only for
+    /// the duration of the call. Each string is duplicated so its pointer stays
+    /// alive across the call, then freed after.
+    private func withCStringArray<R>(
+        _ strings: [String], _ body: (UnsafePointer<UnsafePointer<CChar>?>?) -> R
+    ) -> R {
+        let dups = strings.map { strdup($0) }
+        defer { dups.forEach { free($0) } }
+        let ptrs: [UnsafePointer<CChar>?] = dups.map { $0.map { UnsafePointer($0) } }
+        return ptrs.withUnsafeBufferPointer { body($0.baseAddress) }
     }
 
     /// UserDefaults key for the model the user explicitly picked in Settings.
