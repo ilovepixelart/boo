@@ -137,6 +137,19 @@ enum {
 };
 int boo_model_verify(const char *path);
 
+// Verify a file at `path` against a pinned SHA-256 hex string `expected` (the
+// manifest oid from boo_models). Unlike boo_model_verify above, this streams the
+// whole file, so it is for a just-finished download (the staging/.part copy,
+// whose name is not yet a manifest entry). One tested implementation for all
+// three frontends. UNREADABLE if the file cannot be opened; never reports OK for
+// a mismatched or short-read file.
+enum {
+    BOO_MODEL_SHA_OK = 0,
+    BOO_MODEL_SHA_MISMATCH = 1,
+    BOO_MODEL_SHA_UNREADABLE = 2,
+};
+int boo_model_verify_sha256(const char *path, const char *expected);
+
 // Diagnostic logging (see docs/logging-and-crash-reporting.md). boo_log_init
 // sets the file sink (per-OS path from the frontend; NULL == stderr only) and
 // the minimum level; boo_log writes one line. Levels below.

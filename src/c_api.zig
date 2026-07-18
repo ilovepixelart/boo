@@ -533,6 +533,44 @@ export fn boo_model_verify(path: [*:0]const u8) c_int {
         BOO_MODEL_FILE_TRUNCATED;
 }
 
+// Hex-encode the SHA-256 of the file at `path` into `out`. False on an open
+// error. Streams in fixed chunks, so a multi-hundred-MB model never lands in
+// memory; a read cut short just yields a non-matching digest, never a false OK.
+fn sha256FileHex(path: [*:0]const u8, out: *[64]u8) bool {
+    const f = libc.fopen(path, "rb") orelse return false;
+    defer _ = libc.fclose(f);
+    var h = std.crypto.hash.sha2.Sha256.init(.{});
+    var buf: [64 * 1024]u8 = undefined;
+    while (true) {
+        const n = libc.fread(&buf, 1, buf.len, f);
+        if (n == 0) break;
+        h.update(buf[0..n]);
+    }
+    var digest: [32]u8 = undefined;
+    h.final(&digest);
+    out.* = std.fmt.bytesToHex(digest, .lower);
+    return true;
+}
+
+// Verify a file against a pinned SHA-256 (`expected`, 64 hex chars). Unlike
+// boo_model_verify (a size-only completeness check for enumeration), this reads
+// the whole file, so it is for a just-finished download. The file is the staging
+// or .part copy, whose name is not yet a manifest entry, so the caller passes the
+// pinned digest from boo_models. Single-sources the hash check the three
+// frontends used to each reimplement (CryptoKit / GChecksum / BCrypt).
+pub const BOO_MODEL_SHA_OK: c_int = 0;
+pub const BOO_MODEL_SHA_MISMATCH: c_int = 1;
+pub const BOO_MODEL_SHA_UNREADABLE: c_int = 2; // could not open the file
+
+export fn boo_model_verify_sha256(path: [*:0]const u8, expected: [*:0]const u8) c_int {
+    var got: [64]u8 = undefined;
+    if (!sha256FileHex(path, &got)) return BOO_MODEL_SHA_UNREADABLE;
+    return if (std.ascii.eqlIgnoreCase(&got, std.mem.span(expected)))
+        BOO_MODEL_SHA_OK
+    else
+        BOO_MODEL_SHA_MISMATCH;
+}
+
 // ── diagnostic logging ────────────────────────────────────────────────────────
 // See src/log.zig. The frontend passes the per-OS log file path (or null for
 // stderr only) and the minimum level (0=error 1=warn 2=info 3=debug). Never log
@@ -634,6 +672,29 @@ test "the download manifest is well-formed" {
     try testing.expectEqual(
         BOO_MODEL_FILE_TRUNCATED,
         boo_model_verify("/nonexistent/ggml-silero-v6.2.0.bin"),
+    );
+}
+
+test "boo_model_verify_sha256 streams the file and checks the pinned digest" {
+    const tmp = std.mem.span(std.c.getenv("TMPDIR") orelse "/tmp");
+    // The canonical SHA-256("abc") vector: OK only if the streamed hash is right.
+    const abc_sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    var pbuf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintSentinel(&pbuf, "{s}/boo-sha-abc", .{tmp}, 0);
+    const f = libc.fopen(path, "wb") orelse return error.SkipZigTest;
+    _ = libc.fwrite("abc", 1, 3, f);
+    _ = libc.fclose(f);
+    defer _ = libc.remove(path);
+
+    try testing.expectEqual(BOO_MODEL_SHA_OK, boo_model_verify_sha256(path, abc_sha));
+    const wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+    try testing.expectEqual(BOO_MODEL_SHA_MISMATCH, boo_model_verify_sha256(path, wrong));
+
+    // An absent file is unreadable, never reported as verified.
+    try testing.expectEqual(
+        BOO_MODEL_SHA_UNREADABLE,
+        boo_model_verify_sha256("/nonexistent/model.bin", abc_sha),
     );
 }
 
