@@ -34,6 +34,26 @@ static void expect_signature(GVariant *v, const char *expected, const char *what
 static const char *const SESSION =
     "/org/freedesktop/portal/desktop/session/1_23/boo_ab12cd34";
 
+// boo_portal_new_token mints the client-chosen token the portal echoes back on
+// the Response object path; it must be a valid D-Bus path component (only
+// [A-Za-z0-9_]) or the subscribe-before-call handshake never matches the reply.
+// Shared by both suites since the plumbing lives in portal.c.
+static void test_portal_token(void) {
+    g_print("Portal token:\n");
+
+    g_autofree char *a = boo_portal_new_token();
+    g_autofree char *b = boo_portal_new_token();
+
+    g_assert_true(g_str_has_prefix(a, "boo_"));
+    g_assert_cmpuint(strlen(a), ==, 20); // "boo_" + 16 hex digits
+    for (const char *p = a + 4; *p; p++) {
+        g_assert_true(g_ascii_isxdigit(*p) && !g_ascii_isupper(*p)); // lowercase hex only
+    }
+    g_assert_cmpstr(a, !=, b); // 64 bits of entropy: two mints do not collide
+
+    g_print("  ok  boo_ + 16 lowercase hex, a valid path component, unique\n");
+}
+
 #ifdef TEST_TEXT_INJECT
 
 // Signatures per org.freedesktop.portal.RemoteDesktop.
@@ -445,6 +465,7 @@ static void test_shortcut_response(void) {
 #endif
 
 int main(void) {
+    test_portal_token(); // shared plumbing, exercised by both suites
 #ifdef TEST_TEXT_INJECT
     test_remote_desktop();
     test_select_devices_options();
