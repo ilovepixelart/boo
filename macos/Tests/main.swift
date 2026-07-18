@@ -242,18 +242,28 @@ server.terminate()
 try? FileManager.default.removeItem(at: serveDir)
 
 // ── WaveformView drawn headless ──
+// The view's job is to make recording / transcribing / idle visually distinct;
+// assert that, not merely that a frame rendered. Each state is cached to its
+// own bitmap and the pixels compared: recording draws amplitude-scaled bars,
+// transcribing a breathing sine, idle flat minimal bars, so a state that
+// rendered identically to idle would mean the state never reached drawing.
 let wave = WaveformView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
-wave.update(
-    waveform: (0..<40).map { Float($0 % 5) / 5.0 }, peakRms: 0.8, isRecording: true,
-    isTranscribing: false)
-wave.update(waveform: [], peakRms: 0, isRecording: false, isTranscribing: true)
-wave.update(waveform: [0.2, 0.4], peakRms: 0.4, isRecording: false, isTranscribing: false)
-if let rep = wave.bitmapImageRepForCachingDisplay(in: wave.bounds) {
+let bars = (0..<40).map { Float($0 % 5) / 5.0 }
+func renderWave(peak: Float, recording: Bool, transcribing: Bool) -> Data? {
+    wave.update(waveform: bars, peakRms: peak, isRecording: recording, isTranscribing: transcribing)
+    guard let rep = wave.bitmapImageRepForCachingDisplay(in: wave.bounds) else { return nil }
     wave.cacheDisplay(in: wave.bounds, to: rep)
-    check(true, "the waveform draws in every state")
-} else {
-    check(false, "the waveform view yields a drawing rep")
+    return rep.tiffRepresentation
 }
+let recordingFrame = renderWave(peak: 0.8, recording: true, transcribing: false)
+let transcribingFrame = renderWave(peak: 0, recording: false, transcribing: true)
+let idleFrame = renderWave(peak: 0, recording: false, transcribing: false)
+check(
+    idleFrame != nil && recordingFrame != nil && recordingFrame != idleFrame,
+    "the recording waveform renders amplitude bars, distinct from idle")
+check(
+    transcribingFrame != nil && transcribingFrame != idleFrame,
+    "the transcribing waveform renders its own animation, distinct from idle")
 
 // ── AppDelegate helpers (no app boot) ──
 let prefs = UserDefaults.standard
@@ -434,6 +444,19 @@ _ = pump(seconds: 3, until: { false })  // let the flash's revert deadline pass
 check(
     overlay.statusLabel.stringValue == "recording...",
     "flashStatus leaves a superseded status untouched")
+
+// Auto-type delivery with no Ghostty target and Accessibility not granted: the
+// transcript must fall back to the clipboard and say so, never silently vanish.
+// Guarded on the missing grant so a dev machine that has granted Accessibility
+// never actually synthesizes a ⌘V keystroke from the harness.
+if !PermissionsManager.hasAccessibility {
+    NSPasteboard.general.clearContents()
+    overlay.typeTextIntoFocusedApp("delivery fallback")
+    check(
+        overlay.statusLabel.stringValue == "copied, grant Accessibility to auto-paste"
+            && NSPasteboard.general.string(forType: .string) == "delivery fallback",
+        "auto-type without Accessibility copies the transcript and explains")
+}
 
 overlay.startDisplayLink()
 overlay.stopDisplayLink()
