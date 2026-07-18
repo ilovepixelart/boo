@@ -51,6 +51,15 @@ int main(void) {
     check(hint && strstr(hint, "curl -L") != NULL, "the hint gives a curl command");
     check(hint && strstr(hint, "parakeet") != NULL, "the hint offers the recommended model");
 
+    // With XDG_DATA_HOME unset, the hint's models dir falls back to the home
+    // path (the sandbox sets XDG_DATA_HOME, so only this covers the fallback).
+    g_autofree char *saved_xdg = g_strdup(g_getenv("XDG_DATA_HOME"));
+    g_unsetenv("XDG_DATA_HOME");
+    g_autofree char *hint_fallback = model_install_hint();
+    check(hint_fallback && strstr(hint_fallback, "/.local/share/boo/models") != NULL,
+          "an unset XDG_DATA_HOME falls back to the home models dir");
+    if (saved_xdg) g_setenv("XDG_DATA_HOME", saved_xdg, TRUE);
+
     // Logging init: creates the state dir and points the core log sink there.
     init_logging();
     g_autofree char *state_dir = g_build_filename(g_get_user_state_dir(), "boo", NULL);
@@ -74,6 +83,13 @@ int main(void) {
     pump_ms(200);
     g_application_release(G_APPLICATION(app)); // balance the choose hold
     check(TRUE, "the no-model responses run without crashing");
+
+    // The quit response: routes to g_application_quit (inert outside
+    // g_application_run) and releases the dialog's own hold, so it self-balances.
+    show_no_model_dialog(&state, "harness hint");
+    pump_ms(50);
+    on_no_model_response(NULL, "quit", &state);
+    check(TRUE, "the quit response runs without crashing");
 
     // The download dialog widgets, then its transfer callbacks with synthetic
     // results (never a real network transfer): a failure re-enables the button,
@@ -112,6 +128,10 @@ int main(void) {
     on_activate(ADW_APPLICATION(app), &state);
     check(TRUE, "a second activate is a no-op present");
     state.ctx = NULL;
+
+    // on_shutdown with no context: the guard skips boo_deinit, a clean no-op.
+    on_shutdown(G_APPLICATION(app), &state);
+    check(state.ctx == NULL, "shutdown with no context is a clean no-op");
 
     pump_ms(200);
     printf("main_harness: %s\n", failures ? "FAIL" : "all checks passed");
