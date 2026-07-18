@@ -696,7 +696,7 @@ deliveryPb.clearContents()
 let priorItem = NSPasteboardItem()
 priorItem.setData(Data("prior clipboard".utf8), forType: .string)
 deliveryPb.writeObjects([priorItem])
-let snapshot = TextDelivery.snapshotPasteboard(deliveryPb)
+let snapshot = PasteResolution.snapshotPasteboard(deliveryPb)
 check(snapshot.count == 1, "snapshotPasteboard copies each pasteboard item")
 deliveryPb.clearContents()
 deliveryPb.setString("transient transcript", forType: .string)  // the paste clobbers it
@@ -711,29 +711,29 @@ deliveryPb.releaseGlobally()
 // layout, so ⌘V pastes on Dvorak/AZERTY, not just QWERTY. "v" exists on every
 // Latin layout, so it must resolve to an in-range key; the paste key falls back
 // to QWERTY's 0x09 only when resolution fails.
-if let vKey = TextDelivery.resolveKeyCode(for: "v") {
+if let vKey = PasteResolution.resolveKeyCode(for: "v") {
     check(vKey < 128, "resolveKeyCode maps 'v' to an in-range virtual key")
 } else {
     check(false, "resolveKeyCode should map 'v' on a Latin layout")
 }
-check(TextDelivery.pasteKeyCode < 128, "the paste key is a valid virtual key")
+check(PasteResolution.pasteKeyCode < 128, "the paste key is a valid virtual key")
 
 // shouldRestoreClipboard: restore only when the paste fired, there was prior
 // content, and nothing else has written the clipboard since our stamp.
 check(
-    TextDelivery.shouldRestoreClipboard(
+    PasteResolution.shouldRestoreClipboard(
         pasted: true, hadPriorItems: true, currentChangeCount: 5, stamp: 5),
     "restore when pasted, had prior content, and unchanged")
 check(
-    !TextDelivery.shouldRestoreClipboard(
+    !PasteResolution.shouldRestoreClipboard(
         pasted: false, hadPriorItems: true, currentChangeCount: 5, stamp: 5),
     "a failed paste keeps the transcript, no restore")
 check(
-    !TextDelivery.shouldRestoreClipboard(
+    !PasteResolution.shouldRestoreClipboard(
         pasted: true, hadPriorItems: false, currentChangeCount: 5, stamp: 5),
     "nothing to restore means no restore")
 check(
-    !TextDelivery.shouldRestoreClipboard(
+    !PasteResolution.shouldRestoreClipboard(
         pasted: true, hadPriorItems: true, currentChangeCount: 6, stamp: 5),
     "a user copy since our write is not clobbered")
 
