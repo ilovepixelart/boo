@@ -8,6 +8,11 @@
 
 #include "inject_plan.h"
 
+bool boo_inject_target_eligible(const void *target, const void *owner,
+                                const void *foreground) {
+    return target && target != owner && foreground == target;
+}
+
 int boo_inject_plan_paste(unsigned held, BooKeyEvent *out) {
     int n = 0;
 

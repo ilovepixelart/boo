@@ -105,8 +105,8 @@ BooDeliverResult boo_inject_deliver(HWND owner, HWND target, const char *utf8) {
 
     // Only paste into the window the dictation started in, and only while it
     // is still where the input would actually go.
-    if (!target || target == owner) return BOO_DELIVER_CLIPBOARD;
-    if (GetForegroundWindow() != target) return BOO_DELIVER_CLIPBOARD;
+    if (!boo_inject_target_eligible(target, owner, GetForegroundWindow()))
+        return BOO_DELIVER_CLIPBOARD;
 
     send_paste_chord();
 

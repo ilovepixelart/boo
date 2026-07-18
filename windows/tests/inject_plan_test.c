@@ -52,10 +52,28 @@ static void test_every_interfering_modifier_is_released(void) {
     expect_chord_at(ev, 4);
 }
 
+static void test_target_eligibility(void) {
+    // Three stand-in window handles; only their identities matter.
+    int owner_win, target_win, other_win;
+    const void *owner = &owner_win;
+    const void *target = &target_win;
+    const void *other = &other_win;
+
+    // Paste only when a real target, distinct from Boo, is the foreground.
+    assert(boo_inject_target_eligible(target, owner, target));
+    // No target: clipboard only (dictation had no destination window).
+    assert(!boo_inject_target_eligible(NULL, owner, owner));
+    // Target is Boo's own window: never paste back into ourselves.
+    assert(!boo_inject_target_eligible(owner, owner, owner));
+    // Focus moved away before the paste: the chord would land in the wrong app.
+    assert(!boo_inject_target_eligible(target, owner, other));
+}
+
 int main(void) {
     test_no_modifiers_is_a_bare_chord();
     test_held_shift_is_released_before_the_chord();
     test_every_interfering_modifier_is_released();
+    test_target_eligibility();
     printf("inject_plan: all tests passed\n");
     return 0;
 }
