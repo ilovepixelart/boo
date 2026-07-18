@@ -13,7 +13,17 @@
 
 Local-first speech-to-text overlay for **macOS**, **Linux**, and (experimentally) **Windows**. Press a hotkey, speak, get text, your audio never leaves the machine.
 
-```bash
+<p align="center">
+  <img src="assets/screenshots/collage.png" alt="Boo on macOS: the dictation overlay with a live waveform and transcript cards, the Settings window with the model switcher and Ghostty-format theme browser, and the menu-bar menu" width="900">
+</p>
+
+## Why
+
+Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) on-device and ships a native frontend per platform, no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
+
+The architecture is borrowed wholesale from [Ghostty](https://github.com/ghostty-org/ghostty): a portable Zig core (`libboo-core`) exposed through a stable C API, plus a separate "apprt" (application runtime) per OS. Same philosophy, *cross-platform shouldn't mean foreign*.
+
+```text
               C API (include/boo.h)
                        │
     Zig Core ──────────┼────────── Native UI per platform
@@ -27,12 +37,6 @@ Local-first speech-to-text overlay for **macOS**, **Linux**, and (experimentally
               boo_transcribe()
               boo_deinit()
 ```
-
-## Why
-
-Most dictation tools either send audio to the cloud or feel foreign on each OS. Boo runs [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) on-device and ships a native frontend per platform, no WebView, no Electron, no shared lowest-common-denominator UI toolkit.
-
-The architecture is borrowed wholesale from [Ghostty](https://github.com/ghostty-org/ghostty): a portable Zig core (`libboo-core`) exposed through a stable C API, plus a separate "apprt" (application runtime) per OS. Same philosophy, *cross-platform shouldn't mean foreign*.
 
 ## Status
 
@@ -83,7 +87,7 @@ zig build app                              # native app (Linux/Windows; macOS ne
 zig build run -- models/ggml-base.en.bin   # bare-bones CLI REPL, no GUI
 ```
 
-Per-platform build guides, packaging, the release checklist, the full test-suite map, and the project layout live in [docs/development.md](docs/development.md).
+New contributors start with [CONTRIBUTING.md](CONTRIBUTING.md). Per-platform build guides, packaging, the release checklist, the full test-suite map, and the project layout live in [docs/development.md](docs/development.md); the whole documentation set is indexed in [docs/](docs/README.md).
 
 ## Security
 
