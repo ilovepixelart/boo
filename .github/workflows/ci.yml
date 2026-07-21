@@ -51,7 +51,7 @@ jobs:
         run: zig build app -Doptimize=ReleaseFast
 
       - name: Cache bench models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.boo/models
           # The SHA-256s are in the key: if a pinned hash ever changes, the old
@@ -235,7 +235,7 @@ jobs:
           sudo cmake --install /tmp/kcov/build
 
       - name: Cache smoke model
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: models
           key: smoke-model-c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b
