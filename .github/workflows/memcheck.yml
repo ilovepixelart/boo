@@ -34,7 +34,7 @@ jobs:
           version: 0.16.0
 
       - name: Cache bench models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.boo/models
           # SHA-256s in the key: a changed hash bypasses the stale entry.
