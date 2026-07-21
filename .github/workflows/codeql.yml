@@ -24,11 +24,11 @@ jobs:
       # language, and Swift would need a macOS build; both are out of scope
       # here. build-mode:none scans the C sources directly, so it needs none of
       # the gtk4/win32/pipewire headers the real build links against.
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: c-cpp
           build-mode: none
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:c-cpp
